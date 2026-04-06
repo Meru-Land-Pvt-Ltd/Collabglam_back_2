@@ -5,6 +5,7 @@ const Admin = require('../models/admin');
 const Brand = require('../models/brand');
 const { InfluencerModel: Influencer } = require('../models/influencer');
 const ApplyCampaign = require('../models/applyCampaign');
+const Modash = require('../models/modash');
 const Contract = require('../models/contract');
 const { Types } = require('mongoose');
 const { createAndEmit } = require('../utils/notifier');
@@ -352,13 +353,11 @@ exports.brandList = async (req, res) => {
       brandId: String(brandId),
     };
 
-    // numeric / string status support (0 = all)
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
     if (normalizedStatus && normalizedStatus !== '__ALL__') {
       filter.status = normalizedStatus;
     }
 
-    // backend search: subject / description / disputeId
     const searchTerm = typeof search === 'string' ? search.trim() : '';
     if (searchTerm) {
       const pattern = escapeRegex(searchTerm);
@@ -366,7 +365,6 @@ exports.brandList = async (req, res) => {
       filter.$or = [{ subject: re }, { description: re }, { disputeId: re }];
     }
 
-    // who raised it (direction filter)
     if (appliedBy && typeof appliedBy === 'string') {
       const role = String(appliedBy).toLowerCase();
       if (role === 'brand') filter['createdBy.role'] = 'Brand';
@@ -383,14 +381,12 @@ exports.brandList = async (req, res) => {
       .limit(l)
       .lean();
 
-    // Add quick "who raised it" info
     const rowsWithRole = rows.map((r) => ({
       ...r,
       raisedByRole: r.createdBy?.role || null,
       raisedById: r.createdBy?.id || null,
     }));
 
-    // Enrich with influencer name + campaign name + raisedBy/raisedAgainst
     try {
       const influencerIds = Array.from(
         new Set(rowsWithRole.map((r) => r.influencerId).filter(Boolean))
@@ -400,38 +396,66 @@ exports.brandList = async (req, res) => {
         new Set(rowsWithRole.map((r) => r.campaignId).filter(Boolean))
       ).map(String);
 
-      const [influencers, campaigns] = await Promise.all([
-      influencerIds.length
-        ? Influencer.find({ _id: { $in: influencerIds } })
+      const [influencers, campaigns, modashProfiles] = await Promise.all([
+        influencerIds.length
+          ? Influencer.find({ _id: { $in: influencerIds } })
             .select('_id name')
             .lean()
-        : [],
-      campaignIds.length
-        ? Campaign.find({ _id: { $in: campaignIds } })
+          : [],
+        campaignIds.length
+          ? Campaign.find({ _id: { $in: campaignIds } })
             .select('_id campaignTitle')
             .lean()
-        : [],
-    ]);
+          : [],
+        influencerIds.length
+          ? Modash.find({
+            $or: [
+              { influencerId: { $in: influencerIds } },
+              { influencer: { $in: influencerIds } },
+            ],
+          })
+            .select('influencerId handle username provider updatedAt')
+            .sort({ updatedAt: -1 })
+            .lean()
+          : [],
+      ]);
 
       const infMap = new Map(
-        (influencers || []).map((i) => [String(i._id), i.name])
+        (influencers || []).map((i) => [String(i._id), i.name || null])
       );
 
       const cmap = new Map(
         (campaigns || []).map((c) => [String(c._id), c.campaignTitle])
       );
-      
+
+      // keep first/latest handle per influencerId
+      const modashMap = new Map();
+      for (const m of modashProfiles || []) {
+        const key = String(m.influencerId);
+        if (!modashMap.has(key)) {
+          modashMap.set(key, {
+            handle: m.handle || m.username || null,
+            provider: m.provider || null,
+          });
+        }
+      }
+
       const enriched = rowsWithRole.map((r) => {
         const campaignName = r.campaignId
           ? cmap.get(String(r.campaignId)) || null
           : null;
+
+        const influencerName = infMap.get(String(r.influencerId)) || null;
+        const modashMeta = modashMap.get(String(r.influencerId)) || {
+          handle: null,
+          provider: null,
+        };
 
         const role = r.raisedByRole;
         let raisedBy = null;
         let raisedAgainst = null;
 
         if (role === 'Brand') {
-          // Brand (viewer) raised it
           raisedBy = {
             role: 'Brand',
             id: r.brandId,
@@ -440,14 +464,17 @@ exports.brandList = async (req, res) => {
           raisedAgainst = {
             role: 'Influencer',
             id: r.influencerId,
-            name: infMap.get(String(r.influencerId)) || null,
+            name: influencerName,
+            handle: modashMeta.handle,
+            provider: modashMeta.provider,
           };
         } else if (role === 'Influencer') {
-          // Influencer raised it against this brand
           raisedBy = {
             role: 'Influencer',
             id: r.influencerId,
-            name: infMap.get(String(r.influencerId)) || null,
+            name: influencerName,
+            handle: modashMeta.handle,
+            provider: modashMeta.provider,
           };
           raisedAgainst = {
             role: 'Brand',
@@ -458,14 +485,12 @@ exports.brandList = async (req, res) => {
 
         const viewerIsRaiser = role === 'Brand';
 
-        console.log("Enriched dispute:", {
-          disputeId: r.disputeId,
-          campaignName,
-        });
-
         return {
           ...r,
           campaignName,
+          influencerName,
+          influencerHandle: modashMeta.handle,
+          influencerProvider: modashMeta.provider,
           raisedBy,
           raisedAgainst,
           viewerIsRaiser,
@@ -481,7 +506,6 @@ exports.brandList = async (req, res) => {
       });
     } catch (e) {
       console.error('Error enriching brandList:', e);
-      // Fallback: still return raisedByRole info
       return res.status(200).json({
         page: p,
         limit: l,
@@ -496,7 +520,6 @@ exports.brandList = async (req, res) => {
   }
 };
 
-// Brand get dispute-by-id (must match brandId)
 exports.brandGetById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -518,17 +541,29 @@ exports.brandGetById = async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    // Enrich with campaign name + who raised against whom
     try {
-      const [campaign, influencer] = await Promise.all([
+      const [campaign, influencer, modash] = await Promise.all([
         d.campaignId
-          ? Campaign.findOne({ campaignsId: d.campaignId })
-            .select('campaignsId campaignTitle')
+          ? Campaign.findOne({ _id: d.campaignId })
+            .select('_id campaignTitle')
             .lean()
           : null,
+
         d.influencerId
           ? Influencer.findOne({ _id: d.influencerId })
-            .select('influencerId name')
+            .select('_id name')
+            .lean()
+          : null,
+
+        d.influencerId
+          ? Modash.findOne({
+            $or: [
+              { influencerId: String(d.influencerId) },
+              { influencer: d.influencerId },
+            ],
+          })
+            .select('influencerId influencer handle username provider updatedAt')
+            .sort({ updatedAt: -1 })
             .lean()
           : null,
       ]);
@@ -536,7 +571,13 @@ exports.brandGetById = async (req, res) => {
       d.campaignName = campaign?.campaignTitle || null;
 
       const influencerName = influencer?.name || null;
+      const influencerHandle = modash?.handle || modash?.username || null;
+      const influencerProvider = modash?.provider || null;
       const raisedByRole = d.createdBy?.role || null;
+
+      d.influencerName = influencerName;
+      d.influencerHandle = influencerHandle;
+      d.influencerProvider = influencerProvider;
 
       if (raisedByRole === 'Brand') {
         d.raisedBy = {
@@ -548,12 +589,16 @@ exports.brandGetById = async (req, res) => {
           role: 'Influencer',
           id: d.influencerId,
           name: influencerName,
+          handle: influencerHandle,
+          provider: influencerProvider,
         };
       } else if (raisedByRole === 'Influencer') {
         d.raisedBy = {
           role: 'Influencer',
           id: d.influencerId,
           name: influencerName,
+          handle: influencerHandle,
+          provider: influencerProvider,
         };
         d.raisedAgainst = {
           role: 'Brand',
@@ -571,6 +616,9 @@ exports.brandGetById = async (req, res) => {
     } catch (e) {
       console.error('Error enriching brandGetById:', e);
       d.campaignName = d.campaignName || null;
+      d.influencerName = d.influencerName || null;
+      d.influencerHandle = d.influencerHandle || null;
+      d.influencerProvider = d.influencerProvider || null;
     }
 
     return res.status(200).json({ dispute: d });
@@ -672,7 +720,7 @@ exports.influencerCreateDispute = async (req, res) => {
         _id: campaignId,
         brandId: String(brandId),
       }).lean();
-       console.log("Found campaign:", camp);
+      console.log("Found campaign:", camp);
       if (camp) linkedCampaignId = String(campaignId);
     }
 
@@ -815,13 +863,13 @@ exports.influencerList = async (req, res) => {
       const [brands, campaigns] = await Promise.all([
         brandIds.length
           ? Brand.find({ _id: { $in: brandIds } })
-              .select('_id name')
-              .lean()
+            .select('_id name')
+            .lean()
           : [],
         campaignIds.length
           ? Campaign.find({ _id: { $in: campaignIds } })
-              .select('_id campaignTitle')
-              .lean()
+            .select('_id campaignTitle')
+            .lean()
           : [],
       ]);
 
@@ -931,13 +979,13 @@ exports.influencerGetById = async (req, res) => {
       const [campaign, brand] = await Promise.all([
         d.campaignId
           ? Campaign.findOne({ campaignsId: d.campaignId })
-              .select('campaignsId campaignTitle')
-              .lean()
+            .select('campaignsId campaignTitle')
+            .lean()
           : null,
         d.brandId
           ? Brand.findOne({ _id: d.brandId })
-              .select('_id name')
-              .lean()
+            .select('_id name')
+            .lean()
           : null,
       ]);
 
@@ -1546,8 +1594,8 @@ exports.influencerCampaignsForDispute = async (req, res) => {
     const skip = (pageNum - 1) * limNum;
 
     const filter = {
-  _id: { $in: campaignIds.map((id) => new Types.ObjectId(id)) },
-};
+      _id: { $in: campaignIds.map((id) => new Types.ObjectId(id)) },
+    };
     if (typeof search === 'string' && search.trim()) {
       const term = search.trim();
       filter.$or = buildSearchOr(term);
@@ -1586,7 +1634,7 @@ exports.influencerCampaignsForDispute = async (req, res) => {
       return {
         // campaign identity
         campaignId: c.campaignsId,
-        _id: c._id, 
+        _id: c._id,
         campaignName: c.campaignTitle,
 
         // brand info
