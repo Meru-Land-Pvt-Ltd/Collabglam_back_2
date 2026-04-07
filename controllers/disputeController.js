@@ -235,34 +235,92 @@ exports.brandCreateDispute = async (req, res) => {
       campaignId,
       influencerId,
       subject,
-      description = '',
+      description = "",
       attachments = [],
+      issueType,
+      related,
     } = req.body || {};
 
-    console.log("campaignId in brandCreateDispute:", influencerId, campaignId);
+    console.log("brandCreateDispute payload:", {
+      brandId,
+      campaignId,
+      influencerId,
+      subject,
+      description,
+      issueType,
+      related,
+    });
+
     if (!brandId || !influencerId || !subject) {
       return res.status(400).json({
-        message: 'brandId, influencerId and subject are required',
+        message: "brandId, influencerId and subject are required",
       });
     }
 
     const brand = await Brand.findOne({ _id: String(brandId) }).lean();
-    if (!brand) return res.status(404).json({ message: 'Brand not found' });
+    if (!brand) {
+      return res.status(404).json({ message: "Brand not found" });
+    }
 
     const influencer = await Influencer.findOne({
       _id: String(influencerId),
     }).lean();
-    if (!influencer) return res.status(404).json({ message: 'Influencer not found' });
+    if (!influencer) {
+      return res.status(404).json({ message: "Influencer not found" });
+    }
 
     let linkedCampaignId = null;
     let camp = null;
+
     if (campaignId) {
       camp = await Campaign.findOne({
         _id: campaignId,
         brandId: String(brandId),
       }).lean();
+
       console.log("Found campaign:", camp);
+
       if (camp) linkedCampaignId = String(campaignId);
+    }
+
+    // Parse issue type from multipart/form-data
+    let parsedIssueType = ["other"];
+    const rawIssueType = issueType ?? related;
+
+    if (rawIssueType) {
+      try {
+        if (Array.isArray(rawIssueType)) {
+          parsedIssueType = rawIssueType;
+        } else if (typeof rawIssueType === "string") {
+          const parsed = JSON.parse(rawIssueType);
+
+          if (Array.isArray(parsed)) {
+            parsedIssueType = parsed;
+          } else if (Array.isArray(parsed?.type)) {
+            parsedIssueType = parsed.type;
+          } else if (typeof parsed?.type === "string") {
+            parsedIssueType = [parsed.type];
+          } else if (typeof parsed === "string") {
+            parsedIssueType = [parsed];
+          }
+        }
+      } catch (err) {
+        if (typeof rawIssueType === "string" && rawIssueType.trim()) {
+          parsedIssueType = [rawIssueType.trim()];
+        }
+      }
+    }
+
+    parsedIssueType = [
+      ...new Set(
+        parsedIssueType
+          .map((item) => String(item).trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    if (!parsedIssueType.length) {
+      parsedIssueType = ["other"];
     }
 
     const sanitizedAttachments = await buildAttachmentsFromReq(req, attachments);
@@ -272,29 +330,28 @@ exports.brandCreateDispute = async (req, res) => {
       brandId: String(brandId),
       influencerId: String(influencerId),
       subject: String(subject).trim(),
-      description: String(description || ''),
-      createdBy: { id: String(brandId), role: 'Brand' },
+      description: String(description || ""),
+      issueType: parsedIssueType,
+      createdBy: { id: String(brandId), role: "Brand" },
       attachments: sanitizedAttachments,
     });
 
     await dispute.save();
 
-    // 🔔 IN-APP NOTIFICATION (Brand raised dispute -> Influencer must see it)
     try {
       await createAndEmit({
         influencerId: String(influencerId),
-        type: 'dispute.created_against_you',
+        type: "dispute.created_against_you",
         title: `New dispute raised (Ticket #${dispute.disputeId})`,
-        message: `${brand?.name || 'A brand'} raised a dispute: "${dispute.subject}".`,
-        entityType: 'dispute',
+        message: `${brand?.name || "A brand"} raised a dispute: "${dispute.subject}".`,
+        entityType: "dispute",
         entityId: dispute.disputeId,
         actionPath: { influencer: `/influencer/disputes/${dispute.disputeId}` },
       });
     } catch (e) {
-      console.warn('In-app notify failed (brandCreateDispute):', e.message);
+      console.warn("In-app notify failed (brandCreateDispute):", e.message);
     }
 
-    // email notifications (existing)
     if (brand.email) {
       await handleSendDisputeCreated({
         email: brand.email,
@@ -311,17 +368,19 @@ exports.brandCreateDispute = async (req, res) => {
         ticketId: dispute.disputeId,
         category: dispute.subject,
         raisedBy: brand.name,
-        raisedByRole: 'Brand',
-        campaignName: linkedCampaignId ? camp?.campaignTitle || '' : '',
+        raisedByRole: "Brand",
+        campaignName: linkedCampaignId ? camp?.campaignTitle || "" : "",
       });
     }
 
-    return res
-      .status(201)
-      .json({ message: 'Dispute created', disputeId: dispute.disputeId });
+    return res.status(201).json({
+      message: "Dispute created",
+      disputeId: dispute.disputeId,
+      issueType: dispute.issueType,
+    });
   } catch (err) {
-    console.error('Error in brandCreateDispute:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in brandCreateDispute:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -338,47 +397,45 @@ exports.brandList = async (req, res) => {
     } = req.body || {};
 
     if (!brandId) {
-      return res.status(400).json({ message: 'brandId is required' });
+      return res.status(400).json({ message: "brandId is required" });
     }
 
     const brand = await Brand.findOne({ _id: String(brandId) }).lean();
     if (!brand) {
-      return res.status(404).json({ message: 'Brand not found' });
+      return res.status(404).json({ message: "Brand not found" });
     }
 
     const p = Math.max(1, parseInt(page, 10) || 1);
     const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+
+    const normalizeSearchValue = (value = "") =>
+      String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/^#+/, "");
 
     const filter = {
       brandId: String(brandId),
     };
 
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
-    if (normalizedStatus && normalizedStatus !== '__ALL__') {
+    if (normalizedStatus && normalizedStatus !== "__ALL__") {
       filter.status = normalizedStatus;
     }
 
-    const searchTerm = typeof search === 'string' ? search.trim() : '';
-    if (searchTerm) {
-      const pattern = escapeRegex(searchTerm);
-      const re = new RegExp(pattern, 'i');
-      filter.$or = [{ subject: re }, { description: re }, { disputeId: re }];
-    }
-
-    if (appliedBy && typeof appliedBy === 'string') {
+    if (appliedBy && typeof appliedBy === "string") {
       const role = String(appliedBy).toLowerCase();
-      if (role === 'brand') filter['createdBy.role'] = 'Brand';
-      if (role === 'influencer') filter['createdBy.role'] = 'Influencer';
+      if (role === "brand") filter["createdBy.role"] = "Brand";
+      if (role === "influencer") filter["createdBy.role"] = "Influencer";
     }
 
-    const total = await Dispute.countDocuments(filter);
+    // Fetch all disputes matching base filters first.
+    // Search will be applied AFTER enrichment so campaign/influencer fields work too.
     const rows = await Dispute.find(filter)
       .select(
-        'disputeId subject description status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy'
+        "disputeId subject description issueType status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy"
       )
       .sort({ createdAt: -1 })
-      .skip((p - 1) * l)
-      .limit(l)
       .lean();
 
     const rowsWithRole = rows.map((r) => ({
@@ -399,12 +456,12 @@ exports.brandList = async (req, res) => {
       const [influencers, campaigns, modashProfiles] = await Promise.all([
         influencerIds.length
           ? Influencer.find({ _id: { $in: influencerIds } })
-            .select('_id name')
+            .select("_id name")
             .lean()
           : [],
         campaignIds.length
           ? Campaign.find({ _id: { $in: campaignIds } })
-            .select('_id campaignTitle')
+            .select("_id campaignTitle")
             .lean()
           : [],
         influencerIds.length
@@ -414,7 +471,7 @@ exports.brandList = async (req, res) => {
               { influencer: { $in: influencerIds } },
             ],
           })
-            .select('influencerId handle username provider updatedAt')
+            .select("influencerId handle username provider updatedAt")
             .sort({ updatedAt: -1 })
             .lean()
           : [],
@@ -425,13 +482,14 @@ exports.brandList = async (req, res) => {
       );
 
       const cmap = new Map(
-        (campaigns || []).map((c) => [String(c._id), c.campaignTitle])
+        (campaigns || []).map((c) => [String(c._id), c.campaignTitle || null])
       );
 
       // keep first/latest handle per influencerId
       const modashMap = new Map();
       for (const m of modashProfiles || []) {
-        const key = String(m.influencerId);
+        const key = String(m.influencerId || m.influencer);
+        if (!key) continue;
         if (!modashMap.has(key)) {
           modashMap.set(key, {
             handle: m.handle || m.username || null,
@@ -455,35 +513,35 @@ exports.brandList = async (req, res) => {
         let raisedBy = null;
         let raisedAgainst = null;
 
-        if (role === 'Brand') {
+        if (role === "Brand") {
           raisedBy = {
-            role: 'Brand',
+            role: "Brand",
             id: r.brandId,
             name: brand.name || null,
           };
           raisedAgainst = {
-            role: 'Influencer',
+            role: "Influencer",
             id: r.influencerId,
             name: influencerName,
             handle: modashMeta.handle,
             provider: modashMeta.provider,
           };
-        } else if (role === 'Influencer') {
+        } else if (role === "Influencer") {
           raisedBy = {
-            role: 'Influencer',
+            role: "Influencer",
             id: r.influencerId,
             name: influencerName,
             handle: modashMeta.handle,
             provider: modashMeta.provider,
           };
           raisedAgainst = {
-            role: 'Brand',
+            role: "Brand",
             id: r.brandId,
             name: brand.name || null,
           };
         }
 
-        const viewerIsRaiser = role === 'Brand';
+        const viewerIsRaiser = role === "Brand";
 
         return {
           ...r,
@@ -494,29 +552,84 @@ exports.brandList = async (req, res) => {
           raisedBy,
           raisedAgainst,
           viewerIsRaiser,
+          issueType: Array.isArray(r.issueType) ? r.issueType : [],
         };
       });
+
+      const searchTerm = normalizeSearchValue(search);
+
+      const filtered = searchTerm
+        ? enriched.filter((r) => {
+          const searchableText = [
+            r.subject,
+            r.description,
+            r.disputeId,
+            r.disputeId ? `#${r.disputeId}` : "",
+            r.campaignName,
+            r.influencerName,
+            r.influencerHandle,
+            r.raisedBy?.name,
+            r.raisedAgainst?.name,
+            r.raisedAgainst?.handle,
+            r.status,
+            ...(Array.isArray(r.issueType) ? r.issueType : []),
+          ]
+            .filter(Boolean)
+            .map((item) => normalizeSearchValue(item))
+            .join(" ");
+
+          return searchableText.includes(searchTerm);
+        })
+        : enriched;
+
+      const total = filtered.length;
+      const totalPages = Math.ceil(total / l) || 1;
+      const disputes = filtered.slice((p - 1) * l, p * l);
 
       return res.status(200).json({
         page: p,
         limit: l,
         total,
-        totalPages: Math.ceil(total / l),
-        disputes: enriched,
+        totalPages,
+        disputes,
       });
     } catch (e) {
-      console.error('Error enriching brandList:', e);
+      console.error("Error enriching brandList:", e);
+
+      const searchTerm = normalizeSearchValue(search);
+
+      const fallbackFiltered = searchTerm
+        ? rowsWithRole.filter((r) => {
+          const searchableText = [
+            r.subject,
+            r.description,
+            r.disputeId,
+            r.disputeId ? `#${r.disputeId}` : "",
+            ...(Array.isArray(r.issueType) ? r.issueType : []),
+          ]
+            .filter(Boolean)
+            .map((item) => normalizeSearchValue(item))
+            .join(" ");
+
+          return searchableText.includes(searchTerm);
+        })
+        : rowsWithRole;
+
+      const total = fallbackFiltered.length;
+      const totalPages = Math.ceil(total / l) || 1;
+      const disputes = fallbackFiltered.slice((p - 1) * l, p * l);
+
       return res.status(200).json({
         page: p,
         limit: l,
         total,
-        totalPages: Math.ceil(total / l),
-        disputes: rowsWithRole,
+        totalPages,
+        disputes,
       });
     }
   } catch (err) {
-    console.error('Error in brandList:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in brandList:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
