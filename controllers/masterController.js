@@ -2,6 +2,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const Campaign = require("../models/campaign");
+const  OpenAI = require("openai");
+const BrandInfo = require("../models/brandInfo")
+const { scrapeBrandWebsite } = require("../utils/brandScraper");
 const { AdminModel, ROLES, PROXY_EMAIL_DOMAIN } = require("../models/master");
 const {
   canInviteRole,
@@ -1410,6 +1413,411 @@ exports.listCampaignsForAdmin = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: e?.message || "Internal error",
+    });
+  }
+};
+
+
+
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.4";
+
+const nullableString = { type: ["string", "null"] };
+const nullableNumber = { type: ["number", "null"] };
+const nullableBoolean = { type: ["boolean", "null"] };
+const nullableArrayOfStrings = {
+  anyOf: [
+    { type: "array", items: { type: "string" } },
+    { type: "null" },
+  ],
+};
+
+const resolveProperties = {
+  matched: { type: "boolean" },
+  brand_name: nullableString,
+  brand_alias: nullableString,
+  domain: nullableString,
+  website_url: nullableString,
+  logo_url: nullableString,
+  industry: nullableString,
+  headquarters_country: nullableString,
+  confidence: { type: "number" },
+  reason: nullableString,
+};
+
+const resolveJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: resolveProperties,
+  required: Object.keys(resolveProperties),
+};
+
+const brandProperties = {
+  brand_name: { type: "string" },
+  brand_alias: nullableString,
+  domain: nullableString,
+  website_url: nullableString,
+  logo_url: nullableString,
+  brand_description: nullableString,
+  industry: nullableString,
+  sub_industry: nullableString,
+  brand_category: nullableString,
+  company_type: nullableString,
+  business_model: nullableString,
+  founded_year: nullableNumber,
+  headquarters_city: nullableString,
+  headquarters_state: nullableString,
+  headquarters_country: nullableString,
+  operating_regions: nullableArrayOfStrings,
+
+  last_year_revenue: nullableNumber,
+  last_year_revenue_year: nullableNumber,
+  employee_count: nullableNumber,
+  company_size_category: nullableString,
+  annual_revenue: nullableNumber,
+  revenue_range: nullableString,
+  funding_total: nullableNumber,
+  funding_stage: nullableString,
+  valuation: nullableNumber,
+  profitability_status: nullableString,
+  growth_rate: nullableNumber,
+  brand_maturity: nullableString,
+
+  instagram_url: nullableString,
+  instagram_followers: nullableNumber,
+  instagram_engagement_rate: nullableNumber,
+  youtube_url: nullableString,
+  youtube_subscribers: nullableNumber,
+  linkedin_url: nullableString,
+  facebook_url: nullableString,
+  twitter_url: nullableString,
+  website_traffic_monthly: nullableNumber,
+  app_downloads: nullableNumber,
+
+  primary_contact_name: nullableString,
+  contact_designation: nullableString,
+  contact_email: nullableString,
+  contact_phone: nullableString,
+  linkedin_contact_url: nullableString,
+  contact_department: nullableString,
+
+  about_page_url: nullableString,
+  contact_page_url: nullableString,
+  general_email: nullableString,
+  sales_email: nullableString,
+  support_email: nullableString,
+  public_phone: nullableString,
+  public_address: nullableString,
+};
+
+const brandJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: brandProperties,
+  required: Object.keys(brandProperties),
+};
+
+function normalizeText(value) {
+  if (value === undefined || value === null || value === "") return null;
+  return value;
+}
+
+function extractDomain(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function prefer(primary, fallback) {
+  return normalizeText(primary) ?? normalizeText(fallback) ?? null;
+}
+
+function mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName) {
+  return {
+    brand_name:
+      normalizeText(aiData.brand_name) ||
+      normalizeText(resolved.brand_name) ||
+      cleanBrandName,
+
+    brand_alias: prefer(aiData.brand_alias, resolved.brand_alias),
+    domain:
+      prefer(aiData.domain, resolved.domain) ||
+      extractDomain(scraped?.website_url || resolved?.website_url || ""),
+
+    website_url: prefer(aiData.website_url, scraped?.website_url || resolved.website_url),
+    logo_url: prefer(aiData.logo_url, resolved.logo_url),
+    brand_description: prefer(aiData.brand_description, null),
+
+    industry: prefer(aiData.industry, resolved.industry),
+    sub_industry: normalizeText(aiData.sub_industry),
+    brand_category: normalizeText(aiData.brand_category),
+    company_type: normalizeText(aiData.company_type),
+    business_model: normalizeText(aiData.business_model),
+    founded_year: aiData.founded_year ?? null,
+    headquarters_city: normalizeText(aiData.headquarters_city),
+    headquarters_state: normalizeText(aiData.headquarters_state),
+    headquarters_country: prefer(
+      aiData.headquarters_country,
+      resolved.headquarters_country
+    ),
+    operating_regions: Array.isArray(aiData.operating_regions)
+      ? aiData.operating_regions
+      : null,
+
+    last_year_revenue: aiData.last_year_revenue ?? null,
+    last_year_revenue_year: aiData.last_year_revenue_year ?? null,
+    employee_count: aiData.employee_count ?? null,
+    company_size_category: normalizeText(aiData.company_size_category),
+    annual_revenue: aiData.annual_revenue ?? null,
+    revenue_range: normalizeText(aiData.revenue_range),
+    funding_total: aiData.funding_total ?? null,
+    funding_stage: normalizeText(aiData.funding_stage),
+    valuation: aiData.valuation ?? null,
+    profitability_status: normalizeText(aiData.profitability_status),
+    growth_rate: aiData.growth_rate ?? null,
+    brand_maturity: normalizeText(aiData.brand_maturity),
+
+    instagram_url: prefer(aiData.instagram_url, scraped?.instagram_url),
+    instagram_followers: aiData.instagram_followers ?? null,
+    instagram_engagement_rate: aiData.instagram_engagement_rate ?? null,
+    youtube_url: prefer(aiData.youtube_url, scraped?.youtube_url),
+    youtube_subscribers: aiData.youtube_subscribers ?? null,
+    linkedin_url: prefer(aiData.linkedin_url, scraped?.linkedin_url),
+    facebook_url: prefer(aiData.facebook_url, scraped?.facebook_url),
+    twitter_url: prefer(aiData.twitter_url, scraped?.twitter_url),
+    website_traffic_monthly: aiData.website_traffic_monthly ?? null,
+    app_downloads: aiData.app_downloads ?? null,
+
+    primary_contact_name: null,
+    contact_designation: normalizeText(aiData.contact_designation),
+    contact_email: prefer(
+      aiData.contact_email,
+      scraped?.sales_email || scraped?.general_email || scraped?.support_email
+    ),
+    contact_phone: prefer(aiData.contact_phone, scraped?.public_phone),
+    linkedin_contact_url: normalizeText(aiData.linkedin_contact_url),
+    contact_department: normalizeText(aiData.contact_department),
+
+    about_page_url: prefer(aiData.about_page_url, scraped?.about_page_url),
+    contact_page_url: prefer(aiData.contact_page_url, scraped?.contact_page_url),
+    general_email: prefer(aiData.general_email, scraped?.general_email),
+    sales_email: prefer(aiData.sales_email, scraped?.sales_email),
+    support_email: prefer(aiData.support_email, scraped?.support_email),
+    public_phone: prefer(aiData.public_phone, scraped?.public_phone),
+    public_address: prefer(aiData.public_address, scraped?.public_address),
+  };
+}
+
+function buildResolvePrompt(brandName) {
+  return `
+You are resolving the official identity of a brand from only its brand name.
+
+Brand name: "${brandName}"
+
+Instructions:
+1. Use web search.
+2. Identify the most likely official brand/company.
+3. Prefer official website/domain and official brand pages.
+4. If name is ambiguous, choose only if confidence is high.
+5. Return matched=false if you cannot confidently identify one official brand.
+6. Never invent information.
+7. confidence must be between 0 and 1.
+
+Return only JSON.
+`;
+}
+
+function buildProfilePrompt(brandName, resolved, scraped) {
+  return `
+You are a brand research assistant.
+
+Original input: "${brandName}"
+
+Resolved identity:
+- brand_name: ${resolved.brand_name || "null"}
+- domain: ${resolved.domain || "null"}
+- website_url: ${resolved.website_url || "null"}
+- industry: ${resolved.industry || "null"}
+- headquarters_country: ${resolved.headquarters_country || "null"}
+
+Public website evidence:
+- about_page_url: ${scraped?.about_page_url || "null"}
+- contact_page_url: ${scraped?.contact_page_url || "null"}
+- scraped_text:
+"""${scraped?.raw_website_text || ""}"""
+
+Instructions:
+1. Use the resolved official website as the anchor entity.
+2. Use web search plus the scraped website text.
+3. Prefer official sources first.
+4. Use public website evidence to fill about/contact/business fields.
+5. If a field is not confidently known, return null.
+6. Never invent personal contact details.
+7. Keep primary_contact_name null unless a public business contact person is clearly shown on the official site.
+8. last_year_revenue_year must be a number, not string.
+9. domain must be root domain only.
+10. Return only JSON.
+`;
+}
+
+async function resolveBrandIdentity(brandName) {
+  const response = await openai.responses.create({
+    model: MODEL,
+    temperature: 0,
+    tools: [{ type: "web_search" }],
+    input: [
+      {
+        role: "system",
+        content:
+          "You resolve official brand identity and return strict structured JSON.",
+      },
+      {
+        role: "user",
+        content: buildResolvePrompt(brandName),
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "brand_resolution",
+        schema: resolveJsonSchema,
+        strict: true,
+      },
+    },
+    max_output_tokens: 1200,
+  });
+
+  if (!response.output_text) {
+    throw new Error("No brand resolution response from OpenAI");
+  }
+
+  return {
+    parsed: JSON.parse(response.output_text),
+    raw: response.output_text,
+  };
+}
+
+async function buildBrandProfile(brandName, resolved, scraped) {
+  const response = await openai.responses.create({
+    model: MODEL,
+    temperature: 0,
+    tools: [{ type: "web_search" }],
+    input: [
+      {
+        role: "system",
+        content:
+          "You research brands and return strict schema-matching JSON.",
+      },
+      {
+        role: "user",
+        content: buildProfilePrompt(brandName, resolved, scraped),
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "brand_profile",
+        schema: brandJsonSchema,
+        strict: true,
+      },
+    },
+    max_output_tokens: 2500,
+  });
+
+  if (!response.output_text) {
+    throw new Error("No brand profile response from OpenAI");
+  }
+
+  return {
+    parsed: JSON.parse(response.output_text),
+    raw: response.output_text,
+  };
+}
+
+exports.BrandInformation = async (req, res) => {
+  try {
+    const brandName = req.body.brandName || req.body.brand_name;
+    const forceRefresh = req.body.forceRefresh === true;
+
+    if (!brandName || typeof brandName !== "string" || !brandName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "brandName is required in request body",
+      });
+    }
+
+    const cleanBrandName = brandName.trim();
+    const normalizedBrandName = cleanBrandName.toLowerCase();
+
+    const existingBrand = await BrandInfo.findOne({
+      normalized_brand_name: normalizedBrandName,
+    });
+
+    if (existingBrand && !forceRefresh) {
+      return res.status(200).json({
+        success: true,
+        message: "Brand data fetched from database",
+        data: existingBrand,
+      });
+    }
+
+    const resolutionResult = await resolveBrandIdentity(cleanBrandName);
+    const resolved = resolutionResult.parsed;
+
+    let scraped = null;
+    if (resolved.matched && resolved.website_url) {
+      scraped = await scrapeBrandWebsite(resolved.website_url);
+    }
+
+    const profileResult = await buildBrandProfile(cleanBrandName, resolved, scraped);
+    const aiData = profileResult.parsed;
+
+    const merged = mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName);
+
+    const finalData = {
+      brand_id: existingBrand?.brand_id || crypto.randomUUID(),
+      normalized_brand_name: normalizedBrandName,
+      input_brand_name: cleanBrandName,
+
+      ...merged,
+
+      website_pages_scraped: scraped?.website_pages_scraped || [],
+      last_scraped_at: scraped?.last_scraped_at || null,
+
+      raw_ai_response: JSON.stringify({
+        resolution: resolutionResult.raw,
+        profile: profileResult.raw,
+      }),
+    };
+
+    const savedBrand = await BrandInfo.findOneAndUpdate(
+      { normalized_brand_name: normalizedBrandName },
+      { $set: finalData },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Brand data generated and saved successfully",
+      data: savedBrand,
+    });
+  } catch (error) {
+    console.error("BrandInformation error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate and save brand data",
+      error: error.message,
     });
   }
 };
