@@ -100,7 +100,12 @@ const disputeSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["open", "in_review", "awaiting_user", "resolved", "rejected"],
+      enum: ["open",
+        "in_review",
+        "awaiting_user",
+        "resolved",
+        "rejected",
+        "revoked",],
       default: "open",
     },
 

@@ -22,6 +22,11 @@ const {
   adminAddComment,
   adminUpdateStatus,
   adminAssign,
+  brandRevokeDispute,
+  brandEditDispute,
+  publicGetDisputeById,
+  brandEditComment,
+  brandDeleteComment
 } = require('../controllers/disputeController');
 
 // ---- Multer config for dispute attachments ----
@@ -86,12 +91,27 @@ router.post(
 );
 router.post('/brand/list', verifyToken, brandList);
 router.get('/brand/:id', verifyToken, brandGetById);
+router.get('/public/:id', publicGetDisputeById);
 router.post(
   '/brand/:id/comment',
   verifyToken,
   uploadAttachments,
   brandAddComment
 );
+router.patch(
+  '/brand/comment/:id',
+  verifyToken,
+  uploadAttachments,
+  brandEditComment
+);
+
+router.delete(
+  '/brand/comment/:id',
+  verifyToken,
+  brandDeleteComment
+);
+router.patch('/brand/disputes/:id/revoke', verifyToken, brandRevokeDispute);
+router.patch('/brand/disputes/:id/edit', verifyToken, uploadAttachments, brandEditDispute); // reuse create handler for edits (with disputeId in params)
 
 // -------- Influencer endpoints (require influencer auth) --------
 router.post(
@@ -109,6 +129,7 @@ router.post(
   influencerAddComment
 );
 router.post('/influencer/applied', verifyToken, influencerCampaignsForDispute);
+// router.patch('/influencer/disputes/:id/revoke', disputeController.influencerRevokeDispute);
 
 // -------- Admin endpoints (relaxed auth, but comments can also have files) --------
 router.post('/admin/list', adminList);

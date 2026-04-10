@@ -1,4 +1,5 @@
 // controllers/disputeController.js
+const mongoose = require("mongoose");
 const Dispute = require('../models/dispute');
 const Campaign = require('../models/campaign');
 const Admin = require('../models/admin');
@@ -23,7 +24,7 @@ const {
 
 const STATUS_ORDER = ['open', 'in_review', 'awaiting_user', 'resolved', 'rejected'];
 const ALLOWED_STATUSES = new Set(STATUS_ORDER);
-
+const FINALIZED_STATUSES = new Set(['resolved', 'rejected', 'revoked']);
 /**
  * Escape a string so it can be safely used inside new RegExp(...)
  */
@@ -150,7 +151,67 @@ async function buildAttachmentsFromReq(req, attachmentsFromBody = []) {
 
   return [...existing, ...newOnes];
 }
+const EDITABLE_ISSUE_TYPES = new Set([
+  'content_not_as_expected',
+  'delay_or_missed_deadline',
+  'payment_issue',
+  'revision_issue',
+  'agreement_issue',
+  'scope_change',
+  'no_response',
+  'other',
+]);
 
+function parseIssueTypePayload(rawIssueType) {
+  if (!rawIssueType) return ['other'];
+
+  if (Array.isArray(rawIssueType)) {
+    const normalized = rawIssueType
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+    return normalized.length ? [...new Set(normalized)] : ['other'];
+  }
+
+  if (typeof rawIssueType === 'string') {
+    const trimmed = rawIssueType.trim();
+    if (!trimmed) return ['other'];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+
+      if (Array.isArray(parsed)) {
+        const normalized = parsed
+          .map((item) => String(item).trim())
+          .filter(Boolean);
+        return normalized.length ? [...new Set(normalized)] : ['other'];
+      }
+
+      if (Array.isArray(parsed?.type)) {
+        const normalized = parsed.type
+          .map((item) => String(item).trim())
+          .filter(Boolean);
+        return normalized.length ? [...new Set(normalized)] : ['other'];
+      }
+
+      if (typeof parsed?.type === 'string' && parsed.type.trim()) {
+        return [parsed.type.trim()];
+      }
+
+      if (typeof parsed === 'string' && parsed.trim()) {
+        return [parsed.trim()];
+      }
+    } catch {
+      return [trimmed];
+    }
+  }
+
+  return ['other'];
+}
+
+function areStringArraysEqual(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => String(value) === String(b[index]));
+}
 // ----------------- ID / MODEL HELPERS -----------------
 
 /**
@@ -226,7 +287,313 @@ async function resolveAdminModel(req) {
 }
 
 // ----------------- BRAND ENDPOINTS -----------------
+// Brand revoke dispute
+exports.brandRevokeDispute = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { brandId, reason = "" } = req.body || {};
 
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
+    if (!brandId) {
+      return res.status(400).json({ message: "brandId is required" });
+    }
+
+    const brand = await Brand.findById(String(brandId)).lean();
+    if (!brand) {
+      return res.status(404).json({ message: "Brand not found" });
+    }
+
+    const dispute = await Dispute.findOne({ disputeId: id });
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    if (String(dispute.brandId) !== String(brandId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (
+      dispute.createdBy?.role !== "Brand" ||
+      String(dispute.createdBy?.id) !== String(brandId)
+    ) {
+      return res.status(403).json({
+        message: "Only the user who raised this dispute can revoke it",
+      });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot revoke a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const trimmedReason = String(reason).trim();
+
+    dispute.status = "revoked";
+    dispute.comments.push({
+      authorRole: "Brand",
+      authorId: String(brandId),
+      text: trimmedReason
+        ? `Dispute revoked by Brand. Reason: ${trimmedReason}`
+        : "Dispute revoked by Brand.",
+      attachments: [],
+    });
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        influencerId: dispute.influencerId,
+        type: "dispute.revoked",
+        title: `Dispute #${dispute.disputeId} revoked`,
+        message: `${brand?.name || "Brand"} revoked the dispute "${dispute.subject}".`,
+        entityType: "dispute",
+        entityId: dispute.disputeId,
+        actionPath: {
+          influencer: `/influencer/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (notifyErr) {
+      console.warn(
+        "In-app notify failed (brandRevokeDispute):",
+        notifyErr?.message || notifyErr
+      );
+    }
+
+    return res.status(200).json({
+      message: "Dispute revoked successfully",
+      disputeId: dispute.disputeId,
+      status: dispute.status,
+    });
+  } catch (err) {
+    console.error("Error in brandRevokeDispute:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.brandEditDispute = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      brandId,
+      subject,
+      description = '',
+      issueType,
+      attachments = [],
+      removedAttachmentUrls = [],
+    } = req.body || {};
+
+    const parseRemovedAttachmentUrlsPayload = (value) => {
+      if (!value) return [];
+
+      if (Array.isArray(value)) {
+        return [...new Set(value.map((v) => String(v || '').trim()).filter(Boolean))];
+      }
+
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            return [...new Set(parsed.map((v) => String(v || '').trim()).filter(Boolean))];
+          }
+        } catch (_) {
+          // ignore JSON parse error and fall back below
+        }
+
+        return [...new Set(trimmed.split(',').map((v) => v.trim()).filter(Boolean))];
+      }
+
+      return [];
+    };
+
+    const getAttachmentUrls = (attachment) => {
+      if (!attachment) return [];
+
+      if (typeof attachment === 'string') {
+        return [attachment.trim()].filter(Boolean);
+      }
+
+      return [
+        attachment?.url,
+        attachment?.uri,
+        attachment?.fileUrl,
+        attachment?.attachmentUrl,
+        attachment?.location,
+        attachment?.path,
+        attachment?.secure_url,
+      ]
+        .map((v) => String(v || '').trim())
+        .filter(Boolean);
+    };
+
+    const trimmedBrandId = String(brandId || '').trim();
+    const trimmedSubject = String(subject || '').trim();
+    const trimmedDescription = String(description || '').trim();
+
+    if (!id) {
+      return res.status(400).json({ message: 'Dispute id is required' });
+    }
+
+    if (!trimmedBrandId) {
+      return res.status(400).json({ message: 'brandId is required' });
+    }
+
+    if (!trimmedSubject) {
+      return res.status(400).json({ message: 'Subject is required' });
+    }
+
+    const brand = await Brand.findById(trimmedBrandId).lean();
+    if (!brand) {
+      return res.status(404).json({ message: 'Brand not found' });
+    }
+
+    const dispute = await Dispute.findOne({ disputeId: id });
+    if (!dispute) {
+      return res.status(404).json({ message: 'Dispute not found' });
+    }
+
+    if (String(dispute.brandId) !== trimmedBrandId) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    if (
+      dispute.createdBy?.role !== 'Brand' ||
+      String(dispute.createdBy?.id) !== trimmedBrandId
+    ) {
+      return res.status(403).json({
+        message: 'Only the user who raised this dispute can edit it',
+      });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot edit a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const parsedIssueType = parseIssueTypePayload(issueType);
+    const invalidIssueTypes = parsedIssueType.filter(
+      (value) => !EDITABLE_ISSUE_TYPES.has(value)
+    );
+
+    if (invalidIssueTypes.length > 0) {
+      return res.status(400).json({
+        message: `Invalid issueType value(s): ${invalidIssueTypes.join(', ')}`,
+      });
+    }
+
+    const parsedRemovedAttachmentUrls =
+      parseRemovedAttachmentUrlsPayload(removedAttachmentUrls);
+
+    const uploadedAttachments = await buildAttachmentsFromReq(req, attachments);
+    const changeSummary = [];
+
+    if (dispute.subject !== trimmedSubject) {
+      dispute.subject = trimmedSubject;
+      changeSummary.push('title');
+    }
+
+    if ((dispute.description || '') !== trimmedDescription) {
+      dispute.description = trimmedDescription;
+      changeSummary.push('description');
+    }
+
+    const currentIssueType = Array.isArray(dispute.issueType)
+      ? dispute.issueType.map((value) => String(value))
+      : [];
+
+    if (!areStringArraysEqual(currentIssueType, parsedIssueType)) {
+      dispute.issueType = parsedIssueType;
+      changeSummary.push('issue type');
+    }
+
+    const existingAttachments = Array.isArray(dispute.attachments)
+      ? dispute.attachments
+      : [];
+
+    if (parsedRemovedAttachmentUrls.length > 0) {
+      const removedSet = new Set(parsedRemovedAttachmentUrls);
+
+      const nextAttachments = existingAttachments.filter((attachment) => {
+        const urls = getAttachmentUrls(attachment);
+        return !urls.some((url) => removedSet.has(url));
+      });
+
+      const removedCount = existingAttachments.length - nextAttachments.length;
+
+      if (removedCount > 0) {
+        dispute.attachments = nextAttachments;
+        changeSummary.push(
+          `${removedCount} attachment${removedCount > 1 ? 's' : ''} removed`
+        );
+      }
+    }
+
+    if (uploadedAttachments.length > 0) {
+      dispute.attachments = [
+        ...(Array.isArray(dispute.attachments) ? dispute.attachments : []),
+        ...uploadedAttachments,
+      ];
+
+      changeSummary.push(
+        `${uploadedAttachments.length} attachment${uploadedAttachments.length > 1 ? 's' : ''} added`
+      );
+    }
+
+    if (changeSummary.length === 0) {
+      return res.status(200).json({
+        message: 'No changes detected',
+        disputeId: dispute.disputeId,
+        status: dispute.status,
+        dispute,
+      });
+    }
+
+    dispute.comments = Array.isArray(dispute.comments) ? dispute.comments : [];
+    dispute.comments.push({
+      authorRole: 'Brand',
+      authorId: trimmedBrandId,
+      text: `Dispute updated by Brand. Updated: ${changeSummary.join(', ')}.`,
+      attachments: uploadedAttachments,
+    });
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        influencerId: dispute.influencerId,
+        type: 'dispute.updated',
+        title: `Dispute #${dispute.disputeId} updated`,
+        message: `${brand?.name || 'Brand'} updated the dispute "${dispute.subject}".`,
+        entityType: 'dispute',
+        entityId: dispute.disputeId,
+        actionPath: {
+          influencer: `/influencer/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (e) {
+      console.warn(
+        'In-app notify failed (brandEditDispute):',
+        e?.message || e
+      );
+    }
+
+    return res.status(200).json({
+      message: 'Dispute updated successfully',
+      disputeId: dispute.disputeId,
+      status: dispute.status,
+      dispute,
+    });
+  } catch (err) {
+    console.error('Error in brandEditDispute:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
 // Brand creates a dispute (multi-image attachments supported)
 exports.brandCreateDispute = async (req, res) => {
   try {
@@ -632,7 +999,114 @@ exports.brandList = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+exports.publicGetDisputeById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    if (!id) {
+      return res.status(400).json({ message: 'Dispute id is required' });
+    }
+
+    const d = await Dispute.findOne({ disputeId: id }).lean();
+    if (!d) {
+      return res.status(404).json({ message: 'Dispute not found' });
+    }
+
+    try {
+      const [campaign, brand, influencer, modash] = await Promise.all([
+        d.campaignId
+          ? Campaign.findOne({ _id: d.campaignId })
+            .select('_id campaignTitle')
+            .lean()
+          : null,
+
+        d.brandId
+          ? Brand.findOne({ _id: d.brandId })
+            .select('_id name')
+            .lean()
+          : null,
+
+        d.influencerId
+          ? Influencer.findOne({ _id: d.influencerId })
+            .select('_id name')
+            .lean()
+          : null,
+
+        d.influencerId
+          ? Modash.findOne({
+            $or: [
+              { influencerId: String(d.influencerId) },
+              { influencer: d.influencerId },
+            ],
+          })
+            .select('influencerId influencer handle username provider updatedAt')
+            .sort({ updatedAt: -1 })
+            .lean()
+          : null,
+      ]);
+
+      d.campaignName = campaign?.campaignTitle || null;
+
+      const brandName = brand?.name || null;
+      const influencerName = influencer?.name || null;
+      const influencerHandle = modash?.handle || modash?.username || null;
+      const influencerProvider = modash?.provider || null;
+      const raisedByRole = d.createdBy?.role || null;
+
+      d.brandName = brandName;
+      d.influencerName = influencerName;
+      d.influencerHandle = influencerHandle;
+      d.influencerProvider = influencerProvider;
+
+      if (raisedByRole === 'Brand') {
+        d.raisedBy = {
+          role: 'Brand',
+          id: d.brandId,
+          name: brandName,
+        };
+        d.raisedAgainst = {
+          role: 'Influencer',
+          id: d.influencerId,
+          name: influencerName,
+          handle: influencerHandle,
+          provider: influencerProvider,
+        };
+      } else if (raisedByRole === 'Influencer') {
+        d.raisedBy = {
+          role: 'Influencer',
+          id: d.influencerId,
+          name: influencerName,
+          handle: influencerHandle,
+          provider: influencerProvider,
+        };
+        d.raisedAgainst = {
+          role: 'Brand',
+          id: d.brandId,
+          name: brandName,
+        };
+      } else {
+        d.raisedBy = null;
+        d.raisedAgainst = null;
+      }
+
+      d.raisedByRole = raisedByRole;
+      d.raisedById = d.createdBy?.id || null;
+      d.viewerIsRaiser = false;
+    } catch (e) {
+      console.error('Error enriching publicGetDisputeById:', e);
+      d.campaignName = d.campaignName || null;
+      d.brandName = d.brandName || null;
+      d.influencerName = d.influencerName || null;
+      d.influencerHandle = d.influencerHandle || null;
+      d.influencerProvider = d.influencerProvider || null;
+    }
+
+    return res.status(200).json({ dispute: d });
+  } catch (err) {
+    console.error('Error in publicGetDisputeById:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
 exports.brandGetById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -797,9 +1271,291 @@ exports.brandAddComment = async (req, res) => {
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
+exports.brandEditComment = async (req, res) => {
+  try {
+    const { id } = req.params; // commentId
+    const { brandId, text, attachments } = req.body || {};
 
+    if (!id) {
+      return res.status(400).json({ message: 'commentId is required' });
+    }
+
+    if (!brandId) {
+      return res.status(400).json({ message: 'brandId is required' });
+    }
+
+    const trimmedBrandId = String(brandId).trim();
+    const trimmedText = text !== undefined ? String(text).trim() : undefined;
+
+    const brand = await Brand.findOne({ _id: trimmedBrandId }).lean();
+    if (!brand) {
+      return res.status(404).json({ message: 'Brand not found' });
+    }
+
+    const dispute = await Dispute.findOne({
+      brandId: trimmedBrandId,
+      'comments.commentId': id,
+    });
+
+    if (!dispute) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot edit a comment on a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const commentIndex = dispute.comments.findIndex(
+      (comment) => String(comment.commentId) === String(id)
+    );
+
+    if (commentIndex === -1) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    const comment = dispute.comments[commentIndex];
+
+    if (
+      comment.authorRole !== 'Brand' ||
+      String(comment.authorId) !== trimmedBrandId
+    ) {
+      return res.status(403).json({
+        message: 'You can only edit your own comments',
+      });
+    }
+
+    let hasChanges = false;
+
+    if (trimmedText !== undefined) {
+      if (!trimmedText) {
+        return res.status(400).json({ message: 'text is required' });
+      }
+
+      if (comment.text !== trimmedText) {
+        comment.text = trimmedText;
+        hasChanges = true;
+      }
+    }
+
+    const hasAttachmentPayload =
+      req.body?.attachments !== undefined ||
+      (Array.isArray(req.files) && req.files.length > 0);
+
+    if (hasAttachmentPayload) {
+      const nextAttachments = await buildAttachmentsFromReq(req, attachments || []);
+      comment.attachments = nextAttachments;
+      hasChanges = true;
+    }
+
+    if (!hasChanges) {
+      return res.status(200).json({
+        message: 'No changes detected',
+        commentId: comment.commentId,
+      });
+    }
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        influencerId: dispute.influencerId,
+        type: 'dispute.comment_edited',
+        title: `Comment updated on Dispute #${dispute.disputeId}`,
+        message: `${brand?.name || 'Brand'} updated a comment.`,
+        entityType: 'dispute',
+        entityId: dispute.disputeId,
+        actionPath: {
+          influencer: `/influencer/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (e) {
+      console.warn('In-app notify failed (brandEditComment):', e?.message || e);
+    }
+
+    return res.status(200).json({
+      message: 'Comment updated successfully',
+      commentId: comment.commentId,
+      disputeId: dispute.disputeId,
+      comment,
+    });
+  } catch (err) {
+    console.error('Error in brandEditComment:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.brandDeleteComment = async (req, res) => {
+  try {
+    const { id } = req.params; // commentId
+    const { brandId } = req.body || {};
+
+    if (!id) {
+      return res.status(400).json({ message: 'commentId is required' });
+    }
+
+    if (!brandId) {
+      return res.status(400).json({ message: 'brandId is required' });
+    }
+
+    const trimmedBrandId = String(brandId).trim();
+
+    const brand = await Brand.findOne({ _id: trimmedBrandId }).lean();
+    if (!brand) {
+      return res.status(404).json({ message: 'Brand not found' });
+    }
+
+    const dispute = await Dispute.findOne({
+      brandId: trimmedBrandId,
+      'comments.commentId': id,
+    });
+
+    if (!dispute) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot delete a comment on a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const comment = dispute.comments.find(
+      (item) => String(item.commentId) === String(id)
+    );
+
+    if (!comment) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    if (
+      comment.authorRole !== 'Brand' ||
+      String(comment.authorId) !== trimmedBrandId
+    ) {
+      return res.status(403).json({
+        message: 'You can only delete your own comments',
+      });
+    }
+
+    dispute.comments = dispute.comments.filter(
+      (item) => String(item.commentId) !== String(id)
+    );
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        influencerId: dispute.influencerId,
+        type: 'dispute.comment_deleted',
+        title: `Comment removed from Dispute #${dispute.disputeId}`,
+        message: `${brand?.name || 'Brand'} deleted a comment.`,
+        entityType: 'dispute',
+        entityId: dispute.disputeId,
+        actionPath: {
+          influencer: `/influencer/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (e) {
+      console.warn('In-app notify failed (brandDeleteComment):', e?.message || e);
+    }
+
+    return res.status(200).json({
+      message: 'Comment deleted successfully',
+      commentId: id,
+      disputeId: dispute.disputeId,
+    });
+  } catch (err) {
+    console.error('Error in brandDeleteComment:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
 // ----------------- INFLUENCER ENDPOINTS -----------------
+// Influencer revoke dispute
+exports.influencerRevokeDispute = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { influencerId, reason = '' } = req.body || {};
 
+    if (!id) {
+      return res.status(400).json({ message: 'Dispute id is required' });
+    }
+
+    if (!influencerId) {
+      return res.status(400).json({ message: 'influencerId is required' });
+    }
+
+    const influencer = await Influencer.findOne({
+      _id: String(influencerId),
+    }).lean();
+
+    if (!influencer) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const d = await Dispute.findOne({ disputeId: id });
+    if (!d) {
+      return res.status(404).json({ message: 'Dispute not found' });
+    }
+
+    if (d.influencerId !== String(influencerId)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    if (
+      d.createdBy?.role !== 'Influencer' ||
+      String(d.createdBy?.id) !== String(influencerId)
+    ) {
+      return res.status(403).json({
+        message: 'Only the user who raised this dispute can revoke it',
+      });
+    }
+
+    if (FINALIZED_STATUSES.has(d.status)) {
+      return res.status(400).json({
+        message: `Cannot revoke a dispute that is already ${d.status}`,
+      });
+    }
+
+    d.status = 'revoked';
+
+    d.comments.push({
+      authorRole: 'Influencer',
+      authorId: String(influencerId),
+      text: reason && String(reason).trim()
+        ? `Dispute revoked by Influencer. Reason: ${String(reason).trim()}`
+        : 'Dispute revoked by Influencer.',
+      attachments: [],
+    });
+
+    await d.save();
+
+    try {
+      await createAndEmit({
+        brandId: d.brandId,
+        type: 'dispute.revoked',
+        title: `Dispute #${d.disputeId} revoked`,
+        message: `${influencer?.name || 'Influencer'} revoked the dispute "${d.subject}".`,
+        entityType: 'dispute',
+        entityId: d.disputeId,
+        actionPath: {
+          brand: `/brand/disputes/${d.disputeId}`,
+        },
+      });
+    } catch (e) {
+      console.warn('In-app notify failed (influencerRevokeDispute):', e.message);
+    }
+
+    return res.status(200).json({
+      message: 'Dispute revoked successfully',
+      disputeId: d.disputeId,
+      status: d.status,
+    });
+  } catch (err) {
+    console.error('Error in influencerRevokeDispute:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
 // Influencer creates a dispute (multi-image attachments supported)
 exports.influencerCreateDispute = async (req, res) => {
   try {
@@ -1216,70 +1972,140 @@ exports.influencerAddComment = async (req, res) => {
 exports.adminGetById = async (req, res) => {
   try {
     const { id } = req.params;
+
     if (!id) {
-      return res.status(400).json({ message: 'Dispute id is required' });
+      return res.status(400).json({ message: "Dispute id is required" });
     }
 
     const d = await Dispute.findOne({ disputeId: id }).lean();
+
     if (!d) {
-      return res.status(404).json({ message: 'Dispute not found' });
+      return res.status(404).json({ message: "Dispute not found" });
     }
 
     try {
-      const [b, inf, camp] = await Promise.all([
-        d.brandId
-          ? Brand.findOne({ brandId: d.brandId })
-            .select('brandId name email')
-            .lean()
+      const toObjectIdOrNull = (value) => {
+        if (!value) return null;
+        const str = String(value);
+        return mongoose.Types.ObjectId.isValid(str)
+          ? new mongoose.Types.ObjectId(str)
+          : null;
+      };
+
+      const formatSince = (dateValue) => {
+        if (!dateValue) return null;
+        const date = new Date(dateValue);
+        if (Number.isNaN(date.getTime())) return null;
+
+        return date.toLocaleString("en-US", {
+          month: "short",
+          year: "numeric",
+        });
+      };
+
+      const brandObjectId = toObjectIdOrNull(d.brandId);
+      const influencerObjectId = toObjectIdOrNull(d.influencerId);
+      const campaignObjectId = toObjectIdOrNull(d.campaignId);
+
+      const [b, inf, camp, modash] = await Promise.all([
+        brandObjectId
+          ? Brand.findOne({ _id: brandObjectId })
+              .select("_id name email createdAt logoUrl brandLogoUrl profileImage profilePic image avatar avatarUrl")
+              .lean()
           : null,
+
+        influencerObjectId
+          ? Influencer.findOne({ _id: influencerObjectId })
+              .select("_id name email createdAt")
+              .lean()
+          : null,
+
+        campaignObjectId
+          ? Campaign.findOne({ _id: campaignObjectId })
+              .select("_id campaignTitle")
+              .lean()
+          : null,
+
         d.influencerId
-          ? Influencer.findOne({ influencerId: d.influencerId })
-            .select('influencerId name email')
-            .lean()
+          ? Modash.findOne({
+              $or: [
+                { influencerId: String(d.influencerId) },
+                { influencer: influencerObjectId || d.influencerId },
+              ],
+            })
+              .select("picture handle username provider updatedAt")
+              .sort({ updatedAt: -1 })
+              .lean()
           : null,
-        d.campaignId
-          ? Campaign.findOne({ campaignsId: d.campaignId })
-            .select('campaignsId campaignTitle')
-            .lean()
-          : null
       ]);
 
-      // existing fields
+      const brandImage =
+        b?.logoUrl ||
+        b?.brandLogoUrl ||
+        b?.profileImage ||
+        b?.profilePic ||
+        b?.avatarUrl ||
+        b?.avatar ||
+        b?.image ||
+        null;
+
+      const influencerImage = modash?.picture || null;
+
+      const brandSince = formatSince(b?.createdAt);
+      const influencerSince = formatSince(inf?.createdAt);
+
       d.brandName = b?.name || null;
       d.influencerName = inf?.name || null;
       d.campaignName = camp?.campaignTitle || null;
 
-      // 👇 NEW: include brand & influencer emails on the dispute object
       d.brandEmail = b?.email || null;
       d.influencerEmail = inf?.email || null;
 
+      d.brandLogoUrl = brandImage;
+      d.influencerProfileImage = influencerImage;
+      d.influencerHandle = modash?.handle || modash?.username || null;
+      d.influencerProvider = modash?.provider || null;
+
+      d.brandSince = brandSince;
+      d.influencerSince = influencerSince;
+
       const raisedByRole = d.createdBy?.role || null;
 
-      if (raisedByRole === 'Brand') {
+      if (raisedByRole === "Brand") {
         d.raisedBy = {
-          role: 'Brand',
+          role: "Brand",
           id: d.brandId,
           name: b?.name || null,
-          email: b?.email || null   // 👈 NEW
+          email: b?.email || null,
+          logoUrl: brandImage,
+          since: brandSince,
         };
+
         d.raisedAgainst = {
-          role: 'Influencer',
+          role: "Influencer",
           id: d.influencerId,
           name: inf?.name || null,
-          email: inf?.email || null // 👈 NEW
+          email: inf?.email || null,
+          logoUrl: influencerImage,
+          since: influencerSince,
         };
-      } else if (raisedByRole === 'Influencer') {
+      } else if (raisedByRole === "Influencer") {
         d.raisedBy = {
-          role: 'Influencer',
+          role: "Influencer",
           id: d.influencerId,
           name: inf?.name || null,
-          email: inf?.email || null // 👈 NEW
+          email: inf?.email || null,
+          logoUrl: influencerImage,
+          since: influencerSince,
         };
+
         d.raisedAgainst = {
-          role: 'Brand',
+          role: "Brand",
           id: d.brandId,
           name: b?.name || null,
-          email: b?.email || null   // 👈 NEW
+          email: b?.email || null,
+          logoUrl: brandImage,
+          since: brandSince,
         };
       } else {
         d.raisedBy = null;
@@ -1289,16 +2115,29 @@ exports.adminGetById = async (req, res) => {
       d.raisedByRole = raisedByRole;
       d.raisedById = d.createdBy?.id || null;
     } catch (e) {
-      console.error('Error enriching adminGetById:', e);
-      d.brandName = d.brandName || null;
-      d.influencerName = d.influencerName || null;
-      d.campaignName = d.campaignName || null;
+      console.error("Error enriching adminGetById:", e);
+
+      d.brandName = null;
+      d.influencerName = null;
+      d.campaignName = null;
+      d.brandEmail = null;
+      d.influencerEmail = null;
+      d.brandLogoUrl = null;
+      d.influencerProfileImage = null;
+      d.influencerHandle = null;
+      d.influencerProvider = null;
+      d.brandSince = null;
+      d.influencerSince = null;
+      d.raisedBy = null;
+      d.raisedAgainst = null;
+      d.raisedByRole = d.createdBy?.role || null;
+      d.raisedById = d.createdBy?.id || null;
     }
 
     return res.status(200).json({ dispute: d });
   } catch (err) {
-    console.error('Error in adminGetById:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in adminGetById:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1383,7 +2222,7 @@ exports.adminList = async (req, res) => {
     const filter = {};
 
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
-    if (normalizedStatus && normalizedStatus !== '__ALL__') {
+    if (normalizedStatus && normalizedStatus !== "__ALL__") {
       filter.status = normalizedStatus;
     }
 
@@ -1391,75 +2230,90 @@ exports.adminList = async (req, res) => {
     if (brandId) filter.brandId = String(brandId);
     if (influencerId) filter.influencerId = String(influencerId);
 
-    // backend search: subject / description / disputeId
-    const searchTerm = typeof search === 'string' ? search.trim() : '';
+    const searchTerm = typeof search === "string" ? search.trim() : "";
     if (searchTerm) {
       const pattern = escapeRegex(searchTerm);
-      const re = new RegExp(pattern, 'i');
+      const re = new RegExp(pattern, "i");
       filter.$or = [{ subject: re }, { description: re }, { disputeId: re }];
     }
 
-    if (appliedBy && typeof appliedBy === 'string') {
+    if (appliedBy && typeof appliedBy === "string") {
       const role = String(appliedBy).toLowerCase();
-      if (role === 'brand') filter['createdBy.role'] = 'Brand';
-      if (role === 'influencer') filter['createdBy.role'] = 'Influencer';
+      if (role === "brand") filter["createdBy.role"] = "Brand";
+      if (role === "influencer") filter["createdBy.role"] = "Influencer";
     }
 
     const total = await Dispute.countDocuments(filter);
+
     const rows = await Dispute.find(filter)
       .sort({ createdAt: -1 })
       .skip((p - 1) * l)
       .limit(l)
       .lean();
 
-    // Enrich with brand / influencer / campaign names
     try {
-      const brandIds = Array.from(
-        new Set(rows.map((r) => r.brandId).filter(Boolean))
-      ).map(String);
-      const influencerIds = Array.from(
-        new Set(rows.map((r) => r.influencerId).filter(Boolean))
-      ).map(String);
-      const campaignIds = Array.from(
-        new Set(rows.map((r) => r.campaignId).filter(Boolean))
-      ).map(String);
+      const uniqueBrandIds = [...new Set(rows.map((r) => r.brandId).filter(Boolean))];
+      const uniqueInfluencerIds = [...new Set(rows.map((r) => r.influencerId).filter(Boolean))];
+      const uniqueCampaignIds = [...new Set(rows.map((r) => r.campaignId).filter(Boolean))];
+
+      const toObjectIds = (ids = []) =>
+        ids
+          .map((id) => String(id))
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .map((id) => new mongoose.Types.ObjectId(id));
+
+      const brandObjectIds = toObjectIds(uniqueBrandIds);
+      const influencerObjectIds = toObjectIds(uniqueInfluencerIds);
+      const campaignObjectIds = toObjectIds(uniqueCampaignIds);
 
       const [brands, influencers, campaigns] = await Promise.all([
-        brandIds.length
-          ? Brand.find({ brandId: { $in: brandIds } })
-            .select('brandId name')
+        brandObjectIds.length
+          ? Brand.find({ _id: { $in: brandObjectIds } })
+            .select("_id name brandName companyName")
             .lean()
           : [],
-        influencerIds.length
-          ? Influencer.find({ influencerId: { $in: influencerIds } })
-            .select('influencerId name')
+        influencerObjectIds.length
+          ? Influencer.find({ _id: { $in: influencerObjectIds } })
+            .select("_id name fullName influencerName username")
             .lean()
           : [],
-        campaignIds.length
-          ? Campaign.find({ campaignsId: { $in: campaignIds } })
-            .select('campaignsId campaignTitle')
+        campaignObjectIds.length
+          ? Campaign.find({ _id: { $in: campaignObjectIds } })
+            .select("_id campaignTitle title name")
             .lean()
           : [],
       ]);
 
       const brandMap = new Map(
-        (brands || []).map((b) => [String(b.brandId), b.name])
+        (brands || []).map((b) => [
+          String(b._id),
+          b.name || b.brandName || b.companyName || null,
+        ])
       );
-      const infMap = new Map(
-        (influencers || []).map((i) => [String(i.influencerId), i.name])
+
+      const influencerMap = new Map(
+        (influencers || []).map((i) => [
+          String(i._id),
+          i.name || i.fullName || i.influencerName || i.username || null,
+        ])
       );
-      const campMap = new Map(
-        (campaigns || []).map((c) => [String(c.campaignsId), c.campaignTitle])
+
+      const campaignMap = new Map(
+        (campaigns || []).map((c) => [
+          String(c._id),
+          c.campaignTitle || c.title || c.name || null,
+        ])
       );
 
       const enriched = rows.map((r) => {
         const raisedByRole = r.createdBy?.role || null;
+
         return {
           ...r,
           brandName: brandMap.get(String(r.brandId)) || null,
-          influencerName: infMap.get(String(r.influencerId)) || null,
+          influencerName: influencerMap.get(String(r.influencerId)) || null,
           campaignName: r.campaignId
-            ? campMap.get(String(r.campaignId)) || null
+            ? campaignMap.get(String(r.campaignId)) || null
             : null,
           raisedByRole,
           raisedById: r.createdBy?.id || null,
@@ -1474,7 +2328,7 @@ exports.adminList = async (req, res) => {
         disputes: enriched,
       });
     } catch (e) {
-      console.error('Error enriching adminList:', e);
+      console.error("Error enriching adminList:", e);
       return res.status(200).json({
         page: p,
         limit: l,
@@ -1484,8 +2338,8 @@ exports.adminList = async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('Error in adminList:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in adminList:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
