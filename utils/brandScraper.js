@@ -11,6 +11,7 @@ function normalizeUrl(url) {
     return null;
   }
 }
+///
 //
 function getBaseUrl(url) {
   try {
