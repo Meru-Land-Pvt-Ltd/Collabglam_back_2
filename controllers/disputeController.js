@@ -10,7 +10,7 @@ const Modash = require('../models/modash');
 const Contract = require('../models/contract');
 const { Types } = require('mongoose');
 const { createAndEmit } = require('../utils/notifier');
-
+const { v4: uuidv4 } = require("uuid");
 // ⬇️ Adjust this path to your GridFS helper file if needed
 const { uploadToGridFS } = require('../utils/gridfs');
 
@@ -22,9 +22,57 @@ const {
 
 // ---- STATUS CONFIG & HELPERS ----
 
-const STATUS_ORDER = ['open', 'in_review', 'awaiting_user', 'resolved', 'rejected'];
+const STATUS_ORDER = [
+  "open",
+  "in_review",
+  "awaiting_user",
+  "evidence_submitted",
+  "in_negotiation",
+  "resolution_proposed",
+  "resolved",
+  "rejected",
+  "revoked",
+];
 const ALLOWED_STATUSES = new Set(STATUS_ORDER);
 const FINALIZED_STATUSES = new Set(['resolved', 'rejected', 'revoked']);
+
+const STATUS_LABELS = {
+  open: "Open",
+  in_review: "Under Review",
+  awaiting_user: "Awaiting Response",
+  evidence_submitted: "Evidence Submitted",
+  in_negotiation: "In Negotiation",
+  resolution_proposed: "Resolution Proposed",
+  resolved: "Completed",
+  rejected: "Rejected",
+  revoked: "Withdrawn",
+};
+
+const STATUS_ALIASES = {
+  open: "open",
+
+  in_review: "in_review",
+  review: "in_review",
+  under_review: "in_review",
+
+  awaiting_user: "awaiting_user",
+  awaiting_response: "awaiting_user",
+
+  evidence_submitted: "evidence_submitted",
+
+  in_negotiation: "in_negotiation",
+
+  resolution_proposed: "resolution_proposed",
+
+  resolved: "resolved",
+  completed: "resolved",
+
+  rejected: "rejected",
+
+  revoked: "revoked",
+  withdrawn: "revoked",
+};
+
 /**
  * Escape a string so it can be safely used inside new RegExp(...)
  */
@@ -33,26 +81,33 @@ function escapeRegex(str) {
 }
 
 function normalizeStatusInput(raw, { allowZeroAll = false } = {}) {
-  if (raw === undefined || raw === null || raw === '') return null;
+  if (raw === undefined || raw === null || raw === "") return null;
 
   const s = String(raw).trim();
   if (!s) return null;
 
-  // numeric mapping
   const num = Number(s);
   if (!Number.isNaN(num)) {
     if (num === 0) {
-      return allowZeroAll ? '__ALL__' : null;
+      return allowZeroAll ? "__ALL__" : null;
     }
-    const idx = num - 1; // 1 → index 0
+
+    const idx = num - 1;
     if (idx >= 0 && idx < STATUS_ORDER.length) {
       return STATUS_ORDER[idx];
     }
     return null;
   }
 
-  // direct string status
-  if (ALLOWED_STATUSES.has(s)) return s;
+  const normalized = s.toLowerCase().replace(/[\s-]+/g, "_");
+
+  if (ALLOWED_STATUSES.has(normalized)) {
+    return normalized;
+  }
+
+  if (STATUS_ALIASES[normalized]) {
+    return STATUS_ALIASES[normalized];
+  }
 
   return null;
 }
@@ -1221,54 +1276,68 @@ exports.brandAddComment = async (req, res) => {
     const { id } = req.params;
     const { text, attachments = [], brandId } = req.body || {};
 
-    if (!id) return res.status(400).json({ message: 'Dispute id is required' });
-    if (!brandId) return res.status(400).json({ message: 'brandId is required' });
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
+    if (!brandId) {
+      return res.status(400).json({ message: "brandId is required" });
+    }
+
     if (!text || !String(text).trim()) {
-      return res.status(400).json({ message: 'text is required' });
+      return res.status(400).json({ message: "text is required" });
     }
 
     const brand = await Brand.findOne({ _id: String(brandId) }).lean();
-    if (!brand) return res.status(404).json({ message: 'Brand not found' });
+    if (!brand) {
+      return res.status(404).json({ message: "Brand not found" });
+    }
 
     const d = await Dispute.findOne({ disputeId: id });
-    if (!d) return res.status(404).json({ message: 'Dispute not found' });
+    if (!d) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
 
-    if (d.brandId !== String(brandId)) return res.status(403).json({ message: 'Forbidden' });
-    if (d.status === 'resolved' || d.status === 'rejected') {
-      return res.status(400).json({ message: 'Cannot comment on a finalized dispute' });
+    if (d.brandId !== String(brandId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (FINALIZED_STATUSES.has(d.status)) {
+      return res.status(400).json({
+        message: "Cannot comment on a finalized dispute",
+      });
     }
 
     const sanitized = await buildAttachmentsFromReq(req, attachments);
 
     d.comments.push({
-      authorRole: 'Brand',
+      authorRole: "Brand",
       authorId: String(brandId),
-      text: String(text),
+      text: String(text).trim(),
       attachments: sanitized,
     });
 
     await d.save();
 
-    // 🔔 Notify Influencer
     try {
       const snippet = String(text).trim().slice(0, 120);
       await createAndEmit({
         influencerId: d.influencerId,
-        type: 'dispute.comment_added',
+        type: "dispute.comment_added",
         title: `New comment on Dispute #${d.disputeId}`,
-        message: `${brand?.name || 'Brand'}: ${snippet}${String(text).trim().length > 120 ? '...' : ''}`,
-        entityType: 'dispute',
+        message: `${brand?.name || "Brand"}: ${snippet}${String(text).trim().length > 120 ? "..." : ""}`,
+        entityType: "dispute",
         entityId: d.disputeId,
         actionPath: { influencer: `/influencer/disputes/${d.disputeId}` },
       });
     } catch (e) {
-      console.warn('In-app notify failed (brandAddComment):', e.message);
+      console.warn("In-app notify failed (brandAddComment):", e.message);
     }
 
-    return res.status(200).json({ message: 'Comment added' });
+    return res.status(200).json({ message: "Comment added" });
   } catch (err) {
-    console.error('Error in brandAddComment:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in brandAddComment:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 exports.brandEditComment = async (req, res) => {
@@ -1911,57 +1980,68 @@ exports.influencerAddComment = async (req, res) => {
     const { id } = req.params;
     const { text, attachments = [], influencerId } = req.body || {};
 
-    if (!id) return res.status(400).json({ message: 'Dispute id is required' });
-    if (!influencerId) return res.status(400).json({ message: 'influencerId is required' });
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
+    if (!influencerId) {
+      return res.status(400).json({ message: "influencerId is required" });
+    }
+
     if (!text || !String(text).trim()) {
-      return res.status(400).json({ message: 'text is required' });
+      return res.status(400).json({ message: "text is required" });
     }
 
     const influencer = await Influencer.findOne({ _id: String(influencerId) }).lean();
-    if (!influencer) return res.status(404).json({ message: 'Influencer not found' });
-
-    const d = await Dispute.findOne({ disputeId: id });
-    if (!d) return res.status(404).json({ message: 'Dispute not found' });
-
-    if (d.influencerId !== String(influencerId)) {
-      return res.status(403).json({ message: 'Forbidden' });
+    if (!influencer) {
+      return res.status(404).json({ message: "Influencer not found" });
     }
 
-    if (d.status === 'resolved' || d.status === 'rejected') {
-      return res.status(400).json({ message: 'Cannot comment on a finalized dispute' });
+    const d = await Dispute.findOne({ disputeId: id });
+    if (!d) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    if (d.influencerId !== String(influencerId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (FINALIZED_STATUSES.has(d.status)) {
+      return res.status(400).json({
+        message: "Cannot comment on a finalized dispute",
+      });
     }
 
     const sanitized = await buildAttachmentsFromReq(req, attachments);
 
     d.comments.push({
-      authorRole: 'Influencer',
+      authorRole: "Influencer",
       authorId: String(influencerId),
-      text: String(text),
+      text: String(text).trim(),
       attachments: sanitized,
     });
 
     await d.save();
 
-    // 🔔 Notify Brand
     try {
       const snippet = String(text).trim().slice(0, 120);
       await createAndEmit({
         brandId: d.brandId,
-        type: 'dispute.comment_added',
+        type: "dispute.comment_added",
         title: `New comment on Dispute #${d.disputeId}`,
-        message: `${influencer?.name || 'Influencer'}: ${snippet}${String(text).trim().length > 120 ? '...' : ''}`,
-        entityType: 'dispute',
+        message: `${influencer?.name || "Influencer"}: ${snippet}${String(text).trim().length > 120 ? "..." : ""}`,
+        entityType: "dispute",
         entityId: d.disputeId,
         actionPath: { brand: `/brand/disputes/${d.disputeId}` },
       });
     } catch (e) {
-      console.warn('In-app notify failed (influencerAddComment):', e.message);
+      console.warn("In-app notify failed (influencerAddComment):", e.message);
     }
 
-    return res.status(200).json({ message: 'Comment added' });
+    return res.status(200).json({ message: "Comment added" });
   } catch (err) {
-    console.error('Error in influencerAddComment:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in influencerAddComment:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -2010,32 +2090,32 @@ exports.adminGetById = async (req, res) => {
       const [b, inf, camp, modash] = await Promise.all([
         brandObjectId
           ? Brand.findOne({ _id: brandObjectId })
-              .select("_id name email createdAt logoUrl brandLogoUrl profileImage profilePic image avatar avatarUrl")
-              .lean()
+            .select("_id name email createdAt logoUrl brandLogoUrl profileImage profilePic image avatar avatarUrl")
+            .lean()
           : null,
 
         influencerObjectId
           ? Influencer.findOne({ _id: influencerObjectId })
-              .select("_id name email createdAt")
-              .lean()
+            .select("_id name email createdAt")
+            .lean()
           : null,
 
         campaignObjectId
           ? Campaign.findOne({ _id: campaignObjectId })
-              .select("_id campaignTitle")
-              .lean()
+            .select("_id campaignTitle")
+            .lean()
           : null,
 
         d.influencerId
           ? Modash.findOne({
-              $or: [
-                { influencerId: String(d.influencerId) },
-                { influencer: influencerObjectId || d.influencerId },
-              ],
-            })
-              .select("picture handle username provider updatedAt")
-              .sort({ updatedAt: -1 })
-              .lean()
+            $or: [
+              { influencerId: String(d.influencerId) },
+              { influencer: influencerObjectId || d.influencerId },
+            ],
+          })
+            .select("picture handle username provider updatedAt")
+            .sort({ updatedAt: -1 })
+            .lean()
           : null,
       ]);
 
@@ -2140,52 +2220,223 @@ exports.adminGetById = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+exports.adminCreateDisputeEvidence = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      evidenceName,
+      notes = "",
+      attachments = [],
+      adminId,
+    } = req.body || {};
 
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
+    const trimmedEvidenceName = String(evidenceName || "").trim();
+    const trimmedNotes = String(notes || "").trim();
+
+    if (!trimmedEvidenceName) {
+      return res.status(400).json({ message: "Evidence name is required" });
+    }
+
+    const dispute = await Dispute.findOne({ disputeId: id });
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot add evidence to a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const admin =
+      (await resolveAdminModel(req)) ||
+      (adminId
+        ? await Admin.findOne({ adminId: String(adminId) })
+          .select("adminId name email")
+          .lean()
+        : null);
+
+    const uploadedAttachments = await buildAttachmentsFromReq(req, attachments);
+
+    if (!uploadedAttachments.length) {
+      return res.status(400).json({
+        message: "Please attach at least one evidence file",
+      });
+    }
+
+    const actorId =
+      admin?.adminId ||
+      (adminId ? String(adminId) : null) ||
+      req.user?.id ||
+      "system";
+
+    const actorName = admin?.name || req.user?.name || "Admin";
+
+    if (!Array.isArray(dispute.evidence)) {
+      dispute.evidence = [];
+    }
+
+    const previousStatus = dispute.status;
+
+    const evidenceEntry = {
+      evidenceId: uuidv4(),
+      evidenceName: trimmedEvidenceName,
+      notes: trimmedNotes,
+      attachments: uploadedAttachments,
+      createdBy: {
+        role: "Admin",
+        id: String(actorId),
+        name: actorName,
+      },
+      createdAt: new Date(),
+    };
+
+    dispute.evidence.push(evidenceEntry);
+
+    // if (dispute.status !== "evidence_submitted") {
+    //   dispute.status = "evidence_submitted";
+    // }
+
+    if (!Array.isArray(dispute.comments)) {
+      dispute.comments = [];
+    }
+
+    dispute.comments.push({
+      authorRole: "Admin",
+      authorId: String(actorId),
+      text: trimmedNotes
+        ? `Evidence added by Admin: ${trimmedEvidenceName}. Notes: ${trimmedNotes}`
+        : `Evidence added by Admin: ${trimmedEvidenceName}.`,
+      attachments: [],
+    });
+
+    if (previousStatus !== dispute.status) {
+      dispute.comments.push({
+        authorRole: "Admin",
+        authorId: String(actorId),
+        text: `Status updated by Admin: ${STATUS_LABELS[dispute.status]}.`,
+        attachments: [],
+      });
+    }
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        brandId: dispute.brandId,
+        influencerId: dispute.influencerId,
+        type: "dispute.evidence_added",
+        title: `Evidence added to Dispute #${dispute.disputeId}`,
+        message: `${actorName} added evidence "${trimmedEvidenceName}".`,
+        entityType: "dispute",
+        entityId: dispute.disputeId,
+        actionPath: {
+          brand: `/brand/disputes/${dispute.disputeId}`,
+          influencer: `/influencer/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (e) {
+      console.warn(
+        "In-app notify failed (adminCreateDisputeEvidence):",
+        e?.message || e
+      );
+    }
+
+    return res.status(201).json({
+      message: "Evidence added successfully",
+      disputeId: dispute.disputeId,
+      status: dispute.status,
+      evidence: evidenceEntry,
+    });
+  } catch (err) {
+    console.error("Error in adminCreateDisputeEvidence:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
 // Admin add comment (multi-image attachments supported, relaxed auth)
 exports.adminAddComment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { text, attachments = [], adminId } = req.body || {};
+    const { text, attachments = [], adminId, parentCommentId = null } = req.body || {};
 
-    if (!id) return res.status(400).json({ message: 'Dispute id is required' });
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
     if (!text || !String(text).trim()) {
-      return res.status(400).json({ message: 'text is required' });
+      return res.status(400).json({ message: "text is required" });
     }
 
     const d = await Dispute.findOne({ disputeId: id });
-    if (!d) return res.status(404).json({ message: 'Dispute not found' });
-
-    if (d.status === 'resolved' || d.status === 'rejected') {
-      return res
-        .status(400)
-        .json({ message: 'Cannot comment on a finalized dispute' });
+    if (!d) {
+      return res.status(404).json({ message: "Dispute not found" });
     }
 
-    const admin = adminId
-      ? await Admin.findOne({ adminId: String(adminId) })
-        .select('adminId name email')
-        .lean()
-      : null;
+    if (FINALIZED_STATUSES.has(d.status)) {
+      return res.status(400).json({
+        message: "Cannot comment on a finalized dispute",
+      });
+    }
 
-    // body attachments + uploaded files
+    const admin =
+      (adminId
+        ? await Admin.findOne({ adminId: String(adminId) })
+          .select("adminId name email")
+          .lean()
+        : null) || (await resolveAdminModel(req));
+
     const sanitized = await buildAttachmentsFromReq(req, attachments);
 
+    let parentComment = null;
+    if (parentCommentId) {
+      parentComment = Array.isArray(d.comments)
+        ? d.comments.find(
+          (comment) => String(comment.commentId) === String(parentCommentId)
+        )
+        : null;
+
+      if (!parentComment) {
+        return res.status(404).json({ message: "Parent comment not found" });
+      }
+
+      if (parentComment.authorRole !== "Brand") {
+        return res.status(400).json({
+          message: "Replies can only be created for brand comments",
+        });
+      }
+    }
+
+    const actorId = admin?.adminId || adminId || req.user?.id || "system";
+
     d.comments.push({
-      authorRole: 'Admin',
-      authorId: admin ? admin.adminId : adminId || 'system',
-      text: String(text),
+      authorRole: "Admin",
+      authorId: String(actorId),
+      text: String(text).trim(),
       attachments: sanitized,
+      parentCommentId: parentComment ? String(parentComment.commentId) : null,
+      threadRootCommentId: parentComment
+        ? String(parentComment.threadRootCommentId || parentComment.commentId)
+        : null,
     });
 
     await d.save();
+
     try {
       await createAndEmit({
         brandId: d.brandId,
         influencerId: d.influencerId,
-        type: 'dispute.admin_comment',
-        title: `Admin comment on Dispute #${d.disputeId}`,
-        message: `Admin added a comment.`,
-        entityType: 'dispute',
+        type: parentComment ? "dispute.admin_reply" : "dispute.admin_comment",
+        title: parentComment
+          ? `Admin replied on Dispute #${d.disputeId}`
+          : `Admin comment on Dispute #${d.disputeId}`,
+        message: parentComment
+          ? "Admin replied in the discussion."
+          : "Admin added a comment.",
+        entityType: "dispute",
         entityId: d.disputeId,
         actionPath: {
           brand: `/brand/disputes/${d.disputeId}`,
@@ -2193,12 +2444,15 @@ exports.adminAddComment = async (req, res) => {
         },
       });
     } catch (e) {
-      console.warn('In-app notify failed (adminAddComment):', e.message);
+      console.warn("In-app notify failed (adminAddComment):", e.message);
     }
-    return res.status(200).json({ message: 'Comment added' });
+
+    return res.status(200).json({
+      message: parentComment ? "Reply added" : "Comment added",
+    });
   } catch (err) {
-    console.error('Error in adminAddComment:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in adminAddComment:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -2348,17 +2602,21 @@ exports.adminUpdateStatus = async (req, res) => {
   try {
     const { disputeId, status, resolution, adminId } = req.body || {};
 
-    if (!disputeId || status === undefined || status === null || status === '') {
-      return res
-        .status(400)
-        .json({ message: 'disputeId and status are required' });
+    if (!disputeId || status === undefined || status === null || status === "") {
+      return res.status(400).json({
+        message: "disputeId and status are required",
+      });
     }
 
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: false });
-    if (!normalizedStatus) return res.status(400).json({ message: 'Invalid status' });
+    if (!normalizedStatus) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
 
     const d = await Dispute.findOne({ disputeId });
-    if (!d) return res.status(404).json({ message: 'Dispute not found' });
+    if (!d) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
 
     const prevStatus = d.status;
     d.status = normalizedStatus;
@@ -2366,34 +2624,46 @@ exports.adminUpdateStatus = async (req, res) => {
     let admin = null;
     if (adminId) {
       admin = await Admin.findOne({ adminId: String(adminId) })
-        .select('adminId name email')
+        .select("adminId name email")
         .lean();
+    }
+
+    const actorId = admin ? admin.adminId : adminId || "system";
+
+    if (prevStatus !== normalizedStatus) {
+      d.comments.push({
+        authorRole: "Admin",
+        authorId: actorId,
+        text: `Status updated by Admin: ${STATUS_LABELS[normalizedStatus] || normalizedStatus}.`,
+        attachments: [],
+      });
     }
 
     if (resolution && String(resolution).trim()) {
       d.comments.push({
-        authorRole: 'Admin',
-        authorId: admin ? admin.adminId : adminId || 'system',
-        text: String(resolution),
+        authorRole: "Admin",
+        authorId: actorId,
+        text: String(resolution).trim(),
+        attachments: [],
       });
     }
 
     await d.save();
 
-    // 🔔 IN-APP NOTIFICATION (status changed -> BOTH must receive)
     try {
-      const adminName = admin?.name || 'Admin';
-      const resolutionText = resolution && String(resolution).trim()
-        ? ` Note: ${String(resolution).trim()}`
-        : '';
+      const adminName = admin?.name || "Admin";
+      const resolutionText =
+        resolution && String(resolution).trim()
+          ? ` Note: ${String(resolution).trim()}`
+          : "";
 
       await createAndEmit({
         brandId: d.brandId,
         influencerId: d.influencerId,
-        type: 'dispute.status_updated',
+        type: "dispute.status_updated",
         title: `Dispute #${d.disputeId} status updated`,
-        message: `${adminName} changed status from "${prevStatus}" to "${d.status}".${resolutionText}`,
-        entityType: 'dispute',
+        message: `${adminName} changed status from "${STATUS_LABELS[prevStatus] || prevStatus}" to "${STATUS_LABELS[d.status] || d.status}".${resolutionText}`,
+        entityType: "dispute",
         entityId: d.disputeId,
         actionPath: {
           brand: `/brand/disputes/${d.disputeId}`,
@@ -2401,18 +2671,17 @@ exports.adminUpdateStatus = async (req, res) => {
         },
       });
     } catch (e) {
-      console.warn('In-app notify failed (adminUpdateStatus):', e.message);
+      console.warn("In-app notify failed (adminUpdateStatus):", e.message);
     }
 
-    // existing email on resolved
-    if (d.status === 'resolved') {
+    if (d.status === "resolved") {
       const [brand, influencer] = await Promise.all([
         Brand.findOne({ brandId: d.brandId }).lean(),
         Influencer.findOne({ influencerId: d.influencerId }).lean(),
       ]);
 
       const resolutionSummary =
-        resolution || 'The dispute has been reviewed and resolved by our team.';
+        resolution || "The dispute has been reviewed and resolved by our team.";
 
       if (brand && brand.email) {
         await handleSendDisputeResolved({
@@ -2422,6 +2691,7 @@ exports.adminUpdateStatus = async (req, res) => {
           resolutionSummary,
         });
       }
+
       if (influencer && influencer.email) {
         await handleSendDisputeResolved({
           email: influencer.email,
@@ -2432,10 +2702,14 @@ exports.adminUpdateStatus = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ message: 'Status updated' });
+    return res.status(200).json({
+      message: "Status updated",
+      status: d.status,
+      statusLabel: STATUS_LABELS[d.status] || d.status,
+    });
   } catch (err) {
-    console.error('Error in adminUpdateStatus:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in adminUpdateStatus:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 

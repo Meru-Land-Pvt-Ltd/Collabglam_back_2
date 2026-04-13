@@ -39,7 +39,28 @@ const attachmentSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+const evidenceSchema = new mongoose.Schema(
+  {
+    evidenceId: { type: String, required: true, default: uuidv4 },
+    evidenceName: { type: String, required: true, trim: true },
+    notes: { type: String, default: "" },
 
+    attachments: { type: [attachmentSchema], default: [] },
+
+    createdBy: {
+      role: {
+        type: String,
+        enum: ["Admin", "Brand", "Influencer"],
+        required: true,
+      },
+      id: { type: String, required: true },
+      name: { type: String, default: null },
+    },
+
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
 const commentSchema = new mongoose.Schema(
   {
     commentId: { type: String, required: true, default: uuidv4 },
@@ -51,6 +72,10 @@ const commentSchema = new mongoose.Schema(
     authorId: { type: String, required: true },
     text: { type: String, required: true },
     attachments: { type: [attachmentSchema], default: [] },
+
+    parentCommentId: { type: String, default: null },
+    threadRootCommentId: { type: String, default: null },
+
     createdAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -81,7 +106,7 @@ const disputeSchema = new mongoose.Schema(
 
     subject: { type: String, required: true },
     description: { type: String, default: "" },
-
+    evidence: { type: [evidenceSchema], default: [] },
     issueType: {
       type: [
         {
@@ -100,12 +125,17 @@ const disputeSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["open",
+      enum: [
+        "open",
         "in_review",
         "awaiting_user",
+        "evidence_submitted",
+        "in_negotiation",
+        "resolution_proposed",
         "resolved",
         "rejected",
-        "revoked",],
+        "revoked",
+      ],
       default: "open",
     },
 
