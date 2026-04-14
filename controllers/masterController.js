@@ -2,7 +2,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const Campaign = require("../models/campaign");
-const  OpenAI = require("openai");
+const OpenAI = require("openai");
 const BrandInfo = require("../models/brandInfo")
 const cheerio = require("cheerio");
 const { GoogleGenAI } = require("@google/genai");
@@ -1284,8 +1284,8 @@ async function enrichCampaignsWithAssignments(campaignDocs = []) {
 
   const assignees = assigneeIds.length
     ? await AdminModel.find({ _id: { $in: assigneeIds } })
-        .select("_id name email role")
-        .lean()
+      .select("_id name email role")
+      .lean()
     : [];
 
   const assigneeMap = new Map();
@@ -1480,6 +1480,57 @@ const brandProperties = {
   support_email: { type: "string" },
   public_phone: { type: "string" },
   public_address: { type: "string" },
+  core_offerings: { type: "string" },
+  flagship_products: { type: "string" },
+  key_products_or_services: { type: "string" },
+  value_proposition: { type: "string" },
+  unique_selling_proposition: { type: "string" },
+  target_audience: { type: "string" },
+  ideal_customer_profile: { type: "string" },
+  brand_positioning: { type: "string" },
+  key_differentiators: { type: "string" },
+  use_cases: { type: "string" },
+
+  blog_url: { type: "string" },
+  newsroom_url: { type: "string" },
+  press_page_url: { type: "string" },
+  resources_page_url: { type: "string" },
+  case_studies_url: { type: "string" },
+  webinars_url: { type: "string" },
+  podcast_url: { type: "string" },
+  content_strategy: { type: "string" },
+  content_pillars: { type: "string" },
+  content_tone: { type: "string" },
+  blog_summary: { type: "string" },
+  recent_blog_titles: { type: "string" },
+  recent_blog_topics: { type: "string" },
+  recent_news_or_launches: { type: "string" },
+
+  leadership_team: { type: "string" },
+  founder_name: { type: "string" },
+  ceo_name: { type: "string" },
+  key_executives: { type: "string" },
+  leadership_overview: { type: "string" },
+  notable_partnerships: { type: "string" },
+  notable_clients: { type: "string" },
+  notable_partnerships_or_clients: { type: "string" },
+  investors_or_backers: { type: "string" },
+
+  marketplaces_or_store_presence: { type: "string" },
+  retail_presence: { type: "string" },
+  distributor_network: { type: "string" },
+
+  customer_support_channels: { type: "string" },
+  faq_page_url: { type: "string" },
+  help_center_url: { type: "string" },
+  return_policy_summary: { type: "string" },
+  warranty_summary: { type: "string" },
+  shipping_regions: { type: "string" },
+  company_mission: { type: "string" },
+  company_vision: { type: "string" },
+  app_store_presence: { type: "string" },
+  play_store_url: { type: "string" },
+  app_store_url: { type: "string" },
 };
 
 const brandJsonSchema = {
@@ -1594,8 +1645,8 @@ function mergeStructuredObjects(primary = {}, fallback = {}, keys = []) {
     output[key] = hasValue(primary[key])
       ? primary[key]
       : hasValue(fallback[key])
-      ? fallback[key]
-      : "";
+        ? fallback[key]
+        : "";
   }
   return output;
 }
@@ -1865,44 +1916,31 @@ Return only JSON.
 `;
 }
 
-function buildProfilePrompt(brandName, resolved, scraped, options = {}) {
-  const { withSearch = false } = options;
-
+function buildProfilePrompt(brandName, resolved, scraped) {
   return `
-You are a brand research assistant.
+You are an Elite Business Research Analyst and Data Forensics Expert conducting a comprehensive, deep-dive analysis into the brand: "${brandName}".
 
-Original input: "${brandName}"
+Resolved Context:
+- Name: ${resolved?.brand_name}
+- Domain: ${resolved?.domain}
+- Website: ${resolved?.website_url}
 
-Resolved identity:
-- matched: ${resolved?.matched === true ? "true" : "false"}
-- brand_name: ${resolved?.brand_name || "null"}
-- domain: ${resolved?.domain || "null"}
-- website_url: ${resolved?.website_url || "null"}
-- industry: ${resolved?.industry || "null"}
-- headquarters_country: ${resolved?.headquarters_country || "null"}
+Web Evidence Scraped:
+"""${scraped?.raw_website_text || "No direct text available; rely on your internal knowledge and live web search capabilities."}"""
 
-Public website evidence:
-- about_page_url: ${scraped?.about_page_url || "null"}
-- contact_page_url: ${scraped?.contact_page_url || "null"}
-- scraped_text:
-"""${scraped?.raw_website_text || ""}"""
+INSTRUCTIONS:
+1. NARRATIVE EXCELLENCE: Every field must be a highly detailed, professional, flowing narrative paragraph. Absolutely no bullet points, fragments, or empty strings.
+2. CONTENT FORENSICS (BLOGS & RESOURCES): You must forensically analyze their content marketing ecosystem. 
+   - Identify the specific URL patterns for their blog, newsroom, case studies, whitepapers, or webinars.
+   - Summarize their core content pillars and the primary topics they write about.
+   - Describe the brand's tone of voice, the target audience for these publications, and highlight any specific themes, recent initiatives, or flagship topics detected in the scraped data.
+3. PRODUCT & MARKET POSITIONING: Clearly delineate their core offerings, flagship products, or services. Detail their unique value proposition (UVP), their ideal customer profile (ICP), and how they differentiate themselves from competitors.
+4. FINANCIAL & METRICS DETAIL: Describe funding rounds, revenue ranges, and valuation in descriptive USD terms. If exact public data is sparse, you MUST provide a highly educated "Market Comparable" analysis based on their industry size, employee count, and maturity stage.
+5. DIGITAL FOOTPRINT & LEADERSHIP: If available in the data, identify key leadership (Founders/CEO/Executives) and describe their broader digital footprint, including their target social platforms, community engagement strategies, or notable industry partnerships.
+6. BRAND OVERVIEW: The 'brand_description' field must be a rich, authoritative overview of at least 400-500 words covering their history, core mission, product value proposition, and market positioning.
+7. EXHAUSTIVE DATA COMPLETENESS: Do not leave any fields blank or return "null". If a specific metric is completely unknown, explain *why* it might not be public (e.g., "As an early-stage private company operating in stealth...") and provide the closest industry estimate or standard practice.
 
-Instructions:
-1. ${withSearch ? "Use live web search plus scraped website text." : "Use provided identity, scraped website text, and model knowledge."}
-2. Every field in the output must be a STRING written as a natural-language sentence or short descriptive paragraph.
-3. Do not return raw numbers, raw arrays, booleans, or plain values without context.
-4. Do not return null, NA, unknown, or blank strings. If something is not clearly available, write a sentence explaining that it could not be clearly identified from public information.
-5. brand_description must be a strong descriptive overview of about 300 to 400 words.
-6. annual_revenue, last_year_revenue, funding_total, and valuation must be written as descriptive USD strings with a dollar symbol, such as: "Last year's revenue was approximately $500,000, reflecting an estimated 20% year-over-year increase."
-7. If public sources mention INR, EUR, CNY, or another currency, convert to USD first before writing the sentence.
-8. operating_regions must be one descriptive sentence, not an array.
-9. contact_email, support_email, sales_email, general_email, contact_phone, and public_phone must also be descriptive sentences, not bare emails or phone numbers.
-10. website_url, domain, social URLs, and page URLs must also be descriptive strings, such as "The official website of the company is https://example.com/."
-11. employee_count, app_downloads, website_traffic_monthly, followers, subscribers, growth_rate, and founded_year must be written as descriptive sentence-style strings.
-12. Prefer official sources first, but you may use reputable public business information for best-effort completion.
-13. Return only valid JSON matching the schema.
-
-Return only JSON.
+Return ONLY a valid JSON object matching the exact requested schema. Do not include any markdown formatting, conversational text, or code blocks outside of the JSON structure.
 `;
 }
 
@@ -2254,7 +2292,7 @@ function mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName) {
     domain: wrapNarrative(
       "domain",
       prefer(aiData.domain, resolved.domain) ||
-        extractDomain(scraped?.website_url || resolved?.website_url || "")
+      extractDomain(scraped?.website_url || resolved?.website_url || "")
     ),
     website_url: wrapNarrative(
       "website_url",
@@ -2329,12 +2367,58 @@ function mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName) {
     public_address: wrapNarrative("public_address", prefer(aiData.public_address, scraped?.public_address)),
   };
 }
+async function generateBlogSummary(blogText, provider) {
+  if (!blogText) return null;
 
+  const prompt = `
+You are an expert brand analyst.
+
+Summarize the blog/content strategy of this company.
+
+Focus on:
+- What topics they write about
+- Target audience
+- Content tone
+- Marketing intent (education, SEO, storytelling, product-driven)
+- How they use content for growth
+
+Keep it under 120 words.
+
+CONTENT:
+${blogText.slice(0, 8000)}
+`;
+
+  try {
+    if (provider === "gemini") {
+      const result = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+      });
+
+      return result.text || null;
+    }
+
+    if (provider === "openai") {
+      const result = await openai.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      return result.choices?.[0]?.message?.content || null;
+    }
+  } catch (err) {
+    console.warn("Blog summary failed:", err.message);
+    return null;
+  }
+
+  return null;
+}
 exports.BrandInformation = async (req, res) => {
   try {
     const brandName = req.body.brandName || req.body.brand_name;
     const forceRefresh = req.body.forceRefresh === true;
-    const requestedProvider = req.body.provider || req.body.ai_provider || DEFAULT_PROVIDER;
+    // const requestedProvider = req.body.provider || req.body.ai_provider || DEFAULT_PROVIDER;
+    const requestedProvider = DEFAULT_PROVIDER
     const effectiveProvider = resolveEffectiveProvider(requestedProvider);
 
     if (!brandName || typeof brandName !== "string" || !brandName.trim()) {
@@ -2396,7 +2480,17 @@ exports.BrandInformation = async (req, res) => {
       scraped,
       effectiveProvider
     );
-
+    let blogSummary = null;
+    if (scraped?.blog_page_text) {
+      try {
+        blogSummary = await generateBlogSummary(
+          scraped.blog_page_text,
+          effectiveProvider
+        );
+      } catch (e) {
+        console.warn("blog summary error:", e.message);
+      }
+    }
     const finalData = {
       brand_id: existingBrand?.brand_id || crypto.randomUUID(),
       normalized_brand_name: normalizedBrandName,
@@ -2404,11 +2498,21 @@ exports.BrandInformation = async (req, res) => {
 
       ...profileResult.parsed,
 
+      blog_url:
+        profileResult.parsed?.blog_url ||
+        scraped?.blog_url ||
+        scraped?.website_pages_scraped?.find(
+          (url) => /\/blogs?(\/|$)/i.test(url)
+        ) ||
+        null,
+
+      blog_summary: blogSummary || null,   // ✅ ADD THIS
+      blog_page_text: scraped?.blog_page_text || null,
+
       website_pages_scraped: Array.isArray(scraped?.website_pages_scraped)
         ? scraped.website_pages_scraped
         : [],
       last_scraped_at: scraped?.last_scraped_at || null,
-
     };
 
     const savedBrand = await BrandInfo.findOneAndUpdate(
@@ -2433,6 +2537,83 @@ exports.BrandInformation = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to generate and save brand data",
+      error: error.message,
+    });
+  }
+};
+
+exports.ListBrand = async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      sortBy = "createdAt",
+      order = "desc",
+    } = req.query;
+
+    page = parseInt(page, 10) || 1;
+    limit = parseInt(limit, 10) || 10;
+
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100;
+
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+
+    if (search && search.trim()) {
+      filter.$or = [
+        { brand_name: { $regex: search.trim(), $options: "i" } },
+        { input_brand_name: { $regex: search.trim(), $options: "i" } },
+        { normalized_brand_name: { $regex: search.trim(), $options: "i" } },
+        { brand_alias: { $regex: search.trim(), $options: "i" } },
+        { domain: { $regex: search.trim(), $options: "i" } },
+      ];
+    }
+
+    const allowedSortFields = [
+      "createdAt",
+      "updatedAt",
+      "brand_name",
+      "input_brand_name",
+      "normalized_brand_name",
+      "founded_year",
+    ];
+
+    const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortOrder = order === "asc" ? 1 : -1;
+
+    const [brands, totalBrands] = await Promise.all([
+      BrandInfo.find(filter)
+        .sort({ [finalSortBy]: sortOrder })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      BrandInfo.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.ceil(totalBrands / limit);
+
+    return res.status(200).json({
+      success: true,
+      message: "Brands fetched successfully",
+      data: brands,
+      pagination: {
+        totalBrands,
+        totalPages,
+        currentPage: page,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("ListBrand error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch brands",
       error: error.message,
     });
   }
