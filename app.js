@@ -57,6 +57,7 @@ const pipelineRoutes = require("./routes/influencerPipeline");
 const brandOuteachRoutes = require("./routes/brandOutreachRoutes");
 const brandNetworkRoutes = require("./routes/brandNetworkRoutes");
 const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
+const instantlytestRoutes = require("./routes/instantlyTestRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -380,6 +381,9 @@ app.use("/brand-network", brandNetworkRoutes);
 app.use("/brand-outreach", brandOuteachRoutes);
 app.use("/pitch-folders", require("./routes/pitchFolderRoutes"));
 app.use("/payment-details", paymentDetailsRoutes);
+// app.use("/instantly", instantlytestRoutes);
+app.use("/instantly/oauth", require("./routes/instantlyOAuthRoutes"));
+app.use("/instantly", require("./routes/instantlyRoutes"));
 
 /* =========================================================
    404 HANDLER

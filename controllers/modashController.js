@@ -1115,6 +1115,345 @@ function buildPlatformBody(platform, body, opts) {
   return sanitizeYouTubeBody(body, { relax: opts && opts.relax });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function pickPostStatNumber(post, keys = []) {
+  const stats = (post && post.stats) || {};
+  for (const key of keys) {
+    const value = stats[key];
+    const num = toNum(value);
+    if (num !== undefined && num >= 0) return num;
+  }
+  return undefined;
+}
+
+function normalizeAiSearchItem(item, platform) {
+  const username = cleanStr(item && item.username).replace(/^@/, '') || undefined;
+  const userId = cleanStr(item && item.userId) || undefined;
+  const matchedPosts = Array.isArray(item && item.matchedPosts) ? item.matchedPosts : [];
+  const recentPosts = Array.isArray(item && item.recentPosts) ? item.recentPosts : [];
+
+  const viewsFromMatched = matchedPosts
+    .map((post) =>
+      pickPostStatNumber(post, ['viewsCount', 'playsCount', 'videoViewsCount', 'views', 'plays'])
+    )
+    .filter((num) => num !== undefined);
+
+  const averageViews = viewsFromMatched.length
+    ? Math.round(viewsFromMatched.reduce((sum, num) => sum + num, 0) / viewsFromMatched.length)
+    : undefined;
+
+  const category = cleanStr(item && item.accountCategory) || undefined;
+
+  return {
+    userId,
+    username,
+    handle: username || undefined,
+    fullname: cleanStr(item && item.fullName) || '',
+    followers: toNum(item && item.followersCount) || 0,
+    engagementRate: toNum(item && item.engagementRate) || 0,
+    engagements: undefined,
+    averageViews,
+    picture: cleanStr(item && item.profilePicture) || undefined,
+    url: buildPublicProfileUrl(platform, username, '', userId),
+    isVerified: false,
+    isPrivate: false,
+    platform,
+    bio: undefined,
+    country: undefined,
+    state: undefined,
+    city: undefined,
+    location: undefined,
+    language: undefined,
+    categories: category ? [category] : [],
+    category,
+    primaryCategory: category,
+    matchedPosts,
+    recentPosts,
+    accountCategory: category,
+    searchType: 'ai',
+    source: 'ai',
+    aiMatchedPostsCount: matchedPosts.length,
+  };
+}
+
+function buildAiSearchBody(platform, payload = {}) {
+  const ai = payload.ai || {};
+  const filters = deepClone(ai.filters || payload.filters || {});
+
+  if (Array.isArray(ai.brands) && ai.brands.length) {
+    filters.brands = ai.brands;
+  }
+
+  return {
+    page: ai.page != null ? ai.page : payload.page != null ? payload.page : 0,
+    query: cleanStr(ai.query || payload.query || ''),
+    filters,
+  };
+}
+
+function collectStandardSearchItems(platform, data) {
+  const bag = []
+    .concat(Array.isArray(data && data.results) ? data.results : [])
+    .concat(Array.isArray(data && data.items) ? data.items : [])
+    .concat(Array.isArray(data && data.influencers) ? data.influencers : [])
+    .concat(Array.isArray(data && data.directs) ? data.directs : [])
+    .concat(Array.isArray(data && data.lookalikes) ? data.lookalikes : [])
+    .concat(Array.isArray(data && data.users) ? data.users : [])
+    .concat(Array.isArray(data && data.channels) ? data.channels : []);
+
+  return bag.map((item) => {
+    const normalized = normalizeSearchItem(item, platform);
+    normalized.searchType = 'standard';
+    normalized.source = 'standard';
+    return normalized;
+  });
+}
+
+async function runStandardPlatformSearch(platform, body) {
+  const firstBody = buildPlatformBody(platform, body);
+  let data = await modashPOST(`/${platform}/search`, firstBody);
+
+  const enableFallback = (process.env.MODASH_YT_FALLBACK || '1') !== '0';
+  if (platform === 'youtube' && enableFallback && Number((data && data.total) || 0) === 0) {
+    const retryBody = buildPlatformBody(platform, body, { relax: true });
+    try {
+      const retryData = await modashPOST(`/${platform}/search`, retryBody);
+      if (retryData && Number((retryData && retryData.total) || 0) > 0) {
+        data = retryData;
+      }
+    } catch {
+      // ignore youtube fallback retry errors
+    }
+  }
+
+  return {
+    platform,
+    kind: 'standard',
+    data,
+    total: Number((data && data.total) || 0),
+    results: collectStandardSearchItems(platform, data),
+  };
+}
+
+async function runAiPlatformSearch(platform, payload) {
+  const body = buildAiSearchBody(platform, payload);
+  const data = await modashPOST(`/ai/${platform}/text-search`, body);
+  const profiles = Array.isArray(data && data.profiles) ? data.profiles : [];
+
+  return {
+    platform,
+    kind: 'ai',
+    data,
+    total: Number((data && data.total) || 0),
+    results: profiles.map((item) => normalizeAiSearchItem(item, platform)),
+  };
+}
+
+function sortUnifiedResults(items = []) {
+  return items.slice().sort((a, b) => {
+    const aAi = a.searchType === 'ai' ? 1 : 0;
+    const bAi = b.searchType === 'ai' ? 1 : 0;
+    if (bAi !== aAi) return bAi - aAi;
+    if ((b.aiMatchedPostsCount || 0) !== (a.aiMatchedPostsCount || 0)) {
+      return (b.aiMatchedPostsCount || 0) - (a.aiMatchedPostsCount || 0);
+    }
+    if (!!b.isVerified !== !!a.isVerified) return b.isVerified ? 1 : -1;
+    if ((b.followers || 0) !== (a.followers || 0)) return (b.followers || 0) - (a.followers || 0);
+    if ((b.engagementRate || 0) !== (a.engagementRate || 0)) {
+      return (b.engagementRate || 0) - (a.engagementRate || 0);
+    }
+    return String(a.username || '').localeCompare(String(b.username || ''));
+  });
+}
+
+function mergeUnifiedSearchItems(items = []) {
+  const map = new Map();
+
+  for (const item of items) {
+    const keyBase =
+      (item.userId && String(item.userId).toLowerCase()) ||
+      (item.username && String(item.username).toLowerCase()) ||
+      (item.url && String(item.url).toLowerCase());
+
+    if (!keyBase) continue;
+
+    const key = `${item.platform}:${keyBase}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, item);
+      continue;
+    }
+
+    const primary = betterSearchResult(prev, item);
+    const secondary = primary === prev ? item : prev;
+    const merged = mergeSearchItem(primary, secondary);
+
+    if (!Array.isArray(merged.matchedPosts) || !merged.matchedPosts.length) {
+      merged.matchedPosts = Array.isArray(primary.matchedPosts) && primary.matchedPosts.length
+        ? primary.matchedPosts
+        : secondary.matchedPosts;
+    }
+
+    if (!Array.isArray(merged.recentPosts) || !merged.recentPosts.length) {
+      merged.recentPosts = Array.isArray(primary.recentPosts) && primary.recentPosts.length
+        ? primary.recentPosts
+        : secondary.recentPosts;
+    }
+
+    if (!merged.accountCategory) {
+      merged.accountCategory = primary.accountCategory || secondary.accountCategory;
+    }
+
+    merged.aiMatchedPostsCount = Math.max(
+      Number(primary.aiMatchedPostsCount || 0),
+      Number(secondary.aiMatchedPostsCount || 0)
+    );
+
+    merged.searchType =
+      primary.searchType === 'ai' || secondary.searchType === 'ai'
+        ? (primary.searchType === 'standard' || secondary.searchType === 'standard' ? 'combined' : 'ai')
+        : 'standard';
+
+    merged.source = merged.searchType;
+    map.set(key, merged);
+  }
+
+  return Array.from(map.values());
+}
+
+async function frontendUnifiedSearch(req, res) {
+  try {
+    const payload = req.body || {};
+    const brandId = cleanStr(payload.brandId || payload.brand_id || '');
+
+    if (!brandId) {
+      return res.status(400).json({ error: 'brandId is required for search' });
+    }
+
+    try {
+      await ensureSearchQuota(brandId);
+    } catch (e) {
+      if (e.code === 'QUOTA_EXCEEDED') {
+        return res.status(403).json({
+          error: 'You have reached your monthly search limit.',
+          meta: e.meta,
+        });
+      }
+      throw e;
+    }
+
+    const requestedPlatforms = Array.isArray(payload.platforms) && payload.platforms.length
+      ? payload.platforms
+      : ['instagram', 'youtube', 'tiktok'];
+
+    const platforms = [];
+    for (const rawPlatform of requestedPlatforms) {
+      const platform = normalizePlatform(rawPlatform);
+      if (!platform) {
+        return res.status(400).json({ error: `Unsupported platform: ${rawPlatform}` });
+      }
+      if (!platforms.includes(platform)) platforms.push(platform);
+    }
+
+    const searchMode = cleanStr(payload.searchMode || payload.mode || '').toLowerCase();
+    const hasStandardBody = !!payload.body;
+    const hasAiConfig = !!payload.ai;
+
+    const doStandard =
+      searchMode === 'combined' ||
+      searchMode === 'all' ||
+      searchMode === 'standard' ||
+      (!searchMode && hasStandardBody);
+
+    const doAi =
+      searchMode === 'combined' ||
+      searchMode === 'all' ||
+      searchMode === 'ai' ||
+      (!searchMode && hasAiConfig);
+
+    if (!doStandard && !doAi) {
+      return res.status(400).json({
+        error: 'Provide searchMode=standard|ai|combined and body and/or ai payload.',
+      });
+    }
+
+    if (doStandard && !payload.body) {
+      return res.status(400).json({ error: 'body is required for standard search.' });
+    }
+
+    if (doAi && !cleanStr(payload?.ai?.query || payload?.query || '')) {
+      return res.status(400).json({ error: 'ai.query is required for AI search.' });
+    }
+
+    const aiDelayMs = Math.max(
+      0,
+      parseInt(String(payload.aiDelayMs ?? process.env.MODASH_AI_DELAY_MS ?? 1100), 10) || 0
+    );
+
+    const responses = [];
+
+    if (doStandard) {
+      for (const platform of platforms) {
+        const result = await runStandardPlatformSearch(platform, payload.body);
+        responses.push(result);
+      }
+    }
+
+    if (doAi) {
+      let aiCallIndex = 0;
+      for (const platform of platforms) {
+        if (aiCallIndex > 0 && aiDelayMs > 0) {
+          await sleep(aiDelayMs);
+        }
+        const result = await runAiPlatformSearch(platform, payload);
+        responses.push(result);
+        aiCallIndex += 1;
+      }
+    }
+
+    const merged = mergeUnifiedSearchItems(
+      responses.flatMap((entry) => Array.isArray(entry.results) ? entry.results : [])
+    );
+
+    const cachedEnriched = await enrichResultsFromCache(merged);
+    const sortedResults = sortUnifiedResults(cachedEnriched);
+
+    const standardTotal = responses
+      .filter((entry) => entry.kind === 'standard')
+      .reduce((sum, entry) => sum + Number(entry.total || 0), 0);
+
+    const aiTotal = responses
+      .filter((entry) => entry.kind === 'ai')
+      .reduce((sum, entry) => sum + Number(entry.total || 0), 0);
+
+    return res.json({
+      searchMode: doStandard && doAi ? 'combined' : doAi ? 'ai' : 'standard',
+      results: sortedResults,
+      total: standardTotal + aiTotal,
+      unique: sortedResults.length,
+      meta: {
+        standardTotal,
+        aiTotal,
+        platforms,
+        aiDelayMs: doAi ? aiDelayMs : 0,
+        perPlatform: responses.map((entry) => ({
+          platform: entry.platform,
+          kind: entry.kind,
+          total: entry.total,
+          resultCount: Array.isArray(entry.results) ? entry.results.length : 0,
+        })),
+      },
+    });
+  } catch (err) {
+    const safe = buildSafeErrorMessage(err, 'Unified search failed');
+    const status = (err && err.status) || 400;
+    return res.status(status).json({ error: safe });
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                              Saved filters                                 */
 /* -------------------------------------------------------------------------- */
@@ -1500,14 +1839,21 @@ async function frontendReport(req, res) {
     const adminId = cleanStr(req.query.adminId || req.query.admin_id || '');
     const isAdmin = !!adminId;
 
-    if (!brandId && !adminId) {
+    // ✅ np=1 => do not consume brand profile-view credit
+    const skipProfileCredit =
+      req.query.np === '1' ||
+      req.query.np === 'true' ||
+      req.query.noProfileCredit === '1' ||
+      req.query.noProfileCredit === 'true';
+
+    if (!skipProfileCredit && !brandId && !adminId) {
       return res.status(400).json({ error: 'brandId or adminId is required for profile views' });
     }
 
     const platform = normalizePlatform(req.query.platform || '');
-    const userId = cleanStr(req.query.userId || '');
+    const requestedUserId = cleanStr(req.query.userId || '');
     const calculationMethod = toCalcMethod(req.query.calculationMethod);
-    const influencerId = cleanStr(req.query.influencerId || req.query.influencer_id || '') || null;
+    let influencerId = cleanStr(req.query.influencerId || req.query.influencer_id || '') || null;
 
     const forceFresh =
       req.query.force === '1' ||
@@ -1518,29 +1864,58 @@ async function frontendReport(req, res) {
     if (!platform) {
       return res.status(400).json({ error: 'platform must be instagram|tiktok|youtube' });
     }
-    if (!userId) {
+
+    if (!requestedUserId) {
       return res.status(400).json({ error: 'userId is required' });
+    }
+
+    let resolvedUserId = requestedUserId;
+
+    if (mongoose.Types.ObjectId.isValid(requestedUserId)) {
+      try {
+        const localDoc = await ModashProfile.findOne({
+          _id: requestedUserId,
+          provider: platform,
+        })
+          .select({
+            userId: 1,
+            influencerId: 1,
+          })
+          .lean();
+
+        if (localDoc?.userId) {
+          resolvedUserId = cleanStr(localDoc.userId);
+          if (!influencerId && localDoc.influencerId) {
+            influencerId = cleanStr(localDoc.influencerId);
+          }
+        }
+      } catch (resolveErr) {
+        console.error('[frontendReport] Failed to resolve local Modash _id:', resolveErr);
+      }
     }
 
     const now = new Date();
     const periodKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const shouldChargeProfileView = !skipProfileCredit && !isAdmin && !!brandId;
+
     let alreadyViewedThisPeriod = false;
 
-    if (!isAdmin && brandId) {
+    if (shouldChargeProfileView) {
       try {
         const existingView = await BrandProfileView.findOne({
           brandId,
           platform,
-          userId,
+          userId: resolvedUserId,
           periodKey,
         }).lean();
+
         alreadyViewedThisPeriod = !!existingView;
       } catch (e) {
         console.error('[frontendReport] Failed to check BrandProfileView:', e.message);
       }
     }
 
-    if (!isAdmin && brandId && !alreadyViewedThisPeriod) {
+    if (shouldChargeProfileView && !alreadyViewedThisPeriod) {
       try {
         await ensureProfileQuota(brandId);
       } catch (e) {
@@ -1556,19 +1931,27 @@ async function frontendReport(req, res) {
 
     if (!forceFresh) {
       try {
-        const cached = await findCachedReport({ platform, userId, influencerId });
+        const cached = await findCachedReport({
+          platform,
+          userId: resolvedUserId,
+          influencerId,
+        });
+
         if (cached && cached.providerRaw) {
           const out = Object.assign({}, cached.providerRaw);
+
           if (cached.lastFetchedAt) {
             const d = new Date(cached.lastFetchedAt);
-            if (!isNaN(d.getTime())) out._lastFetchedAt = d.toISOString();
+            if (!isNaN(d.getTime())) {
+              out._lastFetchedAt = d.toISOString();
+            }
           }
 
-          if (!isAdmin && brandId) {
+          if (shouldChargeProfileView) {
             await recordBrandProfileView({
               brandId,
               platform,
-              userId,
+              userId: resolvedUserId,
               influencerId,
               periodKey,
               at: now,
@@ -1584,9 +1967,10 @@ async function frontendReport(req, res) {
 
     let reportJSON;
     try {
-      reportJSON = await modashGET(`/${platform}/profile/${encodeURIComponent(userId)}/report`, {
-        calculationMethod,
-      });
+      reportJSON = await modashGET(
+        `/${platform}/profile/${encodeURIComponent(resolvedUserId)}/report`,
+        { calculationMethod }
+      );
     } catch (apiErr) {
       const raw = (apiErr && apiErr.message) || '';
       let safeMsg = 'Report unavailable';
@@ -1598,6 +1982,7 @@ async function frontendReport(req, res) {
           /api token|developer section|modash|authorization|bearer|modash_api_key|marketer\.modash\.io/i.test(
             String(rawMsg)
           );
+
         safeMsg = isSensitive ? 'Report unavailable' : rawMsg || safeMsg;
       } catch {
         // ignore parsing errors
@@ -1608,23 +1993,27 @@ async function frontendReport(req, res) {
     }
 
     const fetchedAt = new Date();
+
     try {
       const normalized = normalizeReportData(reportJSON);
+
       await upsertModashProfileFromReport(normalized, platform, {
-        userIdFromRequest: userId,
+        userIdFromRequest: resolvedUserId,
         influencerId,
       });
     } catch (saveErr) {
       console.error('[frontendReport] Failed to save Modash profile to database:', saveErr);
     }
 
-    const out = Object.assign({}, reportJSON, { _lastFetchedAt: fetchedAt.toISOString() });
+    const out = Object.assign({}, reportJSON, {
+      _lastFetchedAt: fetchedAt.toISOString(),
+    });
 
-    if (!isAdmin && brandId) {
+    if (shouldChargeProfileView) {
       await recordBrandProfileView({
         brandId,
         platform,
-        userId,
+        userId: resolvedUserId,
         influencerId,
         periodKey,
         at: fetchedAt,
@@ -2256,7 +2645,6 @@ async function getMediaKitLink(req, res) {
     const usernameRx = exactCI(username);
     const handleRx = exactCI(`@${username}`);
 
-    // 1) First try local DB
     let saved = await ModashProfile.findOne({
       provider: platform,
       $or: [
@@ -2268,7 +2656,6 @@ async function getMediaKitLink(req, res) {
       .select('_id provider userId username handle fullname')
       .lean();
 
-    // 2) If not found locally, call Modash API and save it
     if (!saved) {
       const hit = await searchForUsername(platform, username);
 
@@ -2300,12 +2687,18 @@ async function getMediaKitLink(req, res) {
     }
 
     const baseUrl = cleanStr(process.env.CAMPAIGN_BASE_URL || 'http://localhost:3000');
-    const link = `${baseUrl}/mediakit/${saved._id}`;
+
+    // Use provider userId in the public link, not Mongo _id.
+    // Also append platform so the frontend does not silently default to youtube.
+    const publicProfileId = encodeURIComponent(cleanStr(saved.userId) || String(saved._id));
+    const publicPlatform = encodeURIComponent(cleanStr(saved.provider));
+    const link = `${baseUrl}/mediakit/${publicProfileId}?platform=${publicPlatform}&np=1`;
 
     return res.json({
       success: true,
       data: {
         modashId: String(saved._id),
+        userId: cleanStr(saved.userId) || null,
         platform: saved.provider,
         username: saved.username || saved.handle || username,
         link,
@@ -2324,6 +2717,7 @@ async function getMediaKitLink(req, res) {
 module.exports = {
   frontendUsers,
   frontendSearch,
+  frontendUnifiedSearch,
   frontendReport,
 
   resolveProfile,

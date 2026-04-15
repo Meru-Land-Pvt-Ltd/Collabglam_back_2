@@ -15,6 +15,7 @@ const BrandAssigned = require("../models/brandAssigned");
 const mongoose = require("mongoose");
 const INVITE_EXP_MINUTES = Number(process.env.INVITE_EXP_MINUTES || 60);
 const { buildCampaignVisibilityFilter } = require('../utils/campaignAccess');
+const EXECUTIVE_ROLES = [ROLES.IME, ROLES.BME, ROLES.SDR];
 
 // ======================
 // Local Helpers
@@ -134,7 +135,7 @@ function resolveHierarchyFields(inviter, targetRole, explicitParentAdmin) {
     };
   }
 
-  if (inviter.role === ROLES.SUPER_ADMIN && [ROLES.IME, ROLES.BME].includes(role)) {
+  if (inviter.role === ROLES.SUPER_ADMIN && EXECUTIVE_ROLES.includes(role)) {
     return {
       parentAdmin: explicitParentAdmin || null,
       rootAdmin: inviterId,
@@ -142,7 +143,7 @@ function resolveHierarchyFields(inviter, targetRole, explicitParentAdmin) {
     };
   }
 
-  if (inviter.role === ROLES.REVENUE_HEAD && [ROLES.IME, ROLES.BME].includes(role)) {
+  if (inviter.role === ROLES.REVENUE_HEAD && EXECUTIVE_ROLES.includes(role)) {
     return {
       parentAdmin: inviterId,
       rootAdmin: inviterRootAdmin,
@@ -290,10 +291,10 @@ exports.inviteAdmin = async (req, res) => {
 
     let parentAdminDoc = null;
 
-    if (actor.role === ROLES.SUPER_ADMIN && [ROLES.IME, ROLES.BME].includes(role)) {
+    if (actor.role === ROLES.SUPER_ADMIN && EXECUTIVE_ROLES.includes(role)) {
       if (!explicitParentAdmin) {
         return res.status(400).json({
-          message: "parentAdmin is required when Super Admin invites IME/BME directly",
+          message: "parentAdmin is required when Super Admin invites IME/BME/SDR directly",
         });
       }
 
@@ -740,11 +741,11 @@ exports.fullyManagedBrandList = async (req, res) => {
   }
 };
 
-async function validateExecutivesUnderRH({ RHId, bdmId, idmId }) {
+async function validateExecutivesUnderRH({ RHId, bdmId, idmId, sdrId }) {
   const rhId = String(RHId || "").trim();
 
   if (!rhId || !mongoose.isValidObjectId(rhId)) {
-    throw new Error("Valid RHId is required before assigning BME/IME");
+    throw new Error("Valid RHId is required before assigning BME/IME/SDR");
   }
 
   const rh = await AdminModel.findOne({
@@ -788,6 +789,23 @@ async function validateExecutivesUnderRH({ RHId, bdmId, idmId }) {
 
     if (!ime) {
       throw new Error("Selected IME does not belong to the assigned RH");
+    }
+  }
+
+  if (sdrId !== undefined && sdrId !== null && String(sdrId).trim() !== "") {
+    if (!mongoose.isValidObjectId(String(sdrId))) {
+      throw new Error("Invalid sdrId");
+    }
+
+    const sdr = await AdminModel.findOne({
+      _id: sdrId,
+      role: ROLES.SDR,
+      status: "active",
+      parentAdmin: rhId,
+    }).select("_id");
+
+    if (!sdr) {
+      throw new Error("Selected SDR does not belong to the assigned RH");
     }
   }
 }
@@ -1108,18 +1126,17 @@ exports.listExecutiveAdmin = async (req, res) => {
     const filter = { status: "active" };
 
     if (requestedRole) {
-      if (![ROLES.BME, ROLES.IME].includes(requestedRole)) {
+      if (![ROLES.BME, ROLES.IME, ROLES.SDR].includes(requestedRole)) {
         return res.status(400).json({
           success: false,
-          message: "role must be either bme or ime",
+          message: "role must be either bme, ime, or sdr",
         });
       }
       filter.role = requestedRole;
     } else {
-      filter.role = { $in: [ROLES.BME, ROLES.IME] };
+      filter.role = { $in: [ROLES.BME, ROLES.IME, ROLES.SDR] };
     }
 
-    // RH should only see their own team
     if (actorRole === ROLES.REVENUE_HEAD) {
       filter.parentAdmin = adminId;
     }
@@ -1279,8 +1296,8 @@ async function enrichCampaignsWithAssignments(campaignDocs = []) {
 
   const assignees = assigneeIds.length
     ? await AdminModel.find({ _id: { $in: assigneeIds } })
-        .select("_id name email role")
-        .lean()
+      .select("_id name email role")
+      .lean()
     : [];
 
   const assigneeMap = new Map();
