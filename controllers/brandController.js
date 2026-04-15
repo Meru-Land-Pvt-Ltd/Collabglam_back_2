@@ -1,7 +1,8 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
-
+const  OpenAI = require("openai");
+const BrandInfo = require("../models/brandInfo")
 const BrandModelImport = require("../models/brand");
 const VerifyOtpModelImport = require("../models/verifyOtp");
 const OtpTemplateImport = require("../template/otpTemplate");
@@ -11,7 +12,7 @@ const ApiResponseImport = require("../core/http/ApiResponse");
 const HttpStatusImport = require("../core/http/HttpStatus");
 const ApiErrorImport = require("../core/http/ApiError");
 const SubscriptionPlan = require("../models/subscription");
-
+const { uploadBrandProfilePicToS3 } = require("../utils/uploadBase64ImagesToS3");
 const BrandModel =
   BrandModelImport.BrandModel || BrandModelImport.default || BrandModelImport;
 
@@ -1367,12 +1368,43 @@ async function updateBrandProfile(req, res, next) {
     return handleControllerError(next, err, "updateBrandProfile");
   }
 }
+const uploadBrandProfilePic = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Brand profile image is required",
+      });
+    }
+
+    const uploadedImage = await uploadBrandProfilePicToS3(
+      req.file,
+      "brand-profile-pic"
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Brand profile image uploaded successfully",
+      data: uploadedImage,
+    });
+  } catch (error) {
+    console.error("Brand profile image upload error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to upload brand profile image",
+    });
+  }
+};
+
+
 
 module.exports = {
   sendSignupOtp,
   verifyOtpSignUp,
   saveBrandOnboarding,
   signInBrand,
+  uploadBrandProfilePic,
   sendOtpForgotBrand,
   verifyOtpForgotBrand,
   updatePasswordBrand,
@@ -1380,5 +1412,6 @@ module.exports = {
   getBrandLiteById,
   getBrandProfile,
   updateBrandProfile,
+
 };
 
