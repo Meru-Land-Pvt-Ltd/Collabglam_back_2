@@ -5,6 +5,7 @@ const ROLES = {
   REVENUE_HEAD: "revenue_head",
   IME: "ime",
   BME: "bme",
+  SDR: "sdr",
 };
 
 const PROXY_EMAIL_DOMAIN = "team.collabglam.com";

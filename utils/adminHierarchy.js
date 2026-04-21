@@ -85,11 +85,12 @@ function canInviteRole(inviterRole, targetRole) {
       ROLES.REVENUE_HEAD,
       ROLES.IME,
       ROLES.BME,
+      ROLES.SDR,
     ].includes(target);
   }
 
   if (inviter === ROLES.REVENUE_HEAD) {
-    return [ROLES.IME, ROLES.BME].includes(target);
+    return [ROLES.IME, ROLES.BME, ROLES.SDR].includes(target);
   }
 
   return false;

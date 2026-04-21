@@ -57,6 +57,7 @@ const pipelineRoutes = require("./routes/influencerPipeline");
 const brandOuteachRoutes = require("./routes/brandOutreachRoutes");
 const brandNetworkRoutes = require("./routes/brandNetworkRoutes");
 const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
+const instantlytestRoutes = require("./routes/instantlyTestRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -70,13 +71,14 @@ const URLENCODED_LIMIT = process.env.URLENCODED_LIMIT || "50mb";
 const FILE_SIZE_LIMIT_MB = Number(process.env.FILE_SIZE_LIMIT_MB || 100);
 const GRIDFS_BUCKET_NAME = process.env.GRIDFS_BUCKET || "uploads";
 
-const corsOrigins = process.env.FRONTEND_ORIGIN || [
+const defaultCorsOrigins = [
   "https://collabglam.com",
   "http://localhost:3000",
   "http://localhost:3001",
   "http://192.168.1.57:3000",
   "https://mhd.sharemitra.com",
 ];
+
 
 /* =========================================================
    REALTIME SETUP
@@ -93,9 +95,22 @@ app.set("broadcastToGroupChatRoom", sockets.broadcastToGroupChatRoom);
 /* =========================================================
    CORS
 ========================================================= */
+
+const corsOrigins = process.env.FRONTEND_ORIGIN
+  ? process.env.FRONTEND_ORIGIN.split(",").map((item) => item.trim()).filter(Boolean)
+  : defaultCorsOrigins;
+
 app.use(
   cors({
-    origin: corsOrigins,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+
+      if (corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
   })
 );
@@ -380,6 +395,11 @@ app.use("/brand-network", brandNetworkRoutes);
 app.use("/brand-outreach", brandOuteachRoutes);
 app.use("/pitch-folders", require("./routes/pitchFolderRoutes"));
 app.use("/payment-details", paymentDetailsRoutes);
+// app.use("/instantly", instantlytestRoutes);
+app.use("/instantly/oauth", require("./routes/instantlyOAuthRoutes"));
+app.use("/instantly", require("./routes/instantlyRoutes"));
+app.use("/instantly/webhook", require("./routes/instantlyWebhookRoutes"));
+app.use("/outreach", require("./routes/outreachRoutes"));
 
 /* =========================================================
    404 HANDLER

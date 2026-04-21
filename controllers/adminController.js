@@ -1,7 +1,7 @@
+const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 
-const Admin = require("../models/admin");
 const { AdminModel, ROLES } = require("../models/master");
 const Brand = require("../models/brand");
 const { InfluencerModel: Influencer } = require("../models/influencer");
@@ -37,7 +37,7 @@ const {
 
 const { _sendCampaignInvitationInternal } = require("../controllers/emailController");
 
-const ASSIGNEE_MODEL = AdminModel || Admin;
+const ASSIGNEE_MODEL = AdminModel;
 const FULLY_MANAGED_PLAN_ID = "e5cb75da-6d0d-481b-b202-69b9cf864940";
 const EMAIL_RX = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
 const HANDLE_RX = /^@[A-Za-z0-9._\-]+$/;
@@ -394,7 +394,12 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
   }
 
   const assigneeIds = [...assignmentMap.values()]
-    .flatMap((assignment) => [assignment?.RHId, assignment?.bdmId, assignment?.idmId])
+    .flatMap((assignment) => [
+      assignment?.RHId,
+      assignment?.bdmId,
+      assignment?.idmId,
+      assignment?.sdrId,
+    ])
     .filter(Boolean)
     .map((id) => String(id));
 
@@ -404,8 +409,8 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
 
   const assignees = uniqueAssigneeIds.length
     ? await ASSIGNEE_MODEL.find({ _id: { $in: uniqueAssigneeIds } })
-      .select("_id name email")
-      .lean()
+        .select("_id name email")
+        .lean()
     : [];
 
   const assigneeMap = {};
@@ -423,6 +428,7 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
     const assignedRh = assignment?.RHId ? assigneeMap[String(assignment.RHId)] || "" : "";
     const assignedBme = assignment?.bdmId ? assigneeMap[String(assignment.bdmId)] || "" : "";
     const assignedIme = assignment?.idmId ? assigneeMap[String(assignment.idmId)] || "" : "";
+    const assignedSdr = assignment?.sdrId ? assigneeMap[String(assignment.sdrId)] || "" : "";
 
     return {
       ...brand,
@@ -433,6 +439,7 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
       assignedRh,
       assignedBme,
       assignedIme,
+      assignedSdr,
       assignedRm: assignedRh,
       assignedBm: assignedBme,
       assignedIm: assignedIme,
@@ -442,6 +449,7 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
       RHId: assignment?.RHId || null,
       bdmId: assignment?.bdmId || null,
       idmId: assignment?.idmId || null,
+      sdrId: assignment?.sdrId || null,
     };
   });
 }
@@ -752,21 +760,44 @@ exports.login = async (req, res) => {
     const password = String(req.body?.password || "");
 
     if (!email || !password) {
-      return res.status(400).json({ message: "email and password are required" });
+      return res.status(400).json({
+        message: "email and password are required",
+      });
     }
 
-    const admin = await Admin.findOne({ email });
+    const admin = await AdminModel.findOne({ email }).select(
+      "+passwordHash email name role status access parentAdmin rootAdmin proxyEmail"
+    );
+
     if (!admin) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const isMatch = await admin.correctPassword(password);
+    if (admin.status !== "active") {
+      return res.status(403).json({
+        message: `Admin is ${admin.status}`,
+      });
+    }
+
+    if (!admin.passwordHash) {
+      return res.status(403).json({
+        message: "Password not set. Please use invite link.",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, admin.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const token = jwt.sign(
-      { adminId: admin.adminId, email: admin.email },
+      {
+        adminId: String(admin._id),
+        email: admin.email,
+        role: admin.role,
+        parentAdmin: admin.parentAdmin ? String(admin.parentAdmin) : null,
+        rootAdmin: admin.rootAdmin ? String(admin.rootAdmin) : null,
+      },
       process.env.JWT_SECRET,
       { expiresIn: "12h" }
     );
@@ -775,8 +806,15 @@ exports.login = async (req, res) => {
       message: "Login successful",
       token,
       admin: {
-        adminId: admin.adminId,
+        _id: admin._id,
         email: admin.email,
+        name: admin.name,
+        role: admin.role,
+        status: admin.status,
+        access: admin.access || [],
+        parentAdmin: admin.parentAdmin,
+        rootAdmin: admin.rootAdmin,
+        proxyEmail: admin.proxyEmail || null,
       },
     });
   } catch (error) {
@@ -852,7 +890,6 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
 
   if (!adminId) return [];
 
-  // both super_admin and revenue_head can see all brands
   if (role === ROLES.SUPER_ADMIN || role === ROLES.REVENUE_HEAD) {
     return null;
   }
@@ -860,6 +897,7 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
   const roleToField = {
     [ROLES.BME]: "bdmId",
     [ROLES.IME]: "idmId",
+    [ROLES.SDR]: "sdrId",
   };
 
   const assignmentField = roleToField[role];
@@ -874,10 +912,25 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
     assigneeFilters.push({ [assignmentField]: toObjectId(adminId) });
   }
 
-  const assignments = await BrandAssigned.find({
+  const baseQuery = {
     status: "active",
     $or: assigneeFilters,
-  })
+  };
+
+  // SDR should only see brands that are still in outreach stage
+  if (role === ROLES.SDR) {
+    baseQuery.$and = [
+      {
+        $or: [
+          { bdmId: { $exists: false } },
+          { bdmId: null },
+          { bdmId: "" },
+        ],
+      },
+    ];
+  }
+
+  const assignments = await BrandAssigned.find(baseQuery)
     .select("brandId")
     .lean();
 
@@ -1508,7 +1561,7 @@ exports.adminGetInfluencerList = async (req, res) => {
 
     if (search && String(search).trim()) {
       const q = String(search).trim();
-      const rx = new RegExp(escapeRegExp(q), "i");
+      const rx = new RegExp(escapeRegex(q), "i");
 
       filter.$or = [
         { name: rx },
@@ -2174,6 +2227,7 @@ exports.assignBrand = async (req, res) => {
     const RHId = req.body?.RHId;
     const bdmId = req.body?.bdmId;
     const idmId = req.body?.idmId;
+    const sdrId = req.body?.sdrId;
 
     if (!brandId) {
       return res.status(400).json({
@@ -2190,12 +2244,13 @@ exports.assignBrand = async (req, res) => {
     }
 
     const wantsRH = RHId !== undefined && RHId !== null && String(RHId).trim() !== "";
-    const wantsBDMOrIDM = bdmId !== undefined || idmId !== undefined;
+    const wantsTeam =
+      bdmId !== undefined || idmId !== undefined || sdrId !== undefined;
 
-    if (!wantsRH && !wantsBDMOrIDM) {
+    if (!wantsRH && !wantsTeam) {
       return res.status(400).json({
         success: false,
-        message: "Send RHId to assign RH OR send bdmId/idmId to assign BDM/IDM",
+        message: "Send RHId to assign RH OR send bdmId/idmId/sdrId to assign team members",
       });
     }
 
@@ -2209,6 +2264,7 @@ exports.assignBrand = async (req, res) => {
 
       if (bdmId !== undefined) set.bdmId = bdmId || null;
       if (idmId !== undefined) set.idmId = idmId || null;
+      if (sdrId !== undefined) set.sdrId = sdrId || null;
 
       let doc = await BrandAssigned.findOneAndUpdate(
         { brandId: normalizedBrandId, status: "active" },
@@ -2230,6 +2286,7 @@ exports.assignBrand = async (req, res) => {
           RHId: RHId || null,
           bdmId: bdmId || null,
           idmId: idmId || null,
+          sdrId: sdrId || null,
           status: "active",
         });
       }
@@ -2244,6 +2301,7 @@ exports.assignBrand = async (req, res) => {
     const set = {};
     if (bdmId !== undefined) set.bdmId = bdmId || null;
     if (idmId !== undefined) set.idmId = idmId || null;
+    if (sdrId !== undefined) set.sdrId = sdrId || null;
 
     let updated = await BrandAssigned.findOneAndUpdate(
       {
@@ -2269,13 +2327,16 @@ exports.assignBrand = async (req, res) => {
     if (!updated) {
       return res.status(400).json({
         success: false,
-        message: "RH is not assigned for this brand. Assign RH first, then add BDM/IDM.",
+        message: "RH is not assigned for this brand. Assign RH first, then add team members.",
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Brand assignment updated successfully",
+      message:
+        bdmId || idmId
+          ? "Brand handed off successfully"
+          : "Brand assignment updated successfully",
       data: updated,
     });
   } catch (error) {
@@ -2662,109 +2723,6 @@ exports.getPublicCampaignByToken = async (req, res) => {
       message: "Internal server error",
       error: err.message,
     });
-  }
-};
-
-exports.disableCampaignShare = async (req, res) => {
-  const requestId = getRequestId(req);
-
-  try {
-    const { campaignId, brandId } = req.body;
-
-    if (!campaignId || !String(campaignId).trim()) {
-      return fail(res, 400, "VALIDATION_ERROR", "Valid campaignId is required", requestId);
-    }
-
-    const filter = {
-      $or: [{ campaignsId: String(campaignId).trim() }],
-    };
-
-    if (mongoose.Types.ObjectId.isValid(String(campaignId))) {
-      filter.$or.push({ _id: new mongoose.Types.ObjectId(String(campaignId)) });
-    }
-
-    const campaign = await Campaign.findOne(filter);
-
-    if (!campaign) {
-      return fail(res, 404, "NOT_FOUND", "Campaign not found", requestId);
-    }
-
-    if (brandId && String(brandId).trim() && String(campaign.brandId) !== String(brandId).trim()) {
-      return fail(res, 404, "NOT_FOUND", "Campaign not found for this brand", requestId);
-    }
-
-    campaign.isPublic = false;
-    await campaign.save();
-
-    return ApiResponse.sendOk(
-      res,
-      200,
-      {
-        message: "Public share link disabled",
-        isPublic: false,
-      },
-      requestId
-    );
-  } catch (err) {
-    return sendControllerError(res, requestId, err);
-  }
-};
-
-exports.getPublicCampaignByToken = async (req, res) => {
-  const requestId = getRequestId(req);
-
-  try {
-    const { token } = req.params;
-
-    if (!token || !String(token).trim()) {
-      return fail(res, 400, "VALIDATION_ERROR", "Valid token is required", requestId);
-    }
-
-    const campaign = await Campaign.findOne({
-      publicShareToken: String(token).trim(),
-      isPublic: true,
-    }).lean();
-
-    if (!campaign) {
-      return fail(res, 404, "NOT_FOUND", "Campaign not found or not public", requestId);
-    }
-
-    return ApiResponse.sendOk(
-      res,
-      200,
-      {
-        doc: {
-          _id: campaign._id,
-          campaignId: campaign.campaignsId || String(campaign._id),
-          campaignTitle: campaign.campaignTitle || "",
-          description: campaign.description || "",
-          campaignType: campaign.campaignType || "",
-          campaignBudget: campaign.campaignBudget || 0,
-          budget: campaign.budget || 0,
-          paymentType: campaign.paymentType || "",
-          platformSelection: campaign.platformSelection || [],
-          targetCountryIds: campaign.targetCountryIds || [],
-          targetAgeRanges: campaign.targetAgeRanges || [],
-          productImages: campaign.productImages || [],
-          productLink: campaign.productLink || "",
-          videoLink: campaign.videoLink || "",
-          additionalNotes: campaign.additionalNotes || "",
-          startAt: campaign.startAt || campaign.timeline?.startDate || null,
-          endAt: campaign.endAt || campaign.timeline?.endDate || null,
-          status: campaign.status || campaign.campaignStatus || "",
-          brandName: campaign.brandName || "",
-          categoryId: campaign.categoryId || null,
-          subcategoryIds: campaign.subcategoryIds || [],
-          contentFormats: campaign.contentFormats || [],
-          contentLanguageIds: campaign.contentLanguageIds || [],
-          preferredHashtags: campaign.preferredHashtags || [],
-          campaignGoals: campaign.campaignGoals || [],
-        },
-      },
-      requestId
-    );
-  } catch (err) {
-    return sendControllerError(res, requestId, err);
   }
 };
 

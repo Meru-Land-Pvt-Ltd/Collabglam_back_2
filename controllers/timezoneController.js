@@ -205,6 +205,63 @@ const getTimezonesByCountries = async (req, res) => {
   }
 };
 
+const formatOffsetLabel = (offsetMinutes) => {
+  if (typeof offsetMinutes !== "number") return "";
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMinutes);
+  const hours = String(Math.floor(abs / 60)).padStart(2, "0");
+  const minutes = String(abs % 60).padStart(2, "0");
+  return `UTC${sign}${hours}:${minutes}`;
+};
+
+const getAllTimezones = async (req, res) => {
+  const requestId = getRequestId(req);
+
+  try {
+    const timezoneMap = ct.getAllTimezones();
+    const timezones = Object.values(timezoneMap)
+      .map((tz) => {
+        const dt = DateTime.now().setZone(tz.name);
+        const isValid = dt.isValid;
+        const offsetMinutes = isValid ? dt.offset : null;
+        const offsetLabel = formatOffsetLabel(offsetMinutes);
+
+        return {
+          value: tz.name,
+          timezone: tz.name,
+          label: `${tz.name} (${offsetLabel})`,
+          offsetMinutes,
+          offsetLabel,
+          nowLocal: isValid ? dt.toISO({ suppressMilliseconds: true }) : null,
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        timezones,
+        meta: {
+          total: timezones.length,
+        },
+      },
+      requestId
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal error";
+    return ApiResponse.sendFail(
+      res,
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      EC("INTERNAL_ERROR"),
+      message,
+      requestId
+    );
+  }
+};
+
+
 module.exports = {
   getTimezonesByCountries,
+  getAllTimezones
 };
