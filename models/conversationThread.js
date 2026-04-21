@@ -5,23 +5,57 @@ const {
   MESSAGE_DIRECTION,
 } = require("../constants/outreach");
 
+const ConversationMailboxesSchema = new Schema(
+  {
+    campaignSenderEmail: { type: String, default: "" },
+    currentReplyFromEmail: { type: String, default: "" },
+    RHEmail: { type: String, default: "" },
+    bmeEmail: { type: String, default: "" },
+    imeEmail: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const ConversationThreadSchema = new Schema(
   {
-    prospectId: { type: Schema.Types.ObjectId, ref: "ProspectBrand", required: true },
-    campaignId: { type: Schema.Types.ObjectId, ref: "OutreachCampaign", required: true },
-    brandId: { type: Schema.Types.ObjectId, ref: "Brand", default: null },
+    prospectId: {
+      type: Schema.Types.ObjectId,
+      ref: "ProspectBrand",
+      required: true,
+    },
+    campaignId: {
+      type: Schema.Types.ObjectId,
+      ref: "OutreachCampaign",
+      default: null,
+    },
+    brandId: {
+      type: Schema.Types.ObjectId,
+      ref: "Brand",
+      default: null,
+    },
 
     ownerRole: {
       type: String,
       enum: Object.values(OWNER_ROLE),
       required: true,
     },
-    ownerId: { type: Schema.Types.ObjectId, ref: "Master", required: true },
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "Master",
+      required: true,
+    },
 
     instantlyThreadId: { type: String, default: "" },
     instantlyCampaignId: { type: String, default: "" },
 
+    mailboxes: {
+      type: ConversationMailboxesSchema,
+      default: () => ({}),
+    },
+
     subject: { type: String, default: "" },
+
+    // Kept as-is for backward compatibility with existing controllers/UI.
     brandEmail: { type: String, default: "" },
     brandName: { type: String, default: "" },
 
@@ -35,19 +69,35 @@ const ConversationThreadSchema = new Schema(
     lastMessageAt: { type: Date, default: null },
     lastInboundAt: { type: Date, default: null },
     lastOutboundAt: { type: Date, default: null },
+
+    unreadForRevenueHead: { type: Boolean, default: false },
     unreadForBme: { type: Boolean, default: false },
+    unreadForIme: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-ConversationThreadSchema.index({ ownerId: 1, status: 1, updatedAt: -1 });
+ConversationThreadSchema.index({
+  ownerRole: 1,
+  ownerId: 1,
+  status: 1,
+  updatedAt: -1,
+});
 ConversationThreadSchema.index({ prospectId: 1 });
 ConversationThreadSchema.index({ instantlyThreadId: 1 });
 
 const ConversationMessageSchema = new Schema(
   {
-    threadId: { type: Schema.Types.ObjectId, ref: "ConversationThread", required: true },
-    prospectId: { type: Schema.Types.ObjectId, ref: "ProspectBrand", required: true },
+    threadId: {
+      type: Schema.Types.ObjectId,
+      ref: "ConversationThread",
+      required: true,
+    },
+    prospectId: {
+      type: Schema.Types.ObjectId,
+      ref: "ProspectBrand",
+      required: true,
+    },
 
     direction: {
       type: String,
@@ -55,7 +105,11 @@ const ConversationMessageSchema = new Schema(
       required: true,
     },
 
-    provider: { type: String, enum: ["instantly"], default: "instantly" },
+    provider: {
+      type: String,
+      enum: ["instantly"],
+      default: "instantly",
+    },
     providerMessageId: { type: String, default: "" },
     providerThreadId: { type: String, default: "" },
 
@@ -68,7 +122,11 @@ const ConversationMessageSchema = new Schema(
     bodyText: { type: String, default: "" },
     bodyHtml: { type: String, default: "" },
 
-    repliedByAdminId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    repliedByAdminId: {
+      type: Schema.Types.ObjectId,
+      ref: "Master",
+      default: null,
+    },
     sentAt: { type: Date, default: null },
     receivedAt: { type: Date, default: null },
   },

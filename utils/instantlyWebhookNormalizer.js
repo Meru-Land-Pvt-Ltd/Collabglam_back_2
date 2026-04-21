@@ -15,8 +15,15 @@ function normalizeInstantlyWebhook(body = {}) {
 
   const threadId =
     body.thread_id ||
-    body.data?.thread_id ||
     body.email_thread_id ||
+    body.threadId ||
+    body.reply_thread_id ||
+    body.message_thread_id ||
+    body.data?.thread_id ||
+    body.data?.email_thread_id ||
+    body.data?.threadId ||
+    body.data?.reply_thread_id ||
+    body.data?.message_thread_id ||
     "";
 
   const emailId =
@@ -26,20 +33,27 @@ function normalizeInstantlyWebhook(body = {}) {
     "";
 
   const subject =
+    body.reply_subject ||
+    body.email_subject ||
     body.subject ||
+    body.data?.reply_subject ||
     body.data?.subject ||
     "";
 
   const snippet =
+    body.reply_text_snippet ||
     body.snippet ||
     body.preview ||
+    body.data?.reply_text_snippet ||
     body.data?.snippet ||
-    body.data?.preview ||
     "";
 
   const bodyText =
+    body.reply_text ||
+    body.email_text ||
     body.body_text ||
     body.text ||
+    body.data?.reply_text ||
     body.data?.body_text ||
     body.data?.text ||
     "";
@@ -49,8 +63,19 @@ function normalizeInstantlyWebhook(body = {}) {
     body.data?.campaign_id ||
     "";
 
+  const accountEmail =
+    body.email_account ||
+    body.account_email ||
+    body.sender_account_email ||
+    body.sender_email ||
+    body.from_email ||
+    body.data?.email_account ||
+    body.data?.account_email ||
+    body.data?.sender_account_email ||
+    "";
+
   return {
-    event: String(event).toLowerCase(),
+    event: String(event).toLowerCase().trim(),
     email: String(email).toLowerCase().trim(),
     threadId: String(threadId).trim(),
     emailId: String(emailId).trim(),
@@ -58,6 +83,7 @@ function normalizeInstantlyWebhook(body = {}) {
     snippet: String(snippet).trim(),
     bodyText: String(bodyText).trim(),
     campaignId: String(campaignId).trim(),
+    accountEmail: String(accountEmail).toLowerCase().trim(),
     raw: body,
   };
 }

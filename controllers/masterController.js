@@ -1108,6 +1108,8 @@ exports.listExecutiveAdmin = async (req, res) => {
     const requestedRole = String(req.query?.role || req.body?.role || "")
       .trim()
       .toLowerCase();
+    const requestedRHId = String(req.query?.RHId || req.body?.RHId || "")
+      .trim();
 
     if (!adminId) {
       return res.status(401).json({
@@ -1137,8 +1139,22 @@ exports.listExecutiveAdmin = async (req, res) => {
       filter.role = { $in: [ROLES.BME, ROLES.IME, ROLES.SDR] };
     }
 
+    // Revenue Head: always only own team
     if (actorRole === ROLES.REVENUE_HEAD) {
       filter.parentAdmin = adminId;
+    }
+
+    // Super Admin: all by default
+    // Other roles / future usage: allow optional RHId filter
+    if (actorRole !== ROLES.REVENUE_HEAD && requestedRHId) {
+      if (!mongoose.isValidObjectId(requestedRHId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid RHId",
+        });
+      }
+
+      filter.parentAdmin = requestedRHId;
     }
 
     const executives = await AdminModel.find(filter)

@@ -161,8 +161,40 @@ async function getCampaignSendingStatus(id, params = {}) {
    Emails
 ========================= */
 
-async function sendTestEmail(payload) {
-  return request("post", "/emails/test", { data: payload });
+async function sendTestEmail(payload = {}) {
+  const eaccount = String(
+    payload.eaccount ||
+      payload.account_email ||
+      payload.accountEmail ||
+      ""
+  ).trim();
+
+  const to_address_email_list = String(
+    payload.to_address_email_list ||
+      payload.to_email ||
+      payload.toEmail ||
+      ""
+  ).trim();
+
+  const subject = String(payload.subject || "").trim();
+
+  const html =
+    payload?.body?.html ||
+    payload?.bodyHtml ||
+    payload?.bodyText ||
+    payload?.body ||
+    "";
+
+  return request("post", "/emails/test", {
+    data: {
+      eaccount,
+      to_address_email_list,
+      subject,
+      body: {
+        html: String(html || ""),
+      },
+    },
+  });
 }
 
 async function replyToEmail(payload) {

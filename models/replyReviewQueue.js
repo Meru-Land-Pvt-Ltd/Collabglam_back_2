@@ -4,11 +4,10 @@ const { REVIEW_STATUS } = require("../constants/outreach");
 const ReplyReviewQueueSchema = new Schema(
   {
     prospectId: { type: Schema.Types.ObjectId, ref: "ProspectBrand", required: true },
-    campaignId: { type: Schema.Types.ObjectId, ref: "OutreachCampaign", required: true },
+    campaignId: { type: Schema.Types.ObjectId, ref: "OutreachCampaign", default: null },
 
     sdrId: { type: Schema.Types.ObjectId, ref: "Master", required: true },
     RHId: { type: Schema.Types.ObjectId, ref: "Master", required: true },
-    suggestedBmeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     assignedBmeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
 
     instantlyThreadId: { type: String, default: "" },

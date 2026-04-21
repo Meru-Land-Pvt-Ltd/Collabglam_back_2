@@ -11,8 +11,8 @@ const PROSPECT_STAGE = {
   QUEUED: "queued",
   IN_SEQUENCE: "in_sequence",
   REPLIED_PENDING_REVIEW: "replied_pending_review",
-  QUALIFIED: "qualified",
   ASSIGNED_TO_BME: "assigned_to_bme",
+  ASSIGNED_TO_IME: "assigned_to_ime",
   UNQUALIFIED: "unqualified",
   BLOCKED: "blocked",
   CLOSED: "closed",
@@ -22,6 +22,7 @@ const OWNER_ROLE = {
   SDR: "sdr",
   REVENUE_HEAD: "revenue_head",
   BME: "bme",
+  IME: "ime",
 };
 
 const REVIEW_STATUS = {
@@ -43,6 +44,12 @@ const MESSAGE_DIRECTION = {
   OUTBOUND: "outbound",
 };
 
+const SINGLE_MAILBOX_ROLES = [
+  OWNER_ROLE.REVENUE_HEAD,
+  OWNER_ROLE.BME,
+  OWNER_ROLE.IME,
+];
+
 module.exports = {
   OUTREACH_CAMPAIGN_STATUS,
   PROSPECT_STAGE,
@@ -50,4 +57,5 @@ module.exports = {
   REVIEW_STATUS,
   THREAD_STATUS,
   MESSAGE_DIRECTION,
+  SINGLE_MAILBOX_ROLES,
 };

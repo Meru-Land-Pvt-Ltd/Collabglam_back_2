@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const { handleInstantlyWebhook } = require("../controllers/instantlyWebhookController");
 
-router.post("/instantly", handleInstantlyWebhook);
+router.post("/", handleInstantlyWebhook);
 
 module.exports = router;

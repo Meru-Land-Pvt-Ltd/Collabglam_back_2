@@ -30,7 +30,17 @@ const ProspectBrandSchema = new Schema(
     RHId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     preAssignedBmeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     assignedBmeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
-
+    assignedImeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    flowType: {
+      type: String,
+      enum: ["standard_brand", "ime_influencer"],
+      default: "standard_brand",
+    },
+    contactType: {
+      type: String,
+      enum: ["brand", "influencer"],
+      default: "brand",
+    },
     currentOwnerRole: {
       type: String,
       enum: Object.values(OWNER_ROLE),
@@ -54,6 +64,7 @@ const ProspectBrandSchema = new Schema(
       threadId: { type: String, default: "" },
       lastEmailId: { type: String, default: "" },
       lastSequenceStep: { type: String, default: "" },
+      senderAccountEmail: { type: String, default: "" },
     },
 
     reply: {
