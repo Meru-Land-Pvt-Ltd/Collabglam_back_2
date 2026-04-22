@@ -95,9 +95,28 @@ const TeamMailboxesSchema = new Schema(
 const CampaignStatsSchema = new Schema(
   {
     totalProspects: { type: Number, default: 0 },
+    totalSent: { type: Number, default: 0 },
+    totalClicked: { type: Number, default: 0 },
     totalReplies: { type: Number, default: 0 },
+    totalOpportunities: { type: Number, default: 0 },
     totalQualified: { type: Number, default: 0 },
     totalAssigned: { type: Number, default: 0 },
+    progressPercent: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const CampaignSyncSchema = new Schema(
+  {
+    providerStatus: {
+      type: String,
+      enum: ["idle", "syncing", "synced", "error"],
+      default: "idle",
+    },
+    lastErrorCode: { type: String, default: "" },
+    lastErrorMessage: { type: String, default: "" },
+    lastSyncedAt: { type: Date, default: null },
+    lastAnalyticsSyncedAt: { type: Date, default: null },
   },
   { _id: false }
 );
@@ -110,6 +129,7 @@ const InstantlyCampaignSchema = new Schema(
     accountEmails: { type: [String], default: [] },
     senderAccountEmail: { type: String, default: "" },
     rawCampaignPayload: { type: Schema.Types.Mixed, default: null },
+    shareLink: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -188,6 +208,34 @@ const OutreachCampaignSchema = new Schema(
       default: () => ({}),
     },
 
+    templateVariables: {
+      type: [String],
+      default: [],
+    },
+
+    csvSchema: {
+      fileName: { type: String, default: "" },
+      totalRows: { type: Number, default: 0 },
+      columns: {
+        type: [
+          {
+            header: { type: String, default: "" },
+            variableKey: { type: String, default: "" },
+            inferredType: { type: String, default: "custom" },
+            selectedType: { type: String, default: "custom" },
+            samples: { type: [String], default: [] },
+          },
+        ],
+        default: [],
+      },
+      updatedAt: { type: Date, default: null },
+    },
+
+    sync: {
+      type: CampaignSyncSchema,
+      default: () => ({}),
+    },
+
     launchValidatedAt: { type: Date, default: null },
     launchedAt: { type: Date, default: null },
     pausedAt: { type: Date, default: null },
@@ -201,5 +249,6 @@ OutreachCampaignSchema.index({ sdrId: 1, status: 1, createdAt: -1 });
 OutreachCampaignSchema.index({ RHId: 1, status: 1, createdAt: -1 });
 OutreachCampaignSchema.index({ IMEId: 1, status: 1, createdAt: -1 });
 OutreachCampaignSchema.index({ "instantly.campaignId": 1 });
+OutreachCampaignSchema.index({ "sync.providerStatus": 1, createdAt: -1 });
 
 module.exports = model("OutreachCampaign", OutreachCampaignSchema);
