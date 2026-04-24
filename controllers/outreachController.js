@@ -11,6 +11,8 @@ const {
   OWNER_ROLE,
 } = require("../constants/outreach");
 const { ensureRole } = require("../utils/outreachGuards");
+const OutreachTemplate = require("../models/OutreachTemplate");
+const OutreachSubsequence = require("../models/OutreachSubsequence");
 const instantlyService = require("../services/instantlyService");
 
 const SDR_ROLE = ROLES?.SDR || "sdr";
@@ -93,34 +95,6 @@ function buildDefaultCampaignSchedule() {
       },
     ],
   };
-}
-
-function buildDefaultSequence() {
-  return [
-    {
-      stepOrder: 1,
-      type: "email",
-      delay: 1,
-      delayUnit: "days",
-      preDelay: 0,
-      preDelayUnit: "days",
-      variants: [
-        {
-          subject: "Collab opportunity with {{companyName}}",
-          body: [
-            "Hi {{firstName}},",
-            "",
-            "We’d love to explore a collaboration opportunity with {{companyName}}.",
-            "",
-            "Would you be open to a quick conversation?",
-            "",
-            "Best,",
-            "CollabGlam",
-          ].join("\n"),
-        },
-      ],
-    },
-  ];
 }
 
 function buildDefaultSendingOptions() {
@@ -250,48 +224,6 @@ function normalizeSequenceStep(step = {}, index = 0) {
       }))
       .filter((variant) => variant.subject || variant.body),
   };
-}
-
-function normalizeCampaignSequences(input = []) {
-  const rows = Array.isArray(input) ? input : [];
-
-  if (!rows.length) {
-    return [
-      {
-        stepOrder: 1,
-        type: "email",
-        delay: 0,
-        delayUnit: "days",
-        preDelay: 0,
-        preDelayUnit: "days",
-        variants: [{ subject: "", body: "" }],
-      },
-    ];
-  }
-
-  return rows.map((step, index) => {
-    const isFirstStep = index === 0;
-
-    return {
-      stepOrder: index + 1,
-      type: "email",
-      delay: isFirstStep ? 0 : Math.max(0, Number(step?.delay || 0)),
-      delayUnit: isFirstStep
-        ? "days"
-        : ["minutes", "hours", "days"].includes(step?.delayUnit)
-          ? step.delayUnit
-          : "days",
-      preDelay: 0,
-      preDelayUnit: "days",
-      variants:
-        Array.isArray(step?.variants) && step.variants.length
-          ? step.variants.map((variant) => ({
-              subject: String(variant?.subject || "").trim(),
-              body: String(variant?.body || ""),
-            }))
-          : [{ subject: "", body: "" }],
-    };
-  });
 }
 
 function normalizeSendingOptions(options = {}, fallback = buildDefaultSendingOptions()) {
@@ -1084,21 +1016,26 @@ exports.createOutreachCampaign = async (req, res) => {
 
 exports.listOutreachCampaigns = async (req, res) => {
   try {
-    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const adminId = req.admin?._id;
+    const role = String(req.admin?.role || "").toLowerCase();
 
-    const filter = {};
-    const status = String(req.query?.status || "").trim().toLowerCase();
+    let filter = {};
 
-    if (status) {
-      filter.status = status;
-    }
-
-    if (req.admin.role === "sdr") {
-      filter.sdrId = req.admin.adminId;
-    } else if (req.admin.role === "revenue_head") {
-      filter.RHId = req.admin.adminId;
-    } else if (req.admin.role === "ime") {
-      filter.IMEId = req.admin.adminId;
+    if (role === "sdr") {
+      filter = { sdrId: adminId };
+    } else if (role === "ime") {
+      filter = { IMEId: adminId };
+    } else if (role === "rh" || role === "revenue_head") {
+      filter = {
+        $or: [
+          { RHId: adminId },
+          { flowType: "ime_influencer" },
+        ],
+      };
+    } else if (role === "super_admin") {
+      filter = {};
+    } else {
+      filter = { _id: null };
     }
 
     const rows = await OutreachCampaign.find(filter)
@@ -1109,14 +1046,12 @@ exports.listOutreachCampaigns = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      count: rows.length,
       data: rows,
     });
   } catch (error) {
-    const payload = getAxiosErrorPayload(error, "Internal error");
-    return res.status(payload.statusCode).json({
+    return res.status(500).json({
       success: false,
-      ...payload,
+      message: error.message || "Failed to list campaigns",
     });
   }
 };
@@ -1425,76 +1360,75 @@ function textToHtml(value = "") {
 
 exports.sendCampaignTestEmail = async (req, res) => {
   try {
-    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getManagedCampaign(req, req.params.id);
 
-    const campaign = await getAccessibleCampaign(req, req.params.id);
-    const configuration = getCampaignConfigurationFromDocument(campaign);
-    const firstVariant = configuration.sequences?.[0]?.variants?.[0] || {};
+    const toEmail = String(req.body?.toEmail || "").trim();
+    const accountEmail =
+      String(req.body?.accountEmail || "").trim() ||
+      String(campaign?.instantly?.senderAccountEmail || "").trim();
 
-    const senderEmail = String(
-      req.body?.accountEmail ||
-      req.body?.eaccount ||
-      campaign.instantly?.senderAccountEmail ||
-      campaign.instantly?.accountEmails?.[0] ||
-      ""
-    ).trim();
+    const stepOrder = Number(req.body?.stepOrder || 1);
 
-    const toEmail = String(
-      req.body?.toEmail ||
-      req.body?.to_address_email_list ||
-      ""
-    ).trim();
-
-    if (!senderEmail || !toEmail) {
+    if (!toEmail) {
       return res.status(400).json({
         success: false,
-        message: "accountEmail and toEmail are required",
+        message: "toEmail is required",
       });
     }
 
-    const previewVars = {
-      firstName: req.body?.variables?.firstName || "Devansh",
-      companyName: req.body?.variables?.companyName || "CollabGlam",
-      ...req.body?.variables,
+    if (!accountEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "accountEmail is required",
+      });
+    }
+
+    const steps = Array.isArray(campaign?.configuration?.sequences)
+      ? campaign.configuration.sequences
+      : [];
+
+    const step =
+      steps.find((item) => Number(item?.stepOrder) === stepOrder) || steps[0];
+
+    if (!step) {
+      return res.status(400).json({
+        success: false,
+        message: "No sequence step found",
+      });
+    }
+
+    const variant = step?.variants?.[0] || {
+      subject: "",
+      body: "",
+      preheaderText: "",
+      signatureHtml: "",
     };
 
-    const rawSubject = String(
-      req.body?.subject ||
-      firstVariant.subject ||
-      `${campaign.name} test`
-    );
+    const preheaderHtml = variant.preheaderText
+      ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(
+          variant.preheaderText
+        )}</div>`
+      : "";
 
-    const rawBodyText = String(
-      req.body?.bodyText ||
-      firstVariant.body ||
-      ""
-    );
+    const signatureHtml = variant.signatureHtml
+      ? `<div style="margin-top:16px;">${variant.signatureHtml}</div>`
+      : "";
 
-    const renderedSubject = renderTemplate(rawSubject, previewVars);
-    const renderedBodyText = renderTemplate(rawBodyText, previewVars);
+    const html = `${preheaderHtml}${textToHtml(String(variant.body || ""))}${signatureHtml}`;
 
-    const payload = {
-      eaccount: senderEmail,
+    const result = await instantlyService.sendTestEmail({
+      eaccount: accountEmail,
       to_address_email_list: toEmail,
-      subject: renderedSubject,
+      subject: String(variant.subject || ""),
       body: {
-        html: `
-          <div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111111;">
-            ${textToHtml(renderedBodyText)}
-          </div>
-        `,
+        html,
       },
-    };
-
-    const testResult = await instantlyService.sendTestEmail(payload);
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Test email request sent to Instantly",
-      data: {
-        sentPayload: payload,
-        testResult,
-      },
+      message: "Test email sent successfully",
+      data: result,
     });
   } catch (error) {
     const payload = getAxiosErrorPayload(error, "Failed to send test email");
@@ -2955,6 +2889,34 @@ async function upsertProspectsFromMappedRows(rows = [], columns = [], sourceFile
   return docs;
 }
 
+function buildDefaultSequence() {
+  return [
+    {
+      stepOrder: 1,
+      type: "email",
+      delay: 0,
+      delayUnit: "days",
+      preDelay: 0,
+      preDelayUnit: "days",
+      variants: [
+        {
+          subject: "Collab opportunity with {{companyName}}",
+          body: [
+            "Hi {{firstName}},",
+            "",
+            "We’d love to explore a collaboration opportunity with {{companyName}}.",
+            "",
+            "Would you be open to a quick conversation?",
+            "",
+            "Best,",
+            "CollabGlam",
+          ].join("\n"),
+        },
+      ],
+    },
+  ];
+}
+
 exports.previewCampaignContactsCsv = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
@@ -3024,5 +2986,505 @@ exports.getCampaignTemplateVariables = async (req, res) => {
       success: false,
       ...payload,
     });
+  }
+};
+
+function normalizeSequenceVariants(variants = []) {
+  const rows = Array.isArray(variants) ? variants : [];
+  if (!rows.length) return [{ subject: "", body: "" }];
+
+  return rows.map((variant) => ({
+    subject: String(variant?.subject || "").trim(),
+    body: String(variant?.body || ""),
+  }));
+}
+
+function normalizeCampaignSequences(input = []) {
+  const rows = Array.isArray(input) ? input : [];
+
+  if (!rows.length) {
+    return [
+      {
+        stepOrder: 1,
+        type: "email",
+        delay: 0,
+        delayUnit: "days",
+        preDelay: 0,
+        preDelayUnit: "days",
+        variants: [{ subject: "", body: "" }],
+      },
+    ];
+  }
+
+  return rows.map((step, index) => {
+    const isFirstStep = index === 0;
+
+    return {
+      stepOrder: index + 1,
+      type: "email",
+      delay: isFirstStep ? 0 : Math.max(1, Number(step?.delay || 1)),
+      delayUnit: isFirstStep
+        ? "days"
+        : ["minutes", "hours", "days"].includes(step?.delayUnit)
+          ? step.delayUnit
+          : "days",
+      preDelay: 0,
+      preDelayUnit: "days",
+      variants: normalizeSequenceVariants(step?.variants),
+    };
+  });
+}
+
+function normalizeSubsequenceSteps(input = []) {
+  const rows = Array.isArray(input) ? input : [];
+
+  if (!rows.length) {
+    return [
+      {
+        stepOrder: 1,
+        type: "email",
+        delay: 1,
+        delayUnit: "days",
+        variants: [{ subject: "", body: "" }],
+      },
+    ];
+  }
+
+  return rows.map((step, index) => ({
+    stepOrder: index + 1,
+    type: "email",
+    delay: Math.max(0, Number(step?.delay || (index === 0 ? 0 : 1))),
+    delayUnit: ["minutes", "hours", "days"].includes(step?.delayUnit)
+      ? step.delayUnit
+      : "days",
+    variants: normalizeSequenceVariants(step?.variants),
+  }));
+}
+
+function buildSystemTemplates() {
+  return [
+    {
+      _id: "system_lead_generation_quick_question",
+      isSystem: true,
+      category: "lead_generation",
+      name: "Quick question",
+      subject: "{{firstName}} - quick question",
+      body: `Hey {{firstName}},
+
+Your LinkedIn was impressive and I wanted to reach out directly :)
+
+So we’re helping {{companyName}} from {{location}} to fill their cal with 5-12 calls with their ideal customer daily. If you let me have a call with you about how we can do the same for you, I will send you a burger with UberEats :D
+
+Are you free any time this week for a quick chat?
+
+Cheers,
+NAME
+
+Reply “No thanks” if you wish to no longer receive messages from me.`,
+    },
+    {
+      _id: "system_follow_up_gentle",
+      isSystem: true,
+      category: "follow_ups",
+      name: "Gentle follow-up",
+      subject: "",
+      body: `Hey {{firstName}},
+
+Just wanted to follow up on my previous note in case it got buried.
+
+Would love to know if this is relevant for {{companyName}}.
+
+Best,
+NAME`,
+    },
+  ];
+}
+
+function buildSubsequencePhraseList(phrases = []) {
+  return (Array.isArray(phrases) ? phrases : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+exports.listCampaignTemplates = async (req, res) => {
+  try {
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    const customTemplates = await OutreachTemplate.find({
+      workspaceId: String(campaign._id),
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        systemTemplates: buildSystemTemplates(),
+        customTemplates,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load templates");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.createCampaignTemplate = async (req, res) => {
+  try {
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    const template = await OutreachTemplate.create({
+      workspaceId: String(campaign._id),
+      createdBy: req.admin?._id || null,
+      category: String(req.body?.category || "custom_templates"),
+      name: String(req.body?.name || "").trim(),
+      subject: String(req.body?.subject || ""),
+      body: String(req.body?.body || ""),
+      isSystem: false,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Template created successfully",
+      data: template,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to create template");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.updateCampaignTemplate = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const template = await OutreachTemplate.findByIdAndUpdate(
+      req.params.templateId,
+      {
+        $set: {
+          name: String(req.body?.name || "").trim(),
+          category: String(req.body?.category || "custom_templates"),
+          subject: String(req.body?.subject || ""),
+          body: String(req.body?.body || ""),
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Template updated successfully",
+      data: template,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to update template");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.deleteCampaignTemplate = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+    await OutreachTemplate.findByIdAndDelete(req.params.templateId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Template deleted successfully",
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to delete template");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.listCampaignSubsequences = async (req, res) => {
+  try {
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (campaign.status !== "launched") {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: { launchRequired: true },
+      });
+    }
+
+    const subsequences = await OutreachSubsequence.find({
+      campaignId: campaign._id,
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: subsequences,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load subsequences");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.createCampaignSubsequence = async (req, res) => {
+  try {
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    if (campaign.status !== "launched") {
+      return res.status(400).json({
+        success: false,
+        message: "Subsequences are available only after the campaign is launched",
+      });
+    }
+
+    const subsequence = await OutreachSubsequence.create({
+      campaignId: campaign._id,
+      name: String(req.body?.name || "New subsequence").trim(),
+      trigger: {
+        statuses: Array.isArray(req.body?.trigger?.statuses) ? req.body.trigger.statuses : [],
+        activities: Array.isArray(req.body?.trigger?.activities) ? req.body.trigger.activities : [],
+        phrases: buildSubsequencePhraseList(req.body?.trigger?.phrases),
+      },
+      scheduleMode: req.body?.scheduleMode || "inherit",
+      schedule: req.body?.schedule || campaign.configuration?.schedule || {},
+      dailyLimitMode: req.body?.dailyLimitMode || "inherit",
+      dailyLimit: Number(req.body?.dailyLimit || 0),
+      ignoreAccountDailyLimits: Boolean(req.body?.ignoreAccountDailyLimits),
+      sequences: normalizeSubsequenceSteps(req.body?.sequences),
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subsequence created successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to create subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.getCampaignSubsequenceById = async (req, res) => {
+  try {
+    await getAccessibleCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOne({
+      _id: req.params.subsequenceId,
+      campaignId: req.params.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.updateCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOneAndUpdate(
+      { _id: req.params.subsequenceId, campaignId: req.params.id },
+      {
+        $set: {
+          name: String(req.body?.name || "").trim(),
+          trigger: {
+            statuses: Array.isArray(req.body?.trigger?.statuses) ? req.body.trigger.statuses : [],
+            activities: Array.isArray(req.body?.trigger?.activities) ? req.body.trigger.activities : [],
+            phrases: buildSubsequencePhraseList(req.body?.trigger?.phrases),
+          },
+          scheduleMode: req.body?.scheduleMode || "inherit",
+          schedule: req.body?.schedule || {},
+          dailyLimitMode: req.body?.dailyLimitMode || "inherit",
+          dailyLimit: Number(req.body?.dailyLimit || 0),
+          ignoreAccountDailyLimits: Boolean(req.body?.ignoreAccountDailyLimits),
+          sequences: normalizeSubsequenceSteps(req.body?.sequences),
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence updated successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to update subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.deleteCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    await OutreachSubsequence.deleteOne({
+      _id: req.params.subsequenceId,
+      campaignId: req.params.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence deleted successfully",
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to delete subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.launchCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOneAndUpdate(
+      { _id: req.params.subsequenceId, campaignId: req.params.id },
+      { $set: { status: "launched" } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence launched successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to launch subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.pauseCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOneAndUpdate(
+      { _id: req.params.subsequenceId, campaignId: req.params.id },
+      { $set: { status: "paused" } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence paused successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to pause subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.duplicateCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const source = await OutreachSubsequence.findOne({
+      _id: req.params.subsequenceId,
+      campaignId: req.params.id,
+    }).lean();
+
+    if (!source) {
+      return res.status(404).json({
+        success: false,
+        message: "Subsequence not found",
+      });
+    }
+
+    delete source._id;
+    delete source.createdAt;
+    delete source.updatedAt;
+
+    const duplicated = await OutreachSubsequence.create({
+      ...source,
+      name: `${source.name} (Copy)`,
+      status: "draft",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subsequence duplicated successfully",
+      data: duplicated,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to duplicate subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.moveLeadsToSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
+    const subsequence = await OutreachSubsequence.findById(req.params.subsequenceId);
+
+    if (!subsequence) {
+      return res.status(404).json({
+        success: false,
+        message: "Subsequence not found",
+      });
+    }
+
+    const prospects = await ProspectBrand.find({
+      _id: { $in: leadIds },
+    });
+
+    const providerLeadIds = prospects
+      .map((item) => item?.instantly?.leadId)
+      .filter(Boolean);
+
+    let providerResult = null;
+    if (providerLeadIds.length && subsequence?.instantly?.subsequenceId) {
+      providerResult = await instantlyService.moveLeadsToSubsequence({
+        lead_ids: providerLeadIds,
+        subsequence_id: subsequence.instantly.subsequenceId,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Leads moved to subsequence successfully",
+      data: {
+        movedCount: leadIds.length,
+        providerResult,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to move leads to subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.removeLeadFromSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findById(req.params.subsequenceId);
+    const prospect = await ProspectBrand.findById(req.body?.leadId);
+
+    if (!subsequence || !prospect) {
+      return res.status(404).json({
+        success: false,
+        message: "Subsequence or lead not found",
+      });
+    }
+
+    let providerResult = null;
+    if (prospect?.instantly?.leadId && subsequence?.instantly?.subsequenceId) {
+      providerResult = await instantlyService.removeLeadFromSubsequence({
+        lead_id: prospect.instantly.leadId,
+        subsequence_id: subsequence.instantly.subsequenceId,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Lead removed from subsequence successfully",
+      data: providerResult,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to remove lead from subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
   }
 };

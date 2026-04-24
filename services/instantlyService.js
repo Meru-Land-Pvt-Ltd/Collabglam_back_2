@@ -569,6 +569,10 @@ async function getOAuthSessionStatus(sessionId) {
   return request("get", `/oauth/session/status/${encodeId(sessionId)}`);
 }
 
+async function moveLeadsToSubsequence(payload = {}) {
+  return request("post", "/leads/subsequence/move", { data: payload });
+}
+
 module.exports = {
   instantlyClient,
 
@@ -684,4 +688,6 @@ module.exports = {
   initGoogleOAuth,
   initMicrosoftOAuth,
   getOAuthSessionStatus,
+
+  moveLeadsToSubsequence,
 };

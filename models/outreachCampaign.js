@@ -183,10 +183,27 @@ const OutreachCampaignSchema = new Schema(
             preDelayUnit: "days",
             variants: [
               {
-                subject: "Collab opportunity with {{companyName}}",
-                body: "Hi {{firstName}},\n\nWe’d love to explore a collaboration opportunity with {{companyName}}.\n\nWould you be open to a quick conversation?\n\nBest,\nCollabGlam",
+                subject: { type: String, default: "" },
+                body: { type: String, default: "" },
+                attachments: {
+                  type: [
+                    {
+                      id: { type: String, default: "" },
+                      name: { type: String, default: "" },
+                      url: { type: String, default: "" },
+                      mimeType: { type: String, default: "" },
+                      size: { type: Number, default: 0 },
+                      kind: {
+                        type: String,
+                        enum: ["image", "file"],
+                        default: "file",
+                      },
+                    },
+                  ],
+                  default: [],
+                },
               },
-            ],
+            ]
           },
         ],
         sendingOptions: {},

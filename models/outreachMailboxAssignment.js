@@ -67,6 +67,7 @@ const OutreachMailboxAssignmentSchema = new Schema(
 
 OutreachMailboxAssignmentSchema.index({ adminId: 1, role: 1, isActive: 1 });
 OutreachMailboxAssignmentSchema.index({ role: 1, isActive: 1 });
+OutreachMailboxAssignmentSchema.index({ adminId: 1, role: 1, isPrimary: -1, assignedAt: 1 });
 
 OutreachMailboxAssignmentSchema.index(
   { adminId: 1, role: 1 },
@@ -74,7 +75,7 @@ OutreachMailboxAssignmentSchema.index(
     unique: true,
     partialFilterExpression: {
       isActive: true,
-      role: { $in: ["revenue_head", "bme", "ime"] },
+      role: { $in: [OWNER_ROLE.REVENUE_HEAD, OWNER_ROLE.BME] },
     },
   }
 );
@@ -85,13 +86,10 @@ OutreachMailboxAssignmentSchema.index(
     unique: true,
     partialFilterExpression: {
       isActive: true,
-      role: "sdr",
+      role: { $in: [OWNER_ROLE.SDR, OWNER_ROLE.IME] },
       isPrimary: true,
     },
   }
 );
 
-module.exports = model(
-  "OutreachMailboxAssignment",
-  OutreachMailboxAssignmentSchema
-);
+module.exports = model("OutreachMailboxAssignment", OutreachMailboxAssignmentSchema);
