@@ -155,7 +155,9 @@ async function getModashProfilesForInfluencer(influencer) {
 
 // ------------------------------- Sync Job --------------------------------
 
-async function refreshMediaKitForInfluencer(influencerId) {
+async function 
+
+refreshMediaKitForInfluencer(influencerId) {
   if (!influencerId) return null;
 
   let influencer = null;
