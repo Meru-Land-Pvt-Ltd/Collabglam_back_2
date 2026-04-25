@@ -199,6 +199,8 @@ const brandSchema = new Schema(
 );
 
 brandSchema.index({ email: 1 }, { unique: true });
+brandSchema.index({ isAdminCreated: 1, signupCompleted: 1, createdAt: -1 });
+brandSchema.index({ createdByAdmin: 1, adminCreatedAt: -1 });
 
 brandSchema.pre("save", async function preSave(next) {
   try {

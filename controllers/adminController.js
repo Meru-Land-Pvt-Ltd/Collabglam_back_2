@@ -92,6 +92,76 @@ function buildAdminDisplay(admin = {}) {
   };
 }
 
+function formatAdminRoleLabel(role = "") {
+  const normalized = String(role || "").trim().toLowerCase();
+
+  if (normalized === ROLES.SUPER_ADMIN) return "Super Admin";
+  if (normalized === ROLES.REVENUE_HEAD) return "RH";
+  if (normalized === ROLES.BME) return "BME";
+  if (normalized === ROLES.IME) return "IME";
+  if (normalized === ROLES.SDR) return "SDR";
+
+  return normalized ? normalized.replace(/_/g, " ").toUpperCase() : "Admin";
+}
+
+function buildCreatorPayload(doc = {}, adminMap = new Map(), selfLabel = "User") {
+  const isAdminCreated = doc?.isAdminCreated === true;
+
+  if (isAdminCreated) {
+    const adminId = doc?.createdByAdmin ? String(doc.createdByAdmin) : "";
+    const admin = adminId ? adminMap.get(adminId) : null;
+    const adminRole = String(doc?.adminCreatedRole || admin?.role || "").trim();
+    const adminName = String(admin?.name || "").trim();
+    const adminEmail = String(admin?.email || "").trim();
+
+    return {
+      createdBySource: "admin",
+      createdByLabel: adminName || adminEmail || "Admin",
+      createdByAdminName: adminName,
+      createdByAdminEmail: adminEmail,
+      createdByAdminRole: adminRole,
+      createdByRoleLabel: formatAdminRoleLabel(adminRole),
+    };
+  }
+
+  return {
+    createdBySource: selfLabel.toLowerCase(),
+    createdByLabel: selfLabel,
+    createdByAdminName: "",
+    createdByAdminEmail: "",
+    createdByAdminRole: "",
+    createdByRoleLabel: "Self signup",
+  };
+}
+
+function buildSignupCurrentStatus(doc = {}) {
+  if (doc?.isAdminCreated === true && doc?.signupCompleted === false) {
+    return {
+      currentStatus: "pending_signup",
+      currentStatusLabel: "Pending Signup",
+      currentStatusSubLabel: "Admin-created placeholder",
+    };
+  }
+
+  return {
+    currentStatus: "active",
+    currentStatusLabel: "Active",
+    currentStatusSubLabel: "Signup completed",
+  };
+}
+
+async function getAdminMapByIds(ids = []) {
+  const objectIds = [...new Set(ids.map((id) => String(id || "")).filter(isObjectId))].map(toObjectId);
+
+  if (!objectIds.length) return new Map();
+
+  const admins = await AdminModel.find({ _id: { $in: objectIds } })
+    .select("_id name email role")
+    .lean();
+
+  return new Map(admins.map((admin) => [String(admin._id), admin]));
+}
+
 async function enrichLiteCampaignCreatedBy(rows = []) {
   const adminIds = [
     ...new Set(
@@ -236,6 +306,10 @@ function getBrandFieldValue(brand, field) {
       return brand.expiresAt || brand.subscription?.expiresAt || "";
     case "status":
       return brand.status || getStatusFromSubscription(brand) || "";
+    case "createdBy":
+      return brand.createdByLabel || brand.createdByAdminName || brand.createdByAdminEmail || "";
+    case "currentStatus":
+      return brand.currentStatusLabel || brand.currentStatus || "";
     case "assignedRh":
     case "assignedRm":
       return brand.assignedRh || brand.assignedRm || "";
@@ -975,10 +1049,22 @@ exports.getAllBrands = async (req, res) => {
       .lean();
 
     const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
+    const adminMap = await getAdminMapByIds(
+      enrichedBrands
+        .filter((brand) => brand?.isAdminCreated === true)
+        .map((brand) => brand?.createdByAdmin)
+    );
+
+    const displayBrands = enrichedBrands.map((brand) => ({
+      ...brand,
+      ...buildCreatorPayload(brand, adminMap, "Brand"),
+      ...buildSignupCurrentStatus(brand),
+    }));
+
     const re = safeRegex(search);
 
     const filtered = re
-      ? enrichedBrands.filter((brand) =>
+      ? displayBrands.filter((brand) =>
           [
             brand.name,
             brand.brandName,
@@ -995,9 +1081,17 @@ exports.getAllBrands = async (req, res) => {
             brand.assignedBm,
             brand.assignedIme,
             brand.assignedIm,
+            brand.createdByLabel,
+            brand.createdByAdminName,
+            brand.createdByAdminEmail,
+            brand.adminCreatedRole,
+            brand.createdByRoleLabel,
+            brand.currentStatus,
+            brand.currentStatusLabel,
+            brand.currentStatusSubLabel,
           ].some((value) => re.test(String(value || "")))
         )
-      : enrichedBrands;
+      : displayBrands;
 
     const allowedSortFields = new Set([
       "name",
@@ -1007,6 +1101,8 @@ exports.getAllBrands = async (req, res) => {
       "createdAt",
       "expiresAt",
       "status",
+      "createdBy",
+      "currentStatus",
       "assignedRh",
       "assignedRm",
       "assignedBme",
@@ -1518,6 +1614,11 @@ async function loadSocialProfilesFromModashBulk(influencerIds = []) {
 
 exports.adminGetInfluencerList = async (req, res) => {
   try {
+    const params = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
+
     const {
       page = 1,
       limit = 20,
@@ -1528,7 +1629,7 @@ exports.adminGetInfluencerList = async (req, res) => {
       hasProxyEmail,
       sortBy = "createdAt",
       sortOrder = "desc",
-    } = req.query || {};
+    } = params;
 
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
     const limitNum = Math.max(Math.min(parseInt(limit, 10) || 20, 100), 1);
@@ -1599,6 +1700,13 @@ exports.adminGetInfluencerList = async (req, res) => {
             "ispage2Skip",
             "ispage3Skip",
             "proxyEmail",
+            "primaryPlatform",
+            "isAdminCreated",
+            "signupCompleted",
+            "createdByAdmin",
+            "adminCreatedRole",
+            "adminCreatedAt",
+            "signupCompletedAt",
             "createdAt",
             "updatedAt",
           ].join(" ")
@@ -1611,6 +1719,12 @@ exports.adminGetInfluencerList = async (req, res) => {
 
     const socialProfilesMap = await loadSocialProfilesFromModashBulk(
       docs.map((doc) => doc._id)
+    );
+
+    const adminMap = await getAdminMapByIds(
+      docs
+        .filter((doc) => doc?.isAdminCreated === true)
+        .map((doc) => doc?.createdByAdmin)
     );
 
     const influencers = docs.map((doc) => {
@@ -1630,6 +1744,9 @@ exports.adminGetInfluencerList = async (req, res) => {
 
       const socialProfiles =
         socialProfilesMap[String(doc._id)] || [];
+
+      const createdByPayload = buildCreatorPayload(doc, adminMap, "Influencer");
+      const currentStatusPayload = buildSignupCurrentStatus(doc);
 
       return {
         _id: doc._id,
@@ -1652,8 +1769,16 @@ exports.adminGetInfluencerList = async (req, res) => {
             }))
           : [],
         proxyEmail: doc.proxyEmail || null,
-        primaryPlatform,
+        primaryPlatform: primaryPlatform || doc.primaryPlatform || null,
         socialProfiles,
+        isAdminCreated: doc.isAdminCreated === true,
+        signupCompleted: doc.signupCompleted !== false,
+        createdByAdmin: doc.createdByAdmin || null,
+        adminCreatedRole: doc.adminCreatedRole || createdByPayload.createdByAdminRole || "",
+        adminCreatedAt: doc.adminCreatedAt || null,
+        signupCompletedAt: doc.signupCompletedAt || null,
+        ...createdByPayload,
+        ...currentStatusPayload,
         pageCounts: {
           page1: Array.isArray(doc.page1) ? doc.page1.length : 0,
           page2: Array.isArray(doc.page2) ? doc.page2.length : 0,
@@ -3023,6 +3148,12 @@ exports.adminCreateBrand = async (req, res) => {
       brand: {
         ...brandDoc,
         brandId: String(brandDoc._id),
+        ...buildCreatorPayload(
+          brandDoc,
+          await getAdminMapByIds([brandDoc.createdByAdmin]),
+          "Brand"
+        ),
+        ...buildSignupCurrentStatus(brandDoc),
       },
     });
   } catch (error) {
@@ -3276,6 +3407,12 @@ exports.adminCreateInfluencer = async (req, res) => {
         ...influencer,
         _id: String(influencer._id),
         primaryPlatform: platform,
+        ...buildCreatorPayload(
+          influencer,
+          await getAdminMapByIds([influencer.createdByAdmin]),
+          "Influencer"
+        ),
+        ...buildSignupCurrentStatus(influencer),
         socialProfiles: [
           {
             provider: platform,

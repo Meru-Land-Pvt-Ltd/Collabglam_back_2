@@ -22,17 +22,9 @@ const InfluencerSchema = new Schema(
       match: [emailRegex, "Invalid email"],
     },
 
-    name: {
-      type: String,
-      trim: true,
-      default: "",
-    },
+    name: { type: String, trim: true, default: "" },
 
-    countryId: {
-      type: Schema.Types.ObjectId,
-      ref: "Country",
-      required: false,
-    },
+    countryId: { type: Schema.Types.ObjectId, ref: "Country", required: false },
 
     countryName: {
       type: String,
@@ -46,64 +38,22 @@ const InfluencerSchema = new Schema(
       trim: true,
     },
 
-    country: {
-      type: String,
-      default: "",
-      trim: true,
-    },
+    country: { type: String, default: "", trim: true },
+    location: { type: String, default: "", trim: true },
 
-    location: {
-      type: String,
-      default: "",
-      trim: true,
-    },
+    languages: { type: [NamedRefSchema], default: [] },
+    categories: { type: [NamedRefSchema], default: [] },
 
-    languages: {
-      type: [NamedRefSchema],
-      default: [],
-    },
+    password: { type: String, select: false },
 
-    categories: {
-      type: [NamedRefSchema],
-      default: [],
-    },
+    primaryPlatform: { type: String, default: null, trim: true },
 
-    password: {
-      type: String,
-      select: false,
-    },
+    page1: { type: [Schema.Types.Mixed], required: true, default: [] },
+    page2: { type: [Schema.Types.Mixed], default: [] },
+    page3: { type: [Schema.Types.Mixed], default: [] },
 
-    primaryPlatform: {
-      type: String,
-      default: null,
-      trim: true,
-    },
-
-    page1: {
-      type: [Schema.Types.Mixed],
-      required: true,
-      default: [],
-    },
-
-    page2: {
-      type: [Schema.Types.Mixed],
-      default: [],
-    },
-
-    page3: {
-      type: [Schema.Types.Mixed],
-      default: [],
-    },
-
-    ispage2Skip: {
-      type: Boolean,
-      default: false,
-    },
-
-    ispage3Skip: {
-      type: Boolean,
-      default: false,
-    },
+    ispage2Skip: { type: Boolean, default: false },
+    ispage3Skip: { type: Boolean, default: false },
 
     proxyEmail: {
       type: String,
@@ -118,37 +68,13 @@ const InfluencerSchema = new Schema(
       },
     },
 
-    isAdminCreated: {
-      type: Boolean,
-      default: false,
-    },
+    isAdminCreated: { type: Boolean, default: false },
+    signupCompleted: { type: Boolean, default: true },
 
-    signupCompleted: {
-      type: Boolean,
-      default: true,
-    },
-
-    createdByAdmin: {
-      type: Schema.Types.ObjectId,
-      ref: "Master",
-      default: null,
-    },
-
-    adminCreatedRole: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    adminCreatedAt: {
-      type: Date,
-      default: null,
-    },
-
-    signupCompletedAt: {
-      type: Date,
-      default: null,
-    },
+    createdByAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    adminCreatedRole: { type: String, default: "", trim: true },
+    adminCreatedAt: { type: Date, default: null },
+    signupCompletedAt: { type: Date, default: null },
   },
   {
     timestamps: true,
@@ -172,13 +98,13 @@ InfluencerSchema.index(
   { proxyEmail: 1 },
   {
     unique: true,
-    partialFilterExpression: {
-      proxyEmail: { $type: "string", $ne: "" },
-    },
+    partialFilterExpression: { proxyEmail: { $type: "string", $ne: "" } },
   }
 );
 
-const InfluencerModel =
-  models.Influencer || model("Influencer", InfluencerSchema);
+InfluencerSchema.index({ isAdminCreated: 1, signupCompleted: 1, createdAt: -1 });
+InfluencerSchema.index({ createdByAdmin: 1, adminCreatedAt: -1 });
+
+const InfluencerModel = models.Influencer || model("Influencer", InfluencerSchema);
 
 module.exports = { InfluencerModel };
