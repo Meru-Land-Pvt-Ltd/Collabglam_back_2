@@ -1,58 +1,32 @@
-import type { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import { ApiResponse } from "../core/http/ApiResponse";
-import { HttpStatus } from "../core/http/HttpStatus";
-import { AdminModel } from "../model/admin";
+const jwt = require("jsonwebtoken");
+const { ApiResponse } = require("../core/http/ApiResponse");
+const { HttpStatus } = require("../core/http/HttpStatus");
+const { AdminModel } = require("../models/admin");
 
-/** ✅ your new access structure (stored on Admin) */
-export type AdminAccessItem = {
-  key: string;        // module key, e.g. "policy"
-  name?: string;      // optional label
-  isEdit: boolean;
-  isDelete: boolean;
-};
-
-export type AdminJwtPayload = {
-  adminId: string;
-  role?: string; // token role is NOT trusted
-  email?: string;
-  iat?: number;
-  exp?: number;
-};
-
-/** what we attach on req after DB validation */
-export type ReqAdmin = {
-  adminId: string;
-  email?: string;
-  role: string;                 // from DB
-  access: AdminAccessItem[];    // from DB (Admin.access)
-  iat?: number;
-  exp?: number;
-};
-
-function getRequestId(req: Request) {
+function getRequestId(req) {
   return (
-    (req as any).requestId ||
-    (req as any).id ||
-    (req.headers["x-request-id"] as string) ||
+    req.requestId ||
+    req.id ||
+    req.headers["x-request-id"] ||
     "NA"
   );
 }
 
-const normalizeKey = (v: any) =>
+const normalizeKey = (v) =>
   String(v ?? "")
     .toLowerCase()
     .trim()
     .replace(/\s+/g, "_");
 
 /**
- * ✅ AUTH + ACCESS LOADER (NEW STRUCTURE)
+ * AUTH + ACCESS LOADER
  * - verifies JWT
  * - fetches Admin from DB
- * - uses Admin.role + Admin.access (no RoleModel)
+ * - uses Admin.role + Admin.access
  * - attaches req.admin = { adminId, role, access, email }
  */
-export async function adminAuth(req: Request, res: Response, next: NextFunction) {
+
+async function adminAuth(req, res, next) {
   const requestId = getRequestId(req);
 
   try {
@@ -62,7 +36,7 @@ export async function adminAuth(req: Request, res: Response, next: NextFunction)
       return ApiResponse.sendFail(
         res,
         HttpStatus.UNAUTHORIZED,
-        "UNAUTHORIZED" as any,
+        "UNAUTHORIZED",
         "Authorization token missing",
         requestId
       );
@@ -75,25 +49,24 @@ export async function adminAuth(req: Request, res: Response, next: NextFunction)
       return ApiResponse.sendFail(
         res,
         HttpStatus.INTERNAL_SERVER_ERROR,
-        "INTERNAL_ERROR" as any,
+        "INTERNAL_ERROR",
         "JWT_SECRET is missing in env",
         requestId
       );
     }
 
-    const decoded = jwt.verify(token, secret) as AdminJwtPayload;
+    const decoded = jwt.verify(token, secret);
 
     if (!decoded?.adminId) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.UNAUTHORIZED,
-        "UNAUTHORIZED" as any,
+        "UNAUTHORIZED",
         "Invalid token",
         requestId
       );
     }
 
-    // ✅ load admin from DB (single source of truth)
     const admin = await AdminModel.findById(decoded.adminId).select(
       "email role status access"
     );
@@ -102,37 +75,40 @@ export async function adminAuth(req: Request, res: Response, next: NextFunction)
       return ApiResponse.sendFail(
         res,
         HttpStatus.UNAUTHORIZED,
-        "UNAUTHORIZED" as any,
+        "UNAUTHORIZED",
         "Admin not found",
         requestId
       );
     }
 
-    const adminStatus = normalizeKey((admin as any).status || "");
+    const adminStatus = normalizeKey(admin.status || "");
+
     if (adminStatus && adminStatus !== "active") {
       return ApiResponse.sendFail(
         res,
         HttpStatus.FORBIDDEN,
-        "FORBIDDEN" as any,
+        "FORBIDDEN",
         "Admin account is not active",
         requestId
       );
     }
 
-    const roleKey = String((admin as any).role || "").trim();
+    const roleKey = String(admin.role || "").trim();
+
     if (!roleKey) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.FORBIDDEN,
-        "FORBIDDEN" as any,
+        "FORBIDDEN",
         "Role not assigned",
         requestId
       );
     }
 
-    const accessRaw = (admin as any).access;
-    const access: AdminAccessItem[] = Array.isArray(accessRaw)
-      ? accessRaw.map((a: any) => ({
+    const accessRaw = admin.access;
+
+    const access = Array.isArray(accessRaw)
+      ? accessRaw.map((a) => ({
           key: normalizeKey(a?.key),
           name: a?.name ? String(a.name) : undefined,
           isEdit: Boolean(a?.isEdit),
@@ -140,22 +116,21 @@ export async function adminAuth(req: Request, res: Response, next: NextFunction)
         }))
       : [];
 
-    const reqAdmin: ReqAdmin = {
-      adminId: String((admin as any)._id),
-      email: (admin as any).email || decoded.email,
+    req.admin = {
+      adminId: String(admin._id),
+      email: admin.email || decoded.email,
       role: roleKey,
       access,
       iat: decoded.iat,
       exp: decoded.exp,
     };
 
-    (req as any).admin = reqAdmin;
     return next();
-  } catch (err: any) {
+  } catch (err) {
     return ApiResponse.sendFail(
       res,
       HttpStatus.UNAUTHORIZED,
-      "UNAUTHORIZED" as any,
+      "UNAUTHORIZED",
       "Invalid token",
       requestId
     );
@@ -163,36 +138,40 @@ export async function adminAuth(req: Request, res: Response, next: NextFunction)
 }
 
 /**
- * ✅ Guard: checks module access exists in admin.access[]
+ * Guard: checks module access exists in admin.access[]
  * usage:
  * router.get("/policies", adminAuth, requireAccess("policy"), listPolicies)
  */
-export function requireAccess(required: string | string[]) {
+function requireAccess(required) {
   const requiredList = Array.isArray(required) ? required : [required];
   const requiredKeys = requiredList.map(normalizeKey);
 
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req, res, next) => {
     const requestId = getRequestId(req);
 
-    const admin = (req as any)?.admin as ReqAdmin | undefined;
+    const admin = req?.admin;
+
     if (!admin?.adminId) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.UNAUTHORIZED,
-        "UNAUTHORIZED" as any,
+        "UNAUTHORIZED",
         "Unauthorized",
         requestId
       );
     }
 
-    const accessKeys = new Set((admin.access || []).map((a) => normalizeKey(a.key)));
+    const accessKeys = new Set(
+      (admin.access || []).map((a) => normalizeKey(a.key))
+    );
+
     const ok = requiredKeys.every((k) => accessKeys.has(k));
 
     if (!ok) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.FORBIDDEN,
-        "FORBIDDEN" as any,
+        "FORBIDDEN",
         "You don't have access to this API",
         requestId
       );
@@ -203,37 +182,42 @@ export function requireAccess(required: string | string[]) {
 }
 
 /**
- * ✅ Guard: checks isEdit=true for module(s)
+ * Guard: checks isEdit=true for module(s)
  * usage:
  * router.put("/policy/:id", adminAuth, requireEditPermission("policy"), editPolicy)
  */
-export function requireEditPermission(required: string | string[]) {
+function requireEditPermission(required) {
   const requiredList = Array.isArray(required) ? required : [required];
   const requiredKeys = requiredList.map(normalizeKey);
 
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req, res, next) => {
     const requestId = getRequestId(req);
 
-    const admin = (req as any)?.admin as ReqAdmin | undefined;
+    const admin = req?.admin;
+
     if (!admin?.adminId) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.UNAUTHORIZED,
-        "UNAUTHORIZED" as any,
+        "UNAUTHORIZED",
         "Unauthorized",
         requestId
       );
     }
 
-    const map = new Map<string, AdminAccessItem>();
-    (admin.access || []).forEach((a) => map.set(normalizeKey(a.key), a));
+    const map = new Map();
+
+    (admin.access || []).forEach((a) => {
+      map.set(normalizeKey(a.key), a);
+    });
 
     const ok = requiredKeys.every((k) => Boolean(map.get(k)?.isEdit));
+
     if (!ok) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.FORBIDDEN,
-        "FORBIDDEN" as any,
+        "FORBIDDEN",
         "You don't have permission to edit",
         requestId
       );
@@ -244,37 +228,42 @@ export function requireEditPermission(required: string | string[]) {
 }
 
 /**
- * ✅ Guard: checks isDelete=true for module(s)
+ * Guard: checks isDelete=true for module(s)
  * usage:
  * router.delete("/policy/:id", adminAuth, requireDeletePermission("policy"), deletePolicy)
  */
-export function requireDeletePermission(required: string | string[]) {
+function requireDeletePermission(required) {
   const requiredList = Array.isArray(required) ? required : [required];
   const requiredKeys = requiredList.map(normalizeKey);
 
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req, res, next) => {
     const requestId = getRequestId(req);
 
-    const admin = (req as any)?.admin as ReqAdmin | undefined;
+    const admin = req?.admin;
+
     if (!admin?.adminId) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.UNAUTHORIZED,
-        "UNAUTHORIZED" as any,
+        "UNAUTHORIZED",
         "Unauthorized",
         requestId
       );
     }
 
-    const map = new Map<string, AdminAccessItem>();
-    (admin.access || []).forEach((a) => map.set(normalizeKey(a.key), a));
+    const map = new Map();
+
+    (admin.access || []).forEach((a) => {
+      map.set(normalizeKey(a.key), a);
+    });
 
     const ok = requiredKeys.every((k) => Boolean(map.get(k)?.isDelete));
+
     if (!ok) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.FORBIDDEN,
-        "FORBIDDEN" as any,
+        "FORBIDDEN",
         "You don't have permission to delete",
         requestId
       );
@@ -285,22 +274,24 @@ export function requireDeletePermission(required: string | string[]) {
 }
 
 /**
- * ✅ keep strict role checks if needed (role comes from DB via adminAuth)
+ * Strict role checks if needed
+ * role comes from DB via adminAuth
  * usage:
  * router.post("/admin/invite", adminAuth, requireAdminRoles(["superadmin"]), inviteAdmin)
  */
-export function requireAdminRoles(roles: string[]) {
+function requireAdminRoles(roles) {
   const allowed = roles.map((r) => String(r).trim());
 
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req, res, next) => {
     const requestId = getRequestId(req);
 
-    const role = String((req as any)?.admin?.role || "").trim();
+    const role = String(req?.admin?.role || "").trim();
+
     if (!role || !allowed.includes(role)) {
       return ApiResponse.sendFail(
         res,
         HttpStatus.FORBIDDEN,
-        "FORBIDDEN" as any,
+        "FORBIDDEN",
         "You don't have access to this API",
         requestId
       );
@@ -309,3 +300,11 @@ export function requireAdminRoles(roles: string[]) {
     return next();
   };
 }
+
+module.exports = {
+  adminAuth,
+  requireAccess,
+  requireEditPermission,
+  requireDeletePermission,
+  requireAdminRoles,
+};
