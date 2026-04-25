@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const Campaign = require("../models/campaign");
 const  OpenAI = require("openai");
 const BrandInfo = require("../models/brandInfo")
+const BrandCoupon = require("../models/brandCoupon")
 const cheerio = require("cheerio");
 const { GoogleGenAI } = require("@google/genai");
 const { scrapeBrandWebsite } = require("../utils/brandScraper");
@@ -2466,6 +2467,103 @@ exports.BrandInformation = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to generate and save brand data",
+      error: error.message,
+    });
+  }
+};
+
+const generateRandomCode = (length = 9) => {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+  let code = "";
+
+  for (let i = 0; i < length; i++) {
+    const randomIndex = crypto.randomInt(0, chars.length);
+    code += chars[randomIndex];
+  }
+
+  return code;
+};
+
+const createPromoCode = () => {
+  return `CG${generateRandomCode(9)}`;
+};
+
+exports.CreateBrandCoupon = async (req, res) => {
+  try {
+    const {
+      brandId,
+      subscriptionId,
+      newPrice,
+      expiredAt,
+    } = req.body;
+
+    if (!brandId || !subscriptionId || newPrice === undefined || !expiredAt) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId, subscriptionId, newPrice and expiredAt are required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(brandId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid brandId",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subscriptionId",
+      });
+    }
+
+    if (Number(newPrice) < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "newPrice cannot be negative",
+      });
+    }
+
+    let promocode;
+    let isUnique = false;
+
+    while (!isUnique) {
+      promocode = createPromoCode();
+
+      const existingPromoCode = await BrandCoupon.findOne({
+        promocode,
+      });
+
+      if (!existingPromoCode) {
+        isUnique = true;
+      }
+    }
+
+    const brandCoupon = await BrandCoupon.create({
+      brandId,
+      subscriptionId,
+      newPrice,
+      promocode,
+      hasUsed: false,
+      expiredAt,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Brand coupon created successfully",
+      promocode: brandCoupon.promocode,
+      data: brandCoupon,
+    });
+
+  } catch (error) {
+    console.error("CreateBrandCoupon error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create brand coupon",
       error: error.message,
     });
   }
