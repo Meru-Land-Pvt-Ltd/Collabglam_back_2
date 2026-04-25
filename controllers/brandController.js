@@ -912,6 +912,43 @@ async function saveBrandOnboarding(req, res, next) {
     return handleControllerError(next, err, "saveBrandOnboarding");
   }
 }
+function hasCompletedOnboardingStep(step) {
+  if (Array.isArray(step)) {
+    return step.some((item) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        return Object.keys(item).length > 0;
+      }
+      return Boolean(item);
+    });
+  }
+
+  if (step && typeof step === "object") {
+    return Object.keys(step).length > 0;
+  }
+
+  return Boolean(step);
+}
+function computeBrandNextRoute(brand) {
+  const page1Done =
+    hasCompletedOnboardingStep(brand?.page1) ||
+    brand?.ispage1Skip === true;
+
+  const page2Done =
+    hasCompletedOnboardingStep(brand?.page2) ||
+    brand?.ispage2Skip === true;
+
+  const page3Done =
+    hasCompletedOnboardingStep(brand?.page3) ||
+    brand?.ispage3Skip === true;
+
+  let route = "campaign";
+
+  if (!page1Done) route = "page1";
+  else if (!page2Done) route = "page2";
+  else if (!page3Done) route = "page3";
+
+  return { route, page1Done, page2Done, page3Done };
+}
 
 async function signInBrand(req, res, next) {
   const requestId = req.requestId || "";
@@ -955,6 +992,8 @@ async function signInBrand(req, res, next) {
       email: brand.email,
     });
 
+    const routeInfo = computeBrandNextRoute(brand);
+
     return ApiResponse.sendOk(
       res,
       HttpStatus.OK,
@@ -962,6 +1001,19 @@ async function signInBrand(req, res, next) {
         message: "Brand sign in successful",
         brandId: String(brand._id),
         token,
+        route: routeInfo.route,
+        onboarding: {
+          page1Done: routeInfo.page1Done,
+          page2Done: routeInfo.page2Done,
+          page3Done: routeInfo.page3Done,
+        },
+        page1: brand.page1 || [],
+        page2: brand.page2 || [],
+        page3: brand.page3 || [],
+        ispage1Skip: brand.ispage1Skip || false,
+        ispage2Skip: brand.ispage2Skip || false,
+        ispage3Skip: brand.ispage3Skip || false,
+        isProfilePicSkip: brand.isProfilePicSkip || false,
       },
       requestId
     );

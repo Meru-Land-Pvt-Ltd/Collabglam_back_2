@@ -8,6 +8,7 @@ router.get('/users', ModashController.frontendUsers);
 
 router.post('/search', ModashController.frontendSearch);
 router.post('/search-unified', ModashController.frontendUnifiedSearch);
+// router.post('/search-unified-suggestions', ModashController.frontendUnifiedSuggestions);
 router.post('/search', ModashController.frontendSearch);
 
 router.get('/report', ModashController.frontendReport);
@@ -20,5 +21,6 @@ router.get('/saved', ModashController.getSavedInfluencers);
 router.get('/random', ModashController.getRandomInfluencers);
 router.post('/export-csv',  ModashController.exportSavedInfluencersCsv);
 router.get('/media-kit-link',  ModashController.getMediaKitLink);
-
+router.post("/creator", ModashController.upsertCreator);
+router.get("/creator/:userId", ModashController.getCreatorByUserId);
 module.exports = router;
