@@ -99,16 +99,9 @@ function getMailboxFilter(admin) {
   return null;
 }
 
-function getThreadMeta(admin) {
+async function getThreadMeta(admin) {
   const role = normalizeRole(admin?.role);
   const adminId = String(admin?.adminId || "");
-
-  if (role === "revenue_head") {
-    return {
-      filter: { ownerRole: OWNER_ROLE.REVENUE_HEAD, ownerId: adminId },
-      unreadField: "unreadForRevenueHead",
-    };
-  }
 
   if (role === "bme") {
     return {
@@ -121,6 +114,22 @@ function getThreadMeta(admin) {
     return {
       filter: { ownerRole: OWNER_ROLE.IME, ownerId: adminId },
       unreadField: "unreadForIme",
+    };
+  }
+
+  if (role === "revenue_head") {
+    const campaigns = await OutreachCampaign.find({
+      $or: [
+        { RHId: adminId },
+        { flowType: "ime_influencer" },
+      ],
+    })
+      .select("_id")
+      .lean();
+
+    return {
+      filter: { campaignId: { $in: campaigns.map((item) => item._id) } },
+      unreadField: "unreadForRevenueHead",
     };
   }
 
@@ -333,7 +342,7 @@ exports.getSidebarSummary = async (req, res) => {
     const workspaceMeta = getWorkspaceMeta(role);
     const campaignFilter = getCampaignFilter(req.admin);
     const mailboxFilter = getMailboxFilter(req.admin);
-    const threadMeta = getThreadMeta(req.admin);
+const threadMeta = await getThreadMeta(req.admin);
 
     const [mailboxRows, campaignSummary, conversationSummary] = await Promise.all([
       mailboxFilter

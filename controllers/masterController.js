@@ -1025,9 +1025,7 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
     if (!actor?.adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    if (adminId == "64b8c8f1c9d898001d9e7c3e") {
 
-    }
     if (!assignmentId) {
       return res.status(400).json({
         success: false,
@@ -1159,12 +1157,29 @@ exports.listExecutiveAdmin = async (req, res) => {
 
     const executives = await AdminModel.find(filter)
       .select("-passwordHash -inviteTokenHash")
-      .sort({ createdAt: -1 });
+      .populate("parentAdmin", "name email role")
+      .populate("createdBy", "name email role")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const data = executives.map((item) => {
+      const revenueHead =
+        item?.parentAdmin?.role === ROLES.REVENUE_HEAD
+          ? item.parentAdmin
+          : item?.createdBy?.role === ROLES.REVENUE_HEAD
+            ? item.createdBy
+            : null;
+
+      return {
+        ...item,
+        revenueHeadName: revenueHead?.name || "",
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      count: executives.length,
-      data: executives,
+      count: data.length,
+      data,
     });
   } catch (e) {
     return res.status(500).json({
@@ -1178,7 +1193,8 @@ exports.rmlist = async (req, res) => {
   try {
     const rms = await AdminModel.find({ role: "revenue_head", status: "active" })
       .select("-passwordHash -inviteTokenHash")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       success: true,

@@ -116,6 +116,8 @@ function buildDefaultSendingOptions() {
     insertUnsubscribeHeader: false,
     allowRiskyContacts: false,
     disableBounceProtect: false,
+    ccList: [],
+    bccList: [],
   };
 }
 
@@ -135,11 +137,11 @@ function normalizeCampaignSchedule(schedule = {}, fallback = buildDefaultCampaig
     ? schedule.windows
     : Array.isArray(schedule.schedules) && schedule.schedules.length
       ? schedule.schedules.map((item) => ({
-          name: item?.name,
-          from: item?.from || item?.timing?.from,
-          to: item?.to || item?.timing?.to,
-          days: item?.days,
-        }))
+        name: item?.name,
+        from: item?.from || item?.timing?.from,
+        to: item?.to || item?.timing?.to,
+        days: item?.days,
+      }))
       : base.windows;
 
   const windows = windowsInput
@@ -162,21 +164,21 @@ function normalizeCampaignSchedule(schedule = {}, fallback = buildDefaultCampaig
   return {
     timezone: String(
       schedule.timezone ||
-        base.timezone ||
-        process.env.INSTANTLY_DEFAULT_TIMEZONE ||
-        "Asia/Kolkata"
+      base.timezone ||
+      process.env.INSTANTLY_DEFAULT_TIMEZONE ||
+      "Asia/Kolkata"
     ).trim(),
     startDate: String(
       schedule.startDate ||
-        schedule.start_date ||
-        base.startDate ||
-        formatDateOnly(new Date())
+      schedule.start_date ||
+      base.startDate ||
+      formatDateOnly(new Date())
     ).trim(),
     endDate: String(
       schedule.endDate ||
-        schedule.end_date ||
-        base.endDate ||
-        formatDateOnly(addDays(new Date(), 365))
+      schedule.end_date ||
+      base.endDate ||
+      formatDateOnly(addDays(new Date(), 365))
     ).trim(),
     windows: windows.length ? windows : base.windows,
   };
@@ -188,11 +190,11 @@ function normalizeSequenceStep(step = {}, index = 0) {
     Array.isArray(step.variants) && step.variants.length
       ? step.variants
       : [
-          {
-            subject: step.subject || fallback.variants[0].subject,
-            body: step.body || fallback.variants[0].body,
-          },
-        ];
+        {
+          subject: step.subject || fallback.variants[0].subject,
+          body: step.body || fallback.variants[0].body,
+        },
+      ];
 
   return {
     stepOrder: normalizeNumber(step.stepOrder, index + 1, 1),
@@ -200,20 +202,20 @@ function normalizeSequenceStep(step = {}, index = 0) {
     delay: normalizeNumber(step.delay, fallback.delay, 0),
     delayUnit: String(
       step.delayUnit ||
-        step.delay_unit ||
-        fallback.delayUnit ||
-        fallback.delay_unit ||
-        "days"
+      step.delay_unit ||
+      fallback.delayUnit ||
+      fallback.delay_unit ||
+      "days"
     )
       .trim()
       .toLowerCase(),
     preDelay: normalizeNumber(step.preDelay, fallback.preDelay, 0),
     preDelayUnit: String(
       step.preDelayUnit ||
-        step.pre_delay_unit ||
-        fallback.preDelayUnit ||
-        fallback.pre_delay_unit ||
-        "days"
+      step.pre_delay_unit ||
+      fallback.preDelayUnit ||
+      fallback.pre_delay_unit ||
+      "days"
     )
       .trim()
       .toLowerCase(),
@@ -262,6 +264,12 @@ function normalizeSendingOptions(options = {}, fallback = buildDefaultSendingOpt
       options.disableBounceProtect ?? options.disable_bounce_protect,
       base.disableBounceProtect
     ),
+    ccList: Array.isArray(options.ccList ?? options.cc_list)
+      ? [...new Set((options.ccList ?? options.cc_list).map((item) => normalizeEmail(item)).filter(Boolean))]
+      : base.ccList || [],
+    bccList: Array.isArray(options.bccList ?? options.bcc_list)
+      ? [...new Set((options.bccList ?? options.bcc_list).map((item) => normalizeEmail(item)).filter(Boolean))]
+      : base.bccList || [],
   };
 }
 
@@ -364,6 +372,8 @@ function buildCampaignCreatePayload({
     insert_unsubscribe_header: sendingOptions.insertUnsubscribeHeader,
     allow_risky_contacts: sendingOptions.allowRiskyContacts,
     disable_bounce_protect: sendingOptions.disableBounceProtect,
+    cc_list: Array.isArray(sendingOptions.ccList) ? sendingOptions.ccList : [],
+    bcc_list: Array.isArray(sendingOptions.bccList) ? sendingOptions.bccList : [],
   };
 }
 
@@ -387,14 +397,81 @@ async function getActiveRhMailbox(rhId) {
   }).lean();
 }
 
-async function getActiveImeMailbox(imeId) {
-  if (!imeId) return null;
+function resolveSelectedAccountEmails(
+  senderAssignments = [],
+  requestedEmails = [],
+  fallbackEmails = []
+) {
+  const availableEmails = senderAssignments
+    .map((item) => String(item?.email || "").trim().toLowerCase())
+    .filter(Boolean);
 
-  return OutreachMailboxAssignment.findOne({
+  const normalizedRequested = Array.isArray(requestedEmails)
+    ? [...new Set(requestedEmails.map((item) => normalizeEmail(item)).filter(Boolean))]
+    : [];
+
+  const normalizedFallback = Array.isArray(fallbackEmails)
+    ? [...new Set(fallbackEmails.map((item) => normalizeEmail(item)).filter(Boolean))]
+    : [];
+
+  const requestedSubset = normalizedRequested.filter((email) => availableEmails.includes(email));
+  if (requestedSubset.length) return requestedSubset;
+
+  const fallbackSubset = normalizedFallback.filter((email) => availableEmails.includes(email));
+  if (fallbackSubset.length) return fallbackSubset;
+
+  return availableEmails;
+}
+
+function resolveSelectedSenderEmail(
+  senderAssignments = [],
+  requestedEmail = "",
+  fallbackEmail = "",
+  selectedEmails = []
+) {
+  const allowedEmails = Array.isArray(selectedEmails) && selectedEmails.length
+    ? selectedEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+    : resolveSelectedAccountEmails(senderAssignments);
+
+  const requested = normalizeEmail(requestedEmail);
+  const fallback = normalizeEmail(fallbackEmail);
+
+  if (requested && allowedEmails.includes(requested)) return requested;
+  if (fallback && allowedEmails.includes(fallback)) return fallback;
+
+  const primary = senderAssignments.find(
+    (item) =>
+      item?.isPrimary &&
+      allowedEmails.includes(normalizeEmail(item?.email))
+  );
+
+  if (primary?.email) return normalizeEmail(primary.email);
+
+  return allowedEmails[0] || "";
+}
+
+async function getActiveImeSenders(imeId) {
+  if (!imeId) return [];
+
+  return OutreachMailboxAssignment.find({
     adminId: imeId,
     role: OWNER_ROLE.IME,
     isActive: true,
-  }).lean();
+  })
+    .sort({ isPrimary: -1, assignedAt: 1, createdAt: 1 })
+    .lean();
+}
+
+async function getAvailableSenderEmailsForCampaign(campaign) {
+  if (!campaign) return [];
+
+  if (isImeFlow(campaign)) {
+    const imeAssignments = await getActiveImeSenders(campaign.IMEId);
+    return imeAssignments.map((item) => normalizeEmail(item.email));
+  }
+
+  const sdrAssignments = await getActiveSdrSenders(campaign.sdrId);
+  return sdrAssignments.map((item) => normalizeEmail(item.email));
 }
 
 async function getStandardCreateContext(req) {
@@ -522,20 +599,27 @@ async function getManagedCampaign(req, campaignId) {
     throw error;
   }
 
-  if (req.admin.role === "super_admin") return campaign;
+  const adminId = String(req.admin?.adminId || req.admin?._id || "");
+  const role = String(req.admin?.role || "").trim().toLowerCase();
 
-  if (
-    req.admin.role === "sdr" &&
-    String(campaign.sdrId) === String(req.admin.adminId)
-  ) {
+  if (role === "super_admin") return campaign;
+
+  if (role === "sdr" && String(campaign.sdrId) === adminId) {
     return campaign;
   }
 
-  if (
-    req.admin.role === "ime" &&
-    String(campaign.IMEId) === String(req.admin.adminId)
-  ) {
+  if (role === "ime" && String(campaign.IMEId) === adminId) {
     return campaign;
+  }
+
+  if (role === "revenue_head" || role === "rh") {
+    const isOwnedRh = String(campaign.RHId) === adminId;
+    const isImeCampaign =
+      String(campaign.flowType || "").trim().toLowerCase() === "ime_influencer";
+
+    if (isOwnedRh || isImeCampaign) {
+      return campaign;
+    }
   }
 
   const error = new Error("You do not own this campaign");
@@ -555,27 +639,35 @@ async function getAccessibleCampaign(req, campaignId) {
     throw error;
   }
 
-  if (req.admin.role === "super_admin") return campaign;
+  const adminId = String(req.admin?.adminId || req.admin?._id || "");
+  const role = String(req.admin?.role || "").trim().toLowerCase();
+
+  if (role === "super_admin") return campaign;
 
   if (
-    req.admin.role === "sdr" &&
-    String(campaign.sdrId?._id || campaign.sdrId) === String(req.admin.adminId)
+    role === "sdr" &&
+    String(campaign.sdrId?._id || campaign.sdrId) === adminId
   ) {
     return campaign;
   }
 
   if (
-    req.admin.role === "revenue_head" &&
-    String(campaign.RHId?._id || campaign.RHId) === String(req.admin.adminId)
+    role === "ime" &&
+    String(campaign.IMEId?._id || campaign.IMEId) === adminId
   ) {
     return campaign;
   }
 
-  if (
-    req.admin.role === "ime" &&
-    String(campaign.IMEId?._id || campaign.IMEId) === String(req.admin.adminId)
-  ) {
-    return campaign;
+  if (role === "revenue_head" || role === "rh") {
+    const isOwnedRh =
+      String(campaign.RHId?._id || campaign.RHId) === adminId;
+
+    const isImeCampaign =
+      String(campaign.flowType || "").trim().toLowerCase() === "ime_influencer";
+
+    if (isOwnedRh || isImeCampaign) {
+      return campaign;
+    }
   }
 
   const error = new Error("Forbidden");
@@ -599,21 +691,21 @@ function normalizeContactRow(row = {}) {
 
   const companyName = String(
     normalized.companyname ||
-      normalized.company ||
-      ""
+    normalized.company ||
+    ""
   ).trim();
 
   const contactEmail = normalizeEmail(
     normalized.contactemail ||
-      normalized.email ||
-      normalized.emailaddress ||
-      ""
+    normalized.email ||
+    normalized.emailaddress ||
+    ""
   );
 
   const contactName = String(
     normalized.contactname ||
-      normalized.name ||
-      ""
+    normalized.name ||
+    ""
   ).trim();
 
   const website = String(normalized.website || "").trim();
@@ -911,7 +1003,26 @@ exports.createOutreachCampaign = async (req, res) => {
 
     if (flowType === "ime_influencer") {
       const { ime } = await getImeCreateContext(req);
-      const imeMailbox = await getActiveImeMailbox(ime._id);
+      const imeAssignments = await getActiveImeSenders(ime._id);
+      const primaryIme =
+        imeAssignments.find((item) => item.isPrimary) || imeAssignments[0] || null;
+
+      const defaultImeAccounts = primaryIme?.email
+        ? [normalizeEmail(primaryIme.email)]
+        : [];
+
+      const selectedAccountEmails = resolveSelectedAccountEmails(
+        imeAssignments,
+        req.body?.accountEmails,
+        defaultImeAccounts
+      );
+
+      const selectedSenderEmail = resolveSelectedSenderEmail(
+        imeAssignments,
+        req.body?.senderAccountEmail,
+        primaryIme?.email || "",
+        selectedAccountEmails
+      );
 
       campaign = await OutreachCampaign.create({
         name,
@@ -920,33 +1031,15 @@ exports.createOutreachCampaign = async (req, res) => {
         createdByAdminId: req.admin.adminId,
         configuration,
         instantly: {
-          accountEmails: imeMailbox?.email ? [imeMailbox.email] : [],
-          senderAccountEmail: imeMailbox?.email || "",
+          accountEmails: selectedAccountEmails,
+          senderAccountEmail: selectedSenderEmail,
           leadListId: "",
           campaignId: "",
           rawCampaignPayload: req.body?.instantlyRawCampaignPayload || null,
           shareLink: "",
         },
         teamMailboxes: {
-          IMEEmail: imeMailbox?.email || "",
-        },
-        status: OUTREACH_CAMPAIGN_STATUS.DRAFT,
-        stats: {
-          totalProspects: 0,
-          totalSent: 0,
-          totalClicked: 0,
-          totalReplies: 0,
-          totalOpportunities: 0,
-          totalQualified: 0,
-          totalAssigned: 0,
-          progressPercent: 0,
-        },
-        sync: {
-          providerStatus: "idle",
-          lastErrorCode: "",
-          lastErrorMessage: "",
-          lastSyncedAt: null,
-          lastAnalyticsSyncedAt: null,
+          IMEEmail: selectedSenderEmail,
         },
       });
     } else {
@@ -956,6 +1049,23 @@ exports.createOutreachCampaign = async (req, res) => {
         activeSenders.find((item) => item.isPrimary) || activeSenders[0] || null;
       const rhMailbox = await getActiveRhMailbox(rh._id);
 
+      const defaultSelectedAccounts = primarySender?.email
+        ? [normalizeEmail(primarySender.email)]
+        : [];
+
+      const selectedAccountEmails = resolveSelectedAccountEmails(
+        activeSenders,
+        req.body?.accountEmails,
+        defaultSelectedAccounts
+      );
+
+      const selectedSenderEmail = resolveSelectedSenderEmail(
+        activeSenders,
+        req.body?.senderAccountEmail,
+        primarySender?.email || "",
+        selectedAccountEmails
+      );
+
       campaign = await OutreachCampaign.create({
         name,
         flowType,
@@ -964,8 +1074,8 @@ exports.createOutreachCampaign = async (req, res) => {
         createdByAdminId: req.admin.adminId,
         configuration,
         instantly: {
-          accountEmails: activeSenders.map((item) => item.email),
-          senderAccountEmail: primarySender?.email || "",
+          accountEmails: selectedAccountEmails,
+          senderAccountEmail: selectedSenderEmail,
           leadListId: "",
           campaignId: "",
           rawCampaignPayload: req.body?.instantlyRawCampaignPayload || null,
@@ -1016,26 +1126,28 @@ exports.createOutreachCampaign = async (req, res) => {
 
 exports.listOutreachCampaigns = async (req, res) => {
   try {
-    const adminId = req.admin?._id;
-    const role = String(req.admin?.role || "").toLowerCase();
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
 
-    let filter = {};
+    const adminId = String(req.admin?.adminId || req.admin?._id || "");
+    const role = String(req.admin?.role || "").trim().toLowerCase();
+    const filter = {};
+
+    const status = String(req.query?.status || "").trim().toLowerCase();
+    if (status) {
+      filter.status = status;
+    }
 
     if (role === "sdr") {
-      filter = { sdrId: adminId };
+      filter.sdrId = adminId;
     } else if (role === "ime") {
-      filter = { IMEId: adminId };
-    } else if (role === "rh" || role === "revenue_head") {
-      filter = {
-        $or: [
-          { RHId: adminId },
-          { flowType: "ime_influencer" },
-        ],
-      };
-    } else if (role === "super_admin") {
-      filter = {};
-    } else {
-      filter = { _id: null };
+      filter.IMEId = adminId;
+    } else if (role === "revenue_head" || role === "rh") {
+      filter.$or = [
+        { RHId: adminId },
+        { flowType: "ime_influencer" },
+      ];
+    } else if (role !== "super_admin") {
+      filter._id = null;
     }
 
     const rows = await OutreachCampaign.find(filter)
@@ -1046,12 +1158,14 @@ exports.listOutreachCampaigns = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      count: rows.length,
       data: rows,
     });
   } catch (error) {
-    return res.status(500).json({
+    const payload = getAxiosErrorPayload(error, "Failed to list campaigns");
+    return res.status(payload.statusCode).json({
       success: false,
-      message: error.message || "Failed to list campaigns",
+      ...payload,
     });
   }
 };
@@ -1070,10 +1184,20 @@ exports.getOutreachCampaignById = async (req, res) => {
         ? campaign.templateVariables
         : buildTemplateVariableList(campaign.csvSchema?.columns || []);
 
+    const availableAccountEmails = await getAvailableSenderEmailsForCampaign(campaign);
+
     return res.status(200).json({
       success: true,
       data: {
         ...campaign.toObject(),
+        instantly: {
+          ...(campaign.instantly || {}),
+          senderAccountEmail: campaign.instantly?.senderAccountEmail || "",
+          accountEmails: Array.isArray(campaign.instantly?.accountEmails)
+            ? campaign.instantly.accountEmails
+            : [],
+          availableAccountEmails,
+        },
         templateVariables,
       },
     });
@@ -1158,11 +1282,24 @@ exports.getOutreachCampaignConfiguration = async (req, res) => {
     ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
     const campaign = await getAccessibleCampaign(req, req.params.id);
 
+    let availableAccountEmails = [];
+
+    if (isImeFlow(campaign)) {
+      const imeAssignments = await getActiveImeSenders(campaign.IMEId);
+      availableAccountEmails = imeAssignments.map((item) => normalizeEmail(item.email)).filter(Boolean);
+    } else {
+      const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      availableAccountEmails = senderAssignments.map((item) => normalizeEmail(item.email)).filter(Boolean);
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         configuration: getCampaignConfigurationFromDocument(campaign),
-        instantly: campaign.instantly || {},
+        instantly: {
+          ...(campaign.instantly || {}),
+          availableAccountEmails,
+        },
         status: campaign.status,
         flowType: campaign.flowType || "standard_brand",
       },
@@ -1195,25 +1332,80 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
     await campaign.save();
 
     if (req.body?.syncNow && campaign.instantly?.campaignId) {
+      let senderAssignments = [];
       let senderEmails = [];
-      let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
+      let primarySenderEmail = normalizeEmail(
+        req.body?.senderAccountEmail || campaign.instantly?.senderAccountEmail || ""
+      );
 
       if (isImeFlow(campaign)) {
-        const imeMailbox = await getActiveImeMailbox(campaign.IMEId);
-        if (imeMailbox?.email) {
-          senderEmails = [imeMailbox.email];
-          primarySenderEmail = imeMailbox.email;
-          campaign.teamMailboxes.IMEEmail = imeMailbox.email;
-        }
-      } else {
-        const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
-        const primarySender =
-          senderAssignments.find((item) => item.isPrimary) || senderAssignments[0] || null;
-        const rhMailbox = await getActiveRhMailbox(campaign.RHId);
+        senderAssignments = await getActiveImeSenders(campaign.IMEId);
 
-        senderEmails = senderAssignments.map((item) => item.email);
-        primarySenderEmail = primarySender?.email || primarySenderEmail;
-        campaign.teamMailboxes.RHEmail = rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
+        if (!senderAssignments.length) {
+          return res.status(400).json({
+            success: false,
+            message: "No mailbox is assigned to this IME",
+          });
+        }
+
+        const availableEmails = senderAssignments
+          .map((item) => normalizeEmail(item.email))
+          .filter(Boolean);
+
+        const requestedEmails = Array.isArray(req.body?.accountEmails)
+          ? req.body.accountEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+          : [];
+
+        senderEmails = requestedEmails.length
+          ? requestedEmails.filter((email) => availableEmails.includes(email))
+          : (campaign.instantly?.accountEmails || [])
+            .map((item) => normalizeEmail(item))
+            .filter((email) => availableEmails.includes(email));
+
+        if (!senderEmails.length) {
+          senderEmails = availableEmails;
+        }
+
+        if (!senderEmails.includes(primarySenderEmail)) {
+          primarySenderEmail = senderEmails[0] || "";
+        }
+
+        campaign.teamMailboxes.IMEEmail = primarySenderEmail;
+      } else {
+        senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+
+        if (!senderAssignments.length) {
+          return res.status(400).json({
+            success: false,
+            message: "No sender mailboxes are assigned to this SDR",
+          });
+        }
+
+        const rhMailbox = await getActiveRhMailbox(campaign.RHId);
+        const availableEmails = senderAssignments
+          .map((item) => normalizeEmail(item.email))
+          .filter(Boolean);
+
+        const requestedEmails = Array.isArray(req.body?.accountEmails)
+          ? req.body.accountEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+          : [];
+
+        senderEmails = requestedEmails.length
+          ? requestedEmails.filter((email) => availableEmails.includes(email))
+          : (campaign.instantly?.accountEmails || [])
+            .map((item) => normalizeEmail(item))
+            .filter((email) => availableEmails.includes(email));
+
+        if (!senderEmails.length) {
+          senderEmails = availableEmails;
+        }
+
+        if (!senderEmails.includes(primarySenderEmail)) {
+          primarySenderEmail = senderEmails[0] || "";
+        }
+
+        campaign.teamMailboxes.RHEmail =
+          rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
       }
 
       const updatePayload = buildCampaignCreatePayload({
@@ -1265,23 +1457,39 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
       });
     }
 
+    let senderAssignments = [];
     let senderEmails = [];
-    let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
+    let primarySenderEmail = normalizeEmail(
+      req.body?.senderAccountEmail || campaign.instantly?.senderAccountEmail || ""
+    );
 
     if (isImeFlow(campaign)) {
-      const imeMailbox = await getActiveImeMailbox(campaign.IMEId);
-      if (!imeMailbox?.email) {
+      senderAssignments = await getActiveImeSenders(campaign.IMEId);
+
+      if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
           message: "No mailbox is assigned to this IME",
         });
       }
 
-      senderEmails = [imeMailbox.email];
-      primarySenderEmail = imeMailbox.email;
-      campaign.teamMailboxes.IMEEmail = imeMailbox.email;
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
+
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.IMEEmail = primarySenderEmail;
     } else {
-      const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+
       if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
@@ -1289,13 +1497,23 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
         });
       }
 
-      const primarySender =
-        senderAssignments.find((item) => item.isPrimary) || senderAssignments[0] || null;
       const rhMailbox = await getActiveRhMailbox(campaign.RHId);
 
-      senderEmails = senderAssignments.map((item) => item.email);
-      primarySenderEmail = primarySender?.email || primarySenderEmail;
-      campaign.teamMailboxes.RHEmail = rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
+
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.RHEmail =
+        rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
     }
 
     const updatePayload = buildCampaignCreatePayload({
@@ -1406,8 +1624,8 @@ exports.sendCampaignTestEmail = async (req, res) => {
 
     const preheaderHtml = variant.preheaderText
       ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(
-          variant.preheaderText
-        )}</div>`
+        variant.preheaderText
+      )}</div>`
       : "";
 
     const signatureHtml = variant.signatureHtml
@@ -1590,13 +1808,13 @@ exports.addCampaignContactsManual = async (req, res) => {
     const contacts = Array.isArray(req.body?.contacts)
       ? req.body.contacts
       : [
-          {
-            companyName: req.body?.companyName,
-            contactName: req.body?.contactName,
-            contactEmail: req.body?.contactEmail,
-            website: req.body?.website,
-          },
-        ];
+        {
+          companyName: req.body?.companyName,
+          contactName: req.body?.contactName,
+          contactEmail: req.body?.contactEmail,
+          website: req.body?.website,
+        },
+      ];
 
     const prospectDocs = await upsertProspectsFromRows(contacts);
     const result = await attachProspectsToCampaign(campaign, prospectDocs);
@@ -1789,18 +2007,18 @@ exports.shareOutreachCampaign = async (req, res) => {
       typeof shareResult === "string"
         ? (isHttpUrl(shareResult) ? shareResult.trim() : "")
         : pickUrl(
-            shareResult?.shareLink,
-            shareResult?.share_link,
-            shareResult?.shareUrl,
-            shareResult?.share_url,
-            shareResult?.url,
-            shareResult?.data?.shareLink,
-            shareResult?.data?.share_link,
-            shareResult?.data?.shareUrl,
-            shareResult?.data?.share_url,
-            shareResult?.data?.url,
-            campaign.instantly?.shareLink
-          );
+          shareResult?.shareLink,
+          shareResult?.share_link,
+          shareResult?.shareUrl,
+          shareResult?.share_url,
+          shareResult?.url,
+          shareResult?.data?.shareLink,
+          shareResult?.data?.share_link,
+          shareResult?.data?.shareUrl,
+          shareResult?.data?.share_url,
+          shareResult?.data?.url,
+          campaign.instantly?.shareLink
+        );
 
     if (shareLink) {
       campaign.instantly.shareLink = shareLink;
@@ -1884,24 +2102,37 @@ exports.launchOutreachCampaign = async (req, res) => {
 
     const imeFlow = isImeFlow(campaign);
 
+    let senderAssignments = [];
     let senderEmails = [];
-    let primarySenderEmail = "";
-    let createCampaignPayload = null;
+    let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
 
-    if (imeFlow) {
-      const imeMailbox = await getActiveImeMailbox(campaign.IMEId);
-      if (!imeMailbox?.email) {
+    if (isImeFlow(campaign)) {
+      senderAssignments = await getActiveImeSenders(campaign.IMEId);
+
+      if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
-          message: "Selected IME must have one connected mailbox",
+          message: "No mailbox is assigned to this IME",
         });
       }
 
-      senderEmails = [imeMailbox.email];
-      primarySenderEmail = imeMailbox.email;
-      campaign.teamMailboxes.IMEEmail = imeMailbox.email;
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
+
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.IMEEmail = primarySenderEmail;
     } else {
-      const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+
       if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
@@ -1909,20 +2140,23 @@ exports.launchOutreachCampaign = async (req, res) => {
         });
       }
 
-      const primarySender =
-        senderAssignments.find((item) => item.isPrimary) || senderAssignments[0];
       const rhMailbox = await getActiveRhMailbox(campaign.RHId);
 
-      if (!rhMailbox) {
-        return res.status(400).json({
-          success: false,
-          message: "Parent Revenue Head mailbox is not connected",
-        });
-      }
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
 
-      senderEmails = senderAssignments.map((item) => item.email);
-      primarySenderEmail = primarySender?.email || "";
-      campaign.teamMailboxes.RHEmail = rhMailbox.email || "";
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.RHEmail =
+        rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
     }
 
     createCampaignPayload = buildCampaignCreatePayload({
@@ -2556,8 +2790,8 @@ exports.diagnoseOutreachCampaign = async (req, res) => {
       } catch (error) {
         diagnostics.warnings.push(
           error?.response?.data?.message ||
-            error?.message ||
-            "Unable to fetch provider sending status"
+          error?.message ||
+          "Unable to fetch provider sending status"
         );
       }
     } else {
@@ -3133,7 +3367,7 @@ exports.createCampaignTemplate = async (req, res) => {
 
     const template = await OutreachTemplate.create({
       workspaceId: String(campaign._id),
-      createdBy: req.admin?._id || null,
+      createdBy: req.admin?.adminId || req.admin?._id || null,
       category: String(req.body?.category || "custom_templates"),
       name: String(req.body?.name || "").trim(),
       subject: String(req.body?.subject || ""),
