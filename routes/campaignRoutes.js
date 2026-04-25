@@ -3,6 +3,7 @@ const router = express.Router();
 const uploadImages = require("../middlewares/uploadImages")
 const campaignController = require("../controllers/campaignsController");
 const { verifyBrandOrAdmin } = require("../middlewares/verifyBrandOrAdmin");
+const { ApiLimiter } = require("../middlewares/rateLimit");
 const { brandAuth } = require("../auth/brandAuth");
 const { influencerAuth } = require("../auth/influencerAuth");
 const  brandOrInfluencerAuth  = require("../auth/brandOrInfluencerAuth");
@@ -21,7 +22,7 @@ router.post("/update-manual", brandAuth, campaignController.updateManualCampaign
 router.get("/getAll", brandAuth, campaignController.getAllCampaigns);
 
 // 4. Get one campaign by its campaignsId
-router.post("/get-by-id", campaignController.getCampaignById);
+router.get("/get-by-id/:campaignId",verifyBrandOrAdmin, campaignController.getCampaignById);
 
 // 5. Delete a campaign by its campaignsId
 router.post("/delete", brandAuth, campaignController.deleteCampaignByCampaignId);
@@ -53,7 +54,7 @@ router.post("/reject-pending", campaignController.rejectCampaignPendingUpdate);
 
 router.get("/created-by-admin/:brandId", campaignController.getAdminCampaigns);
 //
-router.get("/category",campaignController.getCategories);
+router.get("/category",ApiLimiter,campaignController.getCategories);
 router.get("/subcategory", campaignController.getSubcategories);
 
 // existing endpoint

@@ -2161,13 +2161,13 @@ exports.getAllCampaigns = async (req, res) => {
 // GET SINGLE
 // ===============================
 exports.getCampaignById = async (req, res) => {
-  try {
-    const brandId = clean(req.body.brandId);
-    const campaignId = clean(req.body.campaignId);
 
-    if (!brandId || !isOid(brandId)) {
-      return res.status(400).json({ message: "Valid brandId is required." });
-    }
+  
+  try {
+    
+    const campaignId = clean(req.params.campaignId);
+
+   
 
     if (!campaignId || !isOid(campaignId)) {
       return res.status(400).json({ message: "Valid campaignId is required." });
@@ -2175,7 +2175,7 @@ exports.getCampaignById = async (req, res) => {
 
     const campaign = await Campaign.findOne({
       _id: campaignId,
-      brandId: brandId,
+
     }).lean();
 
     if (!campaign) {
