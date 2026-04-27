@@ -40,10 +40,6 @@ router.post('/item/media-kit-link/approval', adminAuth, controller.updateFolderI
 router.post('/:id/share-link', adminAuth, controller.generateShareLink);
 router.post('/:id/import-youtube', adminAuth, controller.bulkImportYoutubeToFolder);
 
-router.post(
-  '/apply-good-fit',
-  adminAuth,
-  controller.applyGoodFitToCampaign
-);
+router.post('/assign-campaign', adminAuth, controller.assignCampaignToFolder);
 
 module.exports = router;

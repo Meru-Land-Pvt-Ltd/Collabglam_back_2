@@ -156,6 +156,30 @@ const FolderShareSchema = new mongoose.Schema(
   { _id: false }
 );
 
+
+const AssignedCampaignSchema = new mongoose.Schema(
+  {
+    campaignId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Campaign',
+      default: null,
+      index: true,
+    },
+    campaignsId: { type: String, trim: true, default: '' },
+    campaignTitle: { type: String, trim: true, default: '' },
+    productOrServiceName: { type: String, trim: true, default: '' },
+    brandId: { type: mongoose.Schema.Types.Mixed, default: null },
+    brandName: { type: String, trim: true, default: '' },
+    assignedAt: { type: Date, default: null },
+    assignedByAdminId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Master',
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const PitchFolderSchema = new mongoose.Schema(
   {
     title: { type: String, trim: true, required: true, index: true },
@@ -169,6 +193,11 @@ const PitchFolderSchema = new mongoose.Schema(
 
     share: {
       type: FolderShareSchema,
+      default: () => ({}),
+    },
+
+    assignedCampaign: {
+      type: AssignedCampaignSchema,
       default: () => ({}),
     },
 
@@ -200,6 +229,7 @@ PitchFolderSchema.index(
   }
 );
 
+PitchFolderSchema.index({ 'assignedCampaign.campaignId': 1, archivedAt: 1, updatedAt: -1 });
 PitchFolderSchema.index({ createdByAdmin: 1, archivedAt: 1, updatedAt: -1 });
 
 module.exports = mongoose.model('PitchFolder', PitchFolderSchema);

@@ -1165,6 +1165,10 @@ exports.getListByCampaign = async (req, res) => {
           : 0;
 
       const applicantStatuses = resolveApplicantStatuses(applicant);
+      const applicantMarkedActive =
+        Number(applicant?.isActive) === 1 ||
+        normalizeText(applicantStatuses.statusBrand) === 'active' ||
+        normalizeText(applicantStatuses.statusInfluencer) === 'active';
 
       const appliedAt = resolveApplicantDate(applicant, recordCreatedAt);
 
@@ -1200,8 +1204,8 @@ exports.getListByCampaign = async (req, res) => {
         brandStatus: applicantStatuses.statusBrand,
         influencerStatus: applicantStatuses.statusInfluencer,
 
-        isInvited: lifecycle.isInvited,
-        isActive: lifecycle.isActive,
+        isInvited: applicantMarkedActive ? 0 : lifecycle.isInvited,
+        isActive: applicantMarkedActive ? 1 : lifecycle.isActive,
         isCompleted: lifecycle.isCompleted,
         lifecycleStatus: lifecycle.lifecycleStatus,
         lifecycleStatusRaw: lifecycle.lifecycleStatusRaw,

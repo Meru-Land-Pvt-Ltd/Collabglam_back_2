@@ -39,7 +39,7 @@ function normalizeEmail(value = '') {
   return cleanStr(value).toLowerCase();
 }
 
-async function findCampaignByAnyIdForGoodFit(campaignId) {
+async function findCampaignByAnyIdForAssignment(campaignId) {
   const id = cleanStr(campaignId);
   if (!id) return null;
 
@@ -828,6 +828,266 @@ function serializeAdmin(admin) {
   };
 }
 
+
+function hasAssignedCampaign(doc) {
+  return !!doc?.assignedCampaign?.campaignId;
+}
+
+function buildAssignedCampaignPayload(campaign, actorId = null) {
+  return {
+    campaignId: campaign?._id || null,
+    campaignsId: cleanStr(campaign?.campaignsId),
+    campaignTitle: cleanStr(campaign?.campaignTitle),
+    productOrServiceName: cleanStr(campaign?.productOrServiceName),
+    brandId: campaign?.brandId || null,
+    brandName: cleanStr(campaign?.brandName),
+    assignedAt: new Date(),
+    assignedByAdminId:
+      actorId && mongoose.Types.ObjectId.isValid(String(actorId))
+        ? new mongoose.Types.ObjectId(String(actorId))
+        : null,
+  };
+}
+
+function serializeAssignedCampaign(assignedCampaign) {
+  if (!assignedCampaign?.campaignId) return null;
+
+  const rawCampaignId = assignedCampaign.campaignId;
+  const campaignId = rawCampaignId?._id ? rawCampaignId._id : rawCampaignId;
+
+  return {
+    campaignId: String(campaignId),
+    campaignsId: assignedCampaign.campaignsId || '',
+    campaignTitle: assignedCampaign.campaignTitle || '',
+    productOrServiceName: assignedCampaign.productOrServiceName || '',
+    brandId: assignedCampaign.brandId || null,
+    brandName: assignedCampaign.brandName || '',
+    assignedAt: assignedCampaign.assignedAt || null,
+    assignedByAdminId: assignedCampaign.assignedByAdminId
+      ? String(assignedCampaign.assignedByAdminId)
+      : null,
+  };
+}
+
+async function activateGoodFitInfluencersForCampaign(folder, campaign) {
+  const campaignObjectId = String(campaign?._id || '');
+  const allItems = Array.isArray(folder?.items) ? folder.items : [];
+  const goodFitItems = allItems.filter((item) => item?.goodFit === true);
+
+  const summary = {
+    campaignId: campaignObjectId,
+    totalGoodFit: goodFitItems.length,
+    withEmail: 0,
+    matched: 0,
+    activated: 0,
+    alreadyInCampaign: 0,
+    missingEmail: 0,
+    influencerNotFound: 0,
+    applicantCount: 0,
+    activatedInfluencers: [],
+    alreadyInCampaignInfluencers: [],
+    missingEmailItems: [],
+    influencerNotFoundItems: [],
+  };
+
+  if (!campaignObjectId || !goodFitItems.length) {
+    return summary;
+  }
+
+  const emailToFolderItem = new Map();
+
+  for (const item of goodFitItems) {
+    const email = normalizeEmail(item?.email);
+
+    if (!email) {
+      summary.missingEmailItems.push({
+        itemId: String(item?._id || ''),
+        name: cleanStr(item?.name),
+        handle: cleanStr(item?.handle),
+      });
+      continue;
+    }
+
+    if (!emailToFolderItem.has(email)) {
+      emailToFolderItem.set(email, item);
+    }
+  }
+
+  const emails = [...emailToFolderItem.keys()];
+  summary.withEmail = emails.length;
+  summary.missingEmail = summary.missingEmailItems.length;
+
+  if (!emails.length) {
+    return summary;
+  }
+
+  const emailRegexes = emails.map(exactEmailRegex);
+  const influencerDocs = await InfluencerModel.find({
+    $or: [
+      { email: { $in: emailRegexes } },
+      { proxyEmail: { $in: emailRegexes } },
+    ],
+  })
+    .select('_id name email proxyEmail')
+    .lean();
+
+  const influencerByEmail = new Map();
+
+  for (const influencer of influencerDocs) {
+    const email = normalizeEmail(influencer?.email);
+    const proxyEmail = normalizeEmail(influencer?.proxyEmail);
+
+    if (email) influencerByEmail.set(email, influencer);
+    if (proxyEmail) influencerByEmail.set(proxyEmail, influencer);
+  }
+
+  const matchedByInfluencerId = new Map();
+
+  for (const email of emails) {
+    const influencer = influencerByEmail.get(email);
+    const folderItem = emailToFolderItem.get(email);
+
+    if (!influencer?._id) {
+      summary.influencerNotFoundItems.push({
+        email,
+        name: cleanStr(folderItem?.name),
+        handle: cleanStr(folderItem?.handle),
+      });
+      continue;
+    }
+
+    const influencerId = String(influencer._id);
+
+    if (!matchedByInfluencerId.has(influencerId)) {
+      matchedByInfluencerId.set(influencerId, {
+        influencer,
+        folderItem,
+        matchedEmail: email,
+      });
+    }
+  }
+
+  const matchedInfluencers = [...matchedByInfluencerId.values()];
+  summary.matched = matchedInfluencers.length;
+  summary.influencerNotFound = summary.influencerNotFoundItems.length;
+
+  if (!matchedInfluencers.length) {
+    return summary;
+  }
+
+  const existingApply = await ApplyCampaign.findOne({
+    campaignId: campaignObjectId,
+  }).lean();
+
+  const alreadyAppliedIds = new Set(
+    Array.isArray(existingApply?.applicants)
+      ? existingApply.applicants
+          .map((applicant) => String(applicant?.influencerId || ''))
+          .filter(Boolean)
+      : []
+  );
+
+  const applicantsToPush = [];
+  const now = new Date();
+
+  for (const row of matchedInfluencers) {
+    const influencerId = String(row.influencer._id);
+    const name = row.influencer.name || row.folderItem?.name || '';
+
+    if (alreadyAppliedIds.has(influencerId)) {
+      summary.alreadyInCampaignInfluencers.push({
+        influencerId,
+        email: row.matchedEmail,
+        name,
+      });
+      continue;
+    }
+
+    applicantsToPush.push({
+      influencerId,
+      name,
+      isShortlisted: 0,
+      isUndicided: 0,
+      isRejected: 0,
+      isActive: 1,
+      statusBrand: 'active',
+      statusInfluencer: 'active',
+      appliedAt: now,
+      activatedAt: now,
+      activeSource: 'pitch_folder_assignment',
+    });
+  }
+
+  if (applicantsToPush.length > 0) {
+    summary.activatedInfluencers = applicantsToPush.map((item) => ({
+      influencerId: item.influencerId,
+      name: item.name,
+    }));
+  }
+
+  const matchedIds = matchedInfluencers.map((row) => String(row.influencer._id));
+
+  let updatedApply = null;
+
+  if (applicantsToPush.length > 0) {
+    updatedApply = await ApplyCampaign.findOneAndUpdate(
+      { campaignId: campaignObjectId },
+      {
+        $setOnInsert: {
+          campaignId: campaignObjectId,
+        },
+        $push: {
+          applicants: {
+            $each: applicantsToPush,
+          },
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+      }
+    ).lean();
+  }
+
+  await ApplyCampaign.updateOne(
+    { campaignId: campaignObjectId },
+    {
+      $set: {
+        'applicants.$[applicant].isShortlisted': 0,
+        'applicants.$[applicant].isUndicided': 0,
+        'applicants.$[applicant].isRejected': 0,
+        'applicants.$[applicant].isActive': 1,
+        'applicants.$[applicant].statusBrand': 'active',
+        'applicants.$[applicant].statusInfluencer': 'active',
+        'applicants.$[applicant].activatedAt': now,
+        'applicants.$[applicant].activeSource': 'pitch_folder_assignment',
+      },
+    },
+    {
+      arrayFilters: [{ 'applicant.influencerId': { $in: matchedIds } }],
+    }
+  );
+
+  if (!updatedApply) {
+    updatedApply = await ApplyCampaign.findOne({ campaignId: campaignObjectId }).lean();
+  }
+
+  summary.activated = matchedInfluencers.length;
+  summary.alreadyInCampaign = summary.alreadyInCampaignInfluencers.length;
+  summary.applicantCount = Array.isArray(updatedApply?.applicants)
+    ? updatedApply.applicants.length
+    : (existingApply?.applicants?.length || 0) + applicantsToPush.length;
+
+  await Campaign.findByIdAndUpdate(campaignObjectId, {
+    $set: {
+      applicantCount: summary.applicantCount,
+      hasApplied: summary.applicantCount > 0 ? 1 : 0,
+    },
+  });
+
+  return summary;
+}
+
 function getLegacyComments(source = {}) {
   if (!source) return '';
 
@@ -1103,6 +1363,7 @@ function serializeFolderListItem(doc) {
         sharedBy: serializeMiniAdmin(doc.share.sharedByAdminId),
       }
       : {},
+    assignedCampaign: serializeAssignedCampaign(doc.assignedCampaign),
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     itemCount: Array.isArray(doc.items) ? doc.items.length : 0,
@@ -1136,6 +1397,7 @@ function serializeFolderDetail(doc) {
         sharedBy: serializeMiniAdmin(doc.share.sharedByAdminId),
       }
       : {},
+    assignedCampaign: serializeAssignedCampaign(doc.assignedCampaign),
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     createdBy: serializeAdmin(doc.createdByAdmin),
@@ -1606,6 +1868,9 @@ exports.duplicateFolder = async (req, res) => {
         generatedAt: null,
         sharedByAdminId: null,
       },
+
+      // duplicated folders start as reusable/unassigned pitch folders
+      assignedCampaign: {},
 
       createdByAdmin: actorId || null,
       updatedByAdmin: actorId || null,
@@ -2658,15 +2923,16 @@ exports.moveFolderItems = async (req, res) => {
   }
 };
 
-exports.applyGoodFitToCampaign = async (req, res) => {
+exports.assignCampaignToFolder = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {
       return res.status(403).json({
         success: false,
-        error: 'You are not allowed to apply Good Fit influencers',
+        error: 'You are not allowed to assign campaigns to pitch folders',
       });
     }
 
+    const actorId = getActorAdminId(req.admin);
     const folderId = cleanStr(req.body?.folderId || req.body?.id);
     const rawCampaignId = cleanStr(req.body?.campaignId);
 
@@ -2693,7 +2959,7 @@ exports.applyGoodFitToCampaign = async (req, res) => {
       });
     }
 
-    const campaign = await findCampaignByAnyIdForGoodFit(rawCampaignId);
+    const campaign = await findCampaignByAnyIdForAssignment(rawCampaignId);
 
     if (!campaign) {
       return res.status(404).json({
@@ -2702,217 +2968,60 @@ exports.applyGoodFitToCampaign = async (req, res) => {
       });
     }
 
-    const campaignObjectId = String(campaign._id);
+    const assignedCampaign = folder.assignedCampaign || {};
+    let assignmentChanged = false;
 
-    const allItems = Array.isArray(folder.items) ? folder.items : [];
+    if (hasAssignedCampaign(folder)) {
+      const currentCampaignObjectId = String(assignedCampaign.campaignId?._id || assignedCampaign.campaignId || '');
+      const nextCampaignObjectId = String(campaign._id || '');
+      const currentCampaignsId = cleanStr(assignedCampaign.campaignsId);
+      const nextCampaignsId = cleanStr(campaign.campaignsId);
 
-    const goodFitItems = allItems.filter((item) => item?.goodFit === true);
+      const isSameCampaign =
+        currentCampaignObjectId === nextCampaignObjectId ||
+        (!!currentCampaignsId && !!nextCampaignsId && currentCampaignsId === nextCampaignsId);
 
-    if (!goodFitItems.length) {
-      return res.status(400).json({
-        success: false,
-        error: 'No Good Fit influencers found in this pitch folder',
-      });
-    }
-
-    const emailToFolderItem = new Map();
-    const missingEmailItems = [];
-
-    for (const item of goodFitItems) {
-      const email = normalizeEmail(item?.email);
-
-      if (!email) {
-        missingEmailItems.push({
-          itemId: String(item?._id || ''),
-          name: cleanStr(item?.name),
-          handle: cleanStr(item?.handle),
+      if (!isSameCampaign) {
+        return res.status(409).json({
+          success: false,
+          error: 'This pitch folder is already assigned to another campaign and cannot be assigned again',
+          data: {
+            folderId: String(folder._id),
+            assignedCampaign: serializeAssignedCampaign(assignedCampaign),
+          },
         });
-        continue;
       }
-
-      if (!emailToFolderItem.has(email)) {
-        emailToFolderItem.set(email, item);
-      }
+    } else {
+      folder.assignedCampaign = buildAssignedCampaignPayload(campaign, actorId);
+      folder.updatedByAdmin = actorId || null;
+      assignmentChanged = true;
+      await folder.save();
     }
 
-    const emails = [...emailToFolderItem.keys()];
+    const activationSummary = await activateGoodFitInfluencersForCampaign(folder, campaign);
 
-    if (!emails.length) {
-      return res.status(400).json({
-        success: false,
-        error: 'Good Fit influencers found, but none of them have email addresses',
-        data: {
-          totalGoodFit: goodFitItems.length,
-          missingEmail: missingEmailItems.length,
-          missingEmailItems,
-        },
-      });
-    }
-
-    const emailRegexes = emails.map(exactEmailRegex);
-
-    const influencerDocs = await InfluencerModel.find({
-      $or: [
-        { email: { $in: emailRegexes } },
-        { proxyEmail: { $in: emailRegexes } },
-      ],
-    })
-      .select('_id name email proxyEmail')
+    const hydrated = await PitchFolder.findById(folder._id)
+      .populate(buildCreatorPopulate())
+      .populate(buildUpdatedByPopulate())
+      .populate(buildSharedByPopulate())
       .lean();
-
-    const influencerByEmail = new Map();
-
-    for (const influencer of influencerDocs) {
-      const email = normalizeEmail(influencer?.email);
-      const proxyEmail = normalizeEmail(influencer?.proxyEmail);
-
-      if (email) influencerByEmail.set(email, influencer);
-      if (proxyEmail) influencerByEmail.set(proxyEmail, influencer);
-    }
-
-    const matchedByInfluencerId = new Map();
-    const influencerNotFound = [];
-
-    for (const email of emails) {
-      const influencer = influencerByEmail.get(email);
-      const folderItem = emailToFolderItem.get(email);
-
-      if (!influencer?._id) {
-        influencerNotFound.push({
-          email,
-          name: cleanStr(folderItem?.name),
-          handle: cleanStr(folderItem?.handle),
-        });
-        continue;
-      }
-
-      const influencerId = String(influencer._id);
-
-      if (!matchedByInfluencerId.has(influencerId)) {
-        matchedByInfluencerId.set(influencerId, {
-          influencer,
-          folderItem,
-          matchedEmail: email,
-        });
-      }
-    }
-
-    const matchedInfluencers = [...matchedByInfluencerId.values()];
-
-    if (!matchedInfluencers.length) {
-      return res.status(404).json({
-        success: false,
-        error: 'No Good Fit influencers matched existing influencer accounts by email',
-        data: {
-          totalGoodFit: goodFitItems.length,
-          withEmail: emails.length,
-          matched: 0,
-          missingEmail: missingEmailItems.length,
-          influencerNotFound: influencerNotFound.length,
-          missingEmailItems,
-          influencerNotFoundItems: influencerNotFound,
-        },
-      });
-    }
-
-    const existingApply = await ApplyCampaign.findOne({
-      campaignId: campaignObjectId,
-    }).lean();
-
-    const alreadyAppliedIds = new Set(
-      Array.isArray(existingApply?.applicants)
-        ? existingApply.applicants
-            .map((applicant) => String(applicant?.influencerId || ''))
-            .filter(Boolean)
-        : []
-    );
-
-    const alreadyApplied = [];
-    const applicantsToPush = [];
-
-    for (const row of matchedInfluencers) {
-      const influencerId = String(row.influencer._id);
-
-      if (alreadyAppliedIds.has(influencerId)) {
-        alreadyApplied.push({
-          influencerId,
-          email: row.matchedEmail,
-          name: row.influencer.name || row.folderItem?.name || '',
-        });
-        continue;
-      }
-
-      applicantsToPush.push({
-        influencerId,
-        name: row.influencer.name || row.folderItem?.name || '',
-        isShortlisted: 0,
-        isUndicided: 0,
-        isRejected: 0,
-        appliedAt: new Date(),
-      });
-    }
-
-    let applicantCount = existingApply?.applicants?.length || 0;
-
-    if (applicantsToPush.length > 0) {
-      const updatedApply = await ApplyCampaign.findOneAndUpdate(
-        { campaignId: campaignObjectId },
-        {
-          $setOnInsert: {
-            campaignId: campaignObjectId,
-          },
-          $push: {
-            applicants: {
-              $each: applicantsToPush,
-            },
-          },
-        },
-        {
-          new: true,
-          upsert: true,
-        }
-      ).lean();
-
-      applicantCount = Array.isArray(updatedApply?.applicants)
-        ? updatedApply.applicants.length
-        : applicantCount + applicantsToPush.length;
-    }
-
-    await Campaign.findByIdAndUpdate(campaignObjectId, {
-      $set: {
-        applicantCount,
-        hasApplied: applicantCount > 0 ? 1 : 0,
-      },
-    });
 
     return res.json({
       success: true,
-      message:
-        applicantsToPush.length > 0
-          ? `${applicantsToPush.length} Good Fit influencer(s) applied successfully`
-          : 'All matched Good Fit influencers are already applied',
+      message: activationSummary.totalGoodFit > 0
+        ? `Campaign assigned and ${activationSummary.activated} Good Fit influencer(s) moved to Active`
+        : 'Campaign assigned to pitch folder successfully. No Good Fit influencers found to activate.',
       data: {
-        folderId: String(folder._id),
-        campaignId: campaignObjectId,
-        totalGoodFit: goodFitItems.length,
-        withEmail: emails.length,
-        matched: matchedInfluencers.length,
-        applied: applicantsToPush.length,
-        alreadyApplied: alreadyApplied.length,
-        missingEmail: missingEmailItems.length,
-        influencerNotFound: influencerNotFound.length,
-        applicantCount,
-        appliedInfluencers: applicantsToPush.map((item) => ({
-          influencerId: item.influencerId,
-          name: item.name,
-        })),
-        alreadyAppliedInfluencers: alreadyApplied,
-        missingEmailItems,
-        influencerNotFoundItems: influencerNotFound,
+        folderId: String(hydrated._id),
+        campaignId: String(campaign._id),
+        assignmentChanged,
+        assignedCampaign: serializeAssignedCampaign(hydrated.assignedCampaign),
+        activation: activationSummary,
+        folder: serializeFolderDetail(hydrated),
       },
     });
   } catch (err) {
-    console.error('[applyGoodFitToCampaign] Error:', err);
+    console.error('[assignCampaignToFolder] Error:', err);
     return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',

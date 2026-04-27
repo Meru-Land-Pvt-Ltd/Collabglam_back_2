@@ -1,7 +1,14 @@
 const mongoose = require("mongoose");
 
-const brandAssignedSchema = new mongoose.Schema(
+const campaignAssignedSchema = new mongoose.Schema(
   {
+    campaignId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Campaign",
+      required: true,
+      index: true,
+    },
+
     brandId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Brand",
@@ -23,6 +30,13 @@ const brandAssignedSchema = new mongoose.Schema(
       index: true,
     },
 
+    idmId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Master",
+      default: null,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: ["active", "inactive", "pending"],
@@ -35,9 +49,9 @@ const brandAssignedSchema = new mongoose.Schema(
   }
 );
 
-brandAssignedSchema.index({ brandId: 1, status: 1 });
-brandAssignedSchema.index({ brandId: 1, RHId: 1, bdmId: 1 });
+campaignAssignedSchema.index({ campaignId: 1, status: 1 });
+campaignAssignedSchema.index({ campaignId: 1, idmId: 1 });
 
 module.exports =
-  mongoose.models.BrandAssigned ||
-  mongoose.model("BrandAssigned", brandAssignedSchema);
+  mongoose.models.CampaignAssigned ||
+  mongoose.model("CampaignAssigned", campaignAssignedSchema);

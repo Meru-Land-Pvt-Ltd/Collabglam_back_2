@@ -291,6 +291,51 @@ function getStatusFromSubscription(doc = {}) {
   return doc.subscriptionExpired || isExpiredDate(subscription.expiresAt) ? "expired" : "active";
 }
 
+async function getCampaignScopedBrandIdsForAdmin(actor = {}) {
+  const role = String(actor?.role || "").trim().toLowerCase();
+  const adminId = String(actor?.adminId || actor?._id || "").trim();
+
+  if (!adminId) return [];
+
+  // Super Admin can see all campaigns
+  if (role === ROLES.SUPER_ADMIN) {
+    return null;
+  }
+
+  let assignmentField = null;
+
+  if (role === ROLES.REVENUE_HEAD) {
+    assignmentField = "RHId";
+  }
+
+  if (role === ROLES.BME) {
+    assignmentField = "bdmId";
+  }
+
+  if (!assignmentField) {
+    return [];
+  }
+
+  const orConditions = [{ [assignmentField]: adminId }];
+
+  if (mongoose.Types.ObjectId.isValid(adminId)) {
+    orConditions.push({
+      [assignmentField]: new mongoose.Types.ObjectId(adminId),
+    });
+  }
+
+  const assignments = await BrandAssigned.find({
+    status: "active",
+    $or: orConditions,
+  })
+    .select("brandId")
+    .lean();
+
+  return assignments
+    .map((item) => item.brandId)
+    .filter(Boolean);
+}
+
 function getBrandFieldValue(brand, field) {
   switch (field) {
     case "name":
@@ -531,7 +576,7 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
 }
 
 async function getScopedCampaignBrandKeysForAdmin(actor = {}) {
-  const scopedBrandObjectIds = await getScopedBrandIdsForAdmin(actor);
+  const scopedBrandObjectIds = await getCampaignScopedBrandIdsForAdmin(actor);
 
   if (scopedBrandObjectIds === null) return null;
 
@@ -966,14 +1011,13 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
 
   if (!adminId) return [];
 
-  if (role === ROLES.SUPER_ADMIN || role === ROLES.REVENUE_HEAD) {
+  if (role === ROLES.SUPER_ADMIN) {
     return null;
   }
 
   const roleToField = {
+    [ROLES.REVENUE_HEAD]: "RHId",
     [ROLES.BME]: "bdmId",
-    [ROLES.IME]: "idmId",
-    [ROLES.SDR]: "sdrId",
   };
 
   const assignmentField = roleToField[role];
@@ -988,24 +1032,10 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
     assigneeFilters.push({ [assignmentField]: toObjectId(adminId) });
   }
 
-  const baseQuery = {
+  const assignments = await BrandAssigned.find({
     status: "active",
     $or: assigneeFilters,
-  };
-
-  if (role === ROLES.SDR) {
-    baseQuery.$and = [
-      {
-        $or: [
-          { bdmId: { $exists: false } },
-          { bdmId: null },
-          { bdmId: "" },
-        ],
-      },
-    ];
-  }
-
-  const assignments = await BrandAssigned.find(baseQuery)
+  })
     .select("brandId")
     .lean();
 
@@ -1024,26 +1054,7 @@ exports.getAllBrands = async (req, res) => {
     const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
     const dir = sortOrder === "asc" ? 1 : -1;
 
-    const actor = req.admin || {};
-    const scopedBrandIds = await getScopedBrandIdsForAdmin(actor);
-
-    const brandQuery = {};
-
-    if (Array.isArray(scopedBrandIds)) {
-      if (!scopedBrandIds.length) {
-        return res.status(200).json({
-          page,
-          limit,
-          total: 0,
-          totalPages: 1,
-          sortBy,
-          sortOrder,
-          brands: [],
-        });
-      }
-
-      brandQuery._id = { $in: scopedBrandIds };
-    }
+const brandQuery = {};
 
     const rawBrands = await Brand.find(brandQuery)
       .select("-password -__v")
@@ -3156,8 +3167,65 @@ async function resolveAdminActor(actor = {}) {
   }
 
   return AdminModel.findById(adminId)
-    .select("_id email role parentAdmin rootAdmin status")
+    .select("_id name email role parentAdmin rootAdmin status")
     .lean();
+}
+
+async function buildBrandAssignmentPayload(assignment) {
+  if (!assignment) {
+    return {
+      assignedRh: "",
+      assignedBme: "",
+      assignedRm: "",
+      assignedBm: "",
+      RHId: null,
+      bdmId: null,
+      assignmentId: null,
+      assignmentStatus: null,
+    };
+  }
+
+  const ids = [assignment.RHId, assignment.bdmId]
+    .filter(Boolean)
+    .map((id) => String(id))
+    .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+  const admins = ids.length
+    ? await AdminModel.find({
+        _id: {
+          $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
+        },
+      })
+        .select("_id name email")
+        .lean()
+    : [];
+
+  const adminMap = {};
+  admins.forEach((admin) => {
+    adminMap[String(admin._id)] = admin.name || admin.email || "";
+  });
+
+  const assignedRh = assignment.RHId
+    ? adminMap[String(assignment.RHId)] || ""
+    : "";
+
+  const assignedBme = assignment.bdmId
+    ? adminMap[String(assignment.bdmId)] || ""
+    : "";
+
+  return {
+    assignedRh,
+    assignedBme,
+
+    assignedRm: assignedRh,
+    assignedBm: assignedBme,
+
+    RHId: assignment.RHId || null,
+    bdmId: assignment.bdmId || null,
+
+    assignmentId: assignment._id || null,
+    assignmentStatus: assignment.status || null,
+  };
 }
 
 async function ensureBrandAssignmentForCreator({ brandId, actor }) {
@@ -3174,29 +3242,106 @@ async function ensureBrandAssignmentForCreator({ brandId, actor }) {
 
   if (role === ROLES.REVENUE_HEAD) {
     set.RHId = actor._id;
+    set.bdmId = null;
   }
 
   if (role === ROLES.BME) {
-    set.bdmId = actor._id;
-
-    if (actor.parentAdmin) {
-      set.RHId = actor.parentAdmin;
+    if (!actor.parentAdmin) {
+      throw new Error("This BME is not mapped under any RH. Please assign RH first.");
     }
+
+    const rh = await AdminModel.findOne({
+      _id: actor.parentAdmin,
+      role: ROLES.REVENUE_HEAD,
+      status: "active",
+    }).select("_id");
+
+    if (!rh) {
+      throw new Error("Mapped RH for this BME is not active or not found.");
+    }
+
+    set.RHId = actor.parentAdmin;
+    set.bdmId = actor._id;
   }
 
   return BrandAssigned.findOneAndUpdate(
-    { brandId: normalizedBrandId, status: "active" },
+    {
+      brandId: normalizedBrandId,
+      status: "active",
+    },
     {
       $setOnInsert: {
         brandId: normalizedBrandId,
       },
       $set: set,
+      $unset: {
+        idmId: "",
+        sdrId: "",
+      },
     },
     {
       new: true,
       upsert: true,
     }
   ).exec();
+}
+
+async function buildBrandAssignmentPayload(assignment) {
+  if (!assignment) {
+    return {
+      assignedRh: "",
+      assignedBme: "",
+      assignedRm: "",
+      assignedBm: "",
+      RHId: null,
+      bdmId: null,
+      assignmentId: null,
+      assignmentStatus: null,
+    };
+  }
+
+  const ids = [assignment.RHId, assignment.bdmId]
+    .filter(Boolean)
+    .map((id) => String(id))
+    .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+  const admins = ids.length
+    ? await AdminModel.find({
+        _id: {
+          $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
+        },
+      })
+        .select("_id name email")
+        .lean()
+    : [];
+
+  const adminMap = {};
+  admins.forEach((admin) => {
+    adminMap[String(admin._id)] = admin.name || admin.email || "";
+  });
+
+  const assignedRh = assignment.RHId
+    ? adminMap[String(assignment.RHId)] || ""
+    : "";
+
+  const assignedBme = assignment.bdmId
+    ? adminMap[String(assignment.bdmId)] || ""
+    : "";
+
+  return {
+    assignedRh,
+    assignedBme,
+
+    // backward-compatible aliases for frontend
+    assignedRm: assignedRh,
+    assignedBm: assignedBme,
+
+    RHId: assignment.RHId || null,
+    bdmId: assignment.bdmId || null,
+
+    assignmentId: assignment._id || null,
+    assignmentStatus: assignment.status || null,
+  };
 }
 
 exports.adminCreateBrand = async (req, res) => {
@@ -3217,6 +3362,28 @@ exports.adminCreateBrand = async (req, res) => {
         success: false,
         message: "Only Super Admin, Revenue Head, or BME can create a brand.",
       });
+    }
+
+    if (actorRole === ROLES.BME && !actor.parentAdmin) {
+      return res.status(400).json({
+        success: false,
+        message: "This BME is not mapped under any RH. Please assign RH first.",
+      });
+    }
+
+    if (actorRole === ROLES.BME) {
+      const rh = await AdminModel.findOne({
+        _id: actor.parentAdmin,
+        role: ROLES.REVENUE_HEAD,
+        status: "active",
+      }).select("_id");
+
+      if (!rh) {
+        return res.status(400).json({
+          success: false,
+          message: "Mapped RH for this BME is not active or not found.",
+        });
+      }
     }
 
     const brandName = String(req.body?.brandName || req.body?.name || "").trim();
@@ -3295,24 +3462,32 @@ exports.adminCreateBrand = async (req, res) => {
       delete brandDoc.__v;
     }
 
-    await ensureBrandAssignmentForCreator({
+    const assignment = await ensureBrandAssignmentForCreator({
       brandId: brandDoc._id,
       actor,
     });
 
+    const assignmentPayload = await buildBrandAssignmentPayload(assignment);
+
+    const creatorPayload = buildCreatorPayload(
+      brandDoc,
+      await getAdminMapByIds([brandDoc.createdByAdmin]),
+      "Brand"
+    );
+
     return res.status(existingBrand ? 200 : 201).json({
       success: true,
-      message: existingBrand
-        ? "Brand placeholder updated successfully."
-        : "Brand created successfully.",
+      message:
+        actorRole === ROLES.BME
+          ? "Brand created and automatically assigned to BME with its RH."
+          : existingBrand
+            ? "Brand placeholder updated successfully."
+            : "Brand created successfully.",
       brand: {
         ...brandDoc,
         brandId: String(brandDoc._id),
-        ...buildCreatorPayload(
-          brandDoc,
-          await getAdminMapByIds([brandDoc.createdByAdmin]),
-          "Brand"
-        ),
+        ...assignmentPayload,
+        ...creatorPayload,
         ...buildSignupCurrentStatus(brandDoc),
       },
     });
