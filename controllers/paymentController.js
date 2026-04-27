@@ -166,7 +166,7 @@ exports.createOrder = async (req, res) => {
 
     // ✅ USD ONLY
     const stripeCurrency = "usd";
-
+ 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],

@@ -8,6 +8,8 @@ const { influencerAuth } = require("../auth/influencerAuth");
 
 // create invitation for one influencer on multiple campaigns
 router.post("/create", brandAuth, campaignInvitationController.createInvitation);
+// router.post("/template-preview", brandAuth,
+// campaignInvitationController.getInvitationTemplatePreview);
 
 // general list with filters
 router.get("/list",  campaignInvitationController.getInvitationsList);

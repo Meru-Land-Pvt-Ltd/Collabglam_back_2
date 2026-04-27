@@ -25,12 +25,28 @@ const InfluencerSchema = new Schema(
     name: { type: String, trim: true, default: "" },
 
     countryId: { type: Schema.Types.ObjectId, ref: "Country", required: false },
-    countryName: { type: String, required: true, trim: true },
+
+    countryName: {
+      type: String,
+      required: [
+        function requiredCountryName() {
+          return !(this.isAdminCreated === true && this.signupCompleted === false);
+        },
+        "Country name is required",
+      ],
+      default: "",
+      trim: true,
+    },
+
+    country: { type: String, default: "", trim: true },
+    location: { type: String, default: "", trim: true },
 
     languages: { type: [NamedRefSchema], default: [] },
     categories: { type: [NamedRefSchema], default: [] },
 
-    password: { type: String },
+    password: { type: String, select: false },
+
+    primaryPlatform: { type: String, default: null, trim: true },
 
     page1: { type: [Schema.Types.Mixed], required: true, default: [] },
     page2: { type: [Schema.Types.Mixed], default: [] },
@@ -51,20 +67,43 @@ const InfluencerSchema = new Schema(
         message: "Invalid proxy email",
       },
     },
+
+    isAdminCreated: { type: Boolean, default: false },
+    signupCompleted: { type: Boolean, default: true },
+
+    createdByAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    adminCreatedRole: { type: String, default: "", trim: true },
+    adminCreatedAt: { type: Date, default: null },
+    signupCompletedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    versionKey: false,
+    toJSON: {
+      transform(_doc, ret) {
+        delete ret.password;
+        return ret;
+      },
+    },
+    toObject: {
+      transform(_doc, ret) {
+        delete ret.password;
+        return ret;
+      },
+    },
+  }
 );
 
-// unique only when proxyEmail exists and is not empty
 InfluencerSchema.index(
   { proxyEmail: 1 },
   {
     unique: true,
-    partialFilterExpression: {
-      proxyEmail: { $type: "string", $ne: "" },
-    },
+    partialFilterExpression: { proxyEmail: { $type: "string", $ne: "" } },
   }
 );
+
+InfluencerSchema.index({ isAdminCreated: 1, signupCompleted: 1, createdAt: -1 });
+InfluencerSchema.index({ createdByAdmin: 1, adminCreatedAt: -1 });
 
 const InfluencerModel = models.Influencer || model("Influencer", InfluencerSchema);
 

@@ -11,6 +11,8 @@ const {
   OWNER_ROLE,
 } = require("../constants/outreach");
 const { ensureRole } = require("../utils/outreachGuards");
+const OutreachTemplate = require("../models/OutreachTemplate");
+const OutreachSubsequence = require("../models/OutreachSubsequence");
 const instantlyService = require("../services/instantlyService");
 
 const SDR_ROLE = ROLES?.SDR || "sdr";
@@ -95,34 +97,6 @@ function buildDefaultCampaignSchedule() {
   };
 }
 
-function buildDefaultSequence() {
-  return [
-    {
-      stepOrder: 1,
-      type: "email",
-      delay: 1,
-      delayUnit: "days",
-      preDelay: 0,
-      preDelayUnit: "days",
-      variants: [
-        {
-          subject: "Collab opportunity with {{companyName}}",
-          body: [
-            "Hi {{firstName}},",
-            "",
-            "We’d love to explore a collaboration opportunity with {{companyName}}.",
-            "",
-            "Would you be open to a quick conversation?",
-            "",
-            "Best,",
-            "CollabGlam",
-          ].join("\n"),
-        },
-      ],
-    },
-  ];
-}
-
 function buildDefaultSendingOptions() {
   return {
     dailyLimit: 100,
@@ -142,6 +116,8 @@ function buildDefaultSendingOptions() {
     insertUnsubscribeHeader: false,
     allowRiskyContacts: false,
     disableBounceProtect: false,
+    ccList: [],
+    bccList: [],
   };
 }
 
@@ -161,11 +137,11 @@ function normalizeCampaignSchedule(schedule = {}, fallback = buildDefaultCampaig
     ? schedule.windows
     : Array.isArray(schedule.schedules) && schedule.schedules.length
       ? schedule.schedules.map((item) => ({
-          name: item?.name,
-          from: item?.from || item?.timing?.from,
-          to: item?.to || item?.timing?.to,
-          days: item?.days,
-        }))
+        name: item?.name,
+        from: item?.from || item?.timing?.from,
+        to: item?.to || item?.timing?.to,
+        days: item?.days,
+      }))
       : base.windows;
 
   const windows = windowsInput
@@ -188,21 +164,21 @@ function normalizeCampaignSchedule(schedule = {}, fallback = buildDefaultCampaig
   return {
     timezone: String(
       schedule.timezone ||
-        base.timezone ||
-        process.env.INSTANTLY_DEFAULT_TIMEZONE ||
-        "Asia/Kolkata"
+      base.timezone ||
+      process.env.INSTANTLY_DEFAULT_TIMEZONE ||
+      "Asia/Kolkata"
     ).trim(),
     startDate: String(
       schedule.startDate ||
-        schedule.start_date ||
-        base.startDate ||
-        formatDateOnly(new Date())
+      schedule.start_date ||
+      base.startDate ||
+      formatDateOnly(new Date())
     ).trim(),
     endDate: String(
       schedule.endDate ||
-        schedule.end_date ||
-        base.endDate ||
-        formatDateOnly(addDays(new Date(), 365))
+      schedule.end_date ||
+      base.endDate ||
+      formatDateOnly(addDays(new Date(), 365))
     ).trim(),
     windows: windows.length ? windows : base.windows,
   };
@@ -214,11 +190,11 @@ function normalizeSequenceStep(step = {}, index = 0) {
     Array.isArray(step.variants) && step.variants.length
       ? step.variants
       : [
-          {
-            subject: step.subject || fallback.variants[0].subject,
-            body: step.body || fallback.variants[0].body,
-          },
-        ];
+        {
+          subject: step.subject || fallback.variants[0].subject,
+          body: step.body || fallback.variants[0].body,
+        },
+      ];
 
   return {
     stepOrder: normalizeNumber(step.stepOrder, index + 1, 1),
@@ -226,20 +202,20 @@ function normalizeSequenceStep(step = {}, index = 0) {
     delay: normalizeNumber(step.delay, fallback.delay, 0),
     delayUnit: String(
       step.delayUnit ||
-        step.delay_unit ||
-        fallback.delayUnit ||
-        fallback.delay_unit ||
-        "days"
+      step.delay_unit ||
+      fallback.delayUnit ||
+      fallback.delay_unit ||
+      "days"
     )
       .trim()
       .toLowerCase(),
     preDelay: normalizeNumber(step.preDelay, fallback.preDelay, 0),
     preDelayUnit: String(
       step.preDelayUnit ||
-        step.pre_delay_unit ||
-        fallback.preDelayUnit ||
-        fallback.pre_delay_unit ||
-        "days"
+      step.pre_delay_unit ||
+      fallback.preDelayUnit ||
+      fallback.pre_delay_unit ||
+      "days"
     )
       .trim()
       .toLowerCase(),
@@ -250,21 +226,6 @@ function normalizeSequenceStep(step = {}, index = 0) {
       }))
       .filter((variant) => variant.subject || variant.body),
   };
-}
-
-function normalizeCampaignSequences(sequences = [], fallback = buildDefaultSequence()) {
-  const input =
-    Array.isArray(sequences) && sequences.length
-      ? sequences
-      : Array.isArray(sequences?.[0]?.steps)
-        ? sequences[0].steps
-        : fallback;
-
-  const normalized = input
-    .map((step, index) => normalizeSequenceStep(step, index))
-    .filter((step) => step.variants.length);
-
-  return normalized.length ? normalized : fallback;
 }
 
 function normalizeSendingOptions(options = {}, fallback = buildDefaultSendingOptions()) {
@@ -303,6 +264,12 @@ function normalizeSendingOptions(options = {}, fallback = buildDefaultSendingOpt
       options.disableBounceProtect ?? options.disable_bounce_protect,
       base.disableBounceProtect
     ),
+    ccList: Array.isArray(options.ccList ?? options.cc_list)
+      ? [...new Set((options.ccList ?? options.cc_list).map((item) => normalizeEmail(item)).filter(Boolean))]
+      : base.ccList || [],
+    bccList: Array.isArray(options.bccList ?? options.bcc_list)
+      ? [...new Set((options.bccList ?? options.bcc_list).map((item) => normalizeEmail(item)).filter(Boolean))]
+      : base.bccList || [],
   };
 }
 
@@ -405,6 +372,8 @@ function buildCampaignCreatePayload({
     insert_unsubscribe_header: sendingOptions.insertUnsubscribeHeader,
     allow_risky_contacts: sendingOptions.allowRiskyContacts,
     disable_bounce_protect: sendingOptions.disableBounceProtect,
+    cc_list: Array.isArray(sendingOptions.ccList) ? sendingOptions.ccList : [],
+    bcc_list: Array.isArray(sendingOptions.bccList) ? sendingOptions.bccList : [],
   };
 }
 
@@ -428,14 +397,81 @@ async function getActiveRhMailbox(rhId) {
   }).lean();
 }
 
-async function getActiveImeMailbox(imeId) {
-  if (!imeId) return null;
+function resolveSelectedAccountEmails(
+  senderAssignments = [],
+  requestedEmails = [],
+  fallbackEmails = []
+) {
+  const availableEmails = senderAssignments
+    .map((item) => String(item?.email || "").trim().toLowerCase())
+    .filter(Boolean);
 
-  return OutreachMailboxAssignment.findOne({
+  const normalizedRequested = Array.isArray(requestedEmails)
+    ? [...new Set(requestedEmails.map((item) => normalizeEmail(item)).filter(Boolean))]
+    : [];
+
+  const normalizedFallback = Array.isArray(fallbackEmails)
+    ? [...new Set(fallbackEmails.map((item) => normalizeEmail(item)).filter(Boolean))]
+    : [];
+
+  const requestedSubset = normalizedRequested.filter((email) => availableEmails.includes(email));
+  if (requestedSubset.length) return requestedSubset;
+
+  const fallbackSubset = normalizedFallback.filter((email) => availableEmails.includes(email));
+  if (fallbackSubset.length) return fallbackSubset;
+
+  return availableEmails;
+}
+
+function resolveSelectedSenderEmail(
+  senderAssignments = [],
+  requestedEmail = "",
+  fallbackEmail = "",
+  selectedEmails = []
+) {
+  const allowedEmails = Array.isArray(selectedEmails) && selectedEmails.length
+    ? selectedEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+    : resolveSelectedAccountEmails(senderAssignments);
+
+  const requested = normalizeEmail(requestedEmail);
+  const fallback = normalizeEmail(fallbackEmail);
+
+  if (requested && allowedEmails.includes(requested)) return requested;
+  if (fallback && allowedEmails.includes(fallback)) return fallback;
+
+  const primary = senderAssignments.find(
+    (item) =>
+      item?.isPrimary &&
+      allowedEmails.includes(normalizeEmail(item?.email))
+  );
+
+  if (primary?.email) return normalizeEmail(primary.email);
+
+  return allowedEmails[0] || "";
+}
+
+async function getActiveImeSenders(imeId) {
+  if (!imeId) return [];
+
+  return OutreachMailboxAssignment.find({
     adminId: imeId,
     role: OWNER_ROLE.IME,
     isActive: true,
-  }).lean();
+  })
+    .sort({ isPrimary: -1, assignedAt: 1, createdAt: 1 })
+    .lean();
+}
+
+async function getAvailableSenderEmailsForCampaign(campaign) {
+  if (!campaign) return [];
+
+  if (isImeFlow(campaign)) {
+    const imeAssignments = await getActiveImeSenders(campaign.IMEId);
+    return imeAssignments.map((item) => normalizeEmail(item.email));
+  }
+
+  const sdrAssignments = await getActiveSdrSenders(campaign.sdrId);
+  return sdrAssignments.map((item) => normalizeEmail(item.email));
 }
 
 async function getStandardCreateContext(req) {
@@ -563,20 +599,27 @@ async function getManagedCampaign(req, campaignId) {
     throw error;
   }
 
-  if (req.admin.role === "super_admin") return campaign;
+  const adminId = String(req.admin?.adminId || req.admin?._id || "");
+  const role = String(req.admin?.role || "").trim().toLowerCase();
 
-  if (
-    req.admin.role === "sdr" &&
-    String(campaign.sdrId) === String(req.admin.adminId)
-  ) {
+  if (role === "super_admin") return campaign;
+
+  if (role === "sdr" && String(campaign.sdrId) === adminId) {
     return campaign;
   }
 
-  if (
-    req.admin.role === "ime" &&
-    String(campaign.IMEId) === String(req.admin.adminId)
-  ) {
+  if (role === "ime" && String(campaign.IMEId) === adminId) {
     return campaign;
+  }
+
+  if (role === "revenue_head" || role === "rh") {
+    const isOwnedRh = String(campaign.RHId) === adminId;
+    const isImeCampaign =
+      String(campaign.flowType || "").trim().toLowerCase() === "ime_influencer";
+
+    if (isOwnedRh || isImeCampaign) {
+      return campaign;
+    }
   }
 
   const error = new Error("You do not own this campaign");
@@ -596,27 +639,35 @@ async function getAccessibleCampaign(req, campaignId) {
     throw error;
   }
 
-  if (req.admin.role === "super_admin") return campaign;
+  const adminId = String(req.admin?.adminId || req.admin?._id || "");
+  const role = String(req.admin?.role || "").trim().toLowerCase();
+
+  if (role === "super_admin") return campaign;
 
   if (
-    req.admin.role === "sdr" &&
-    String(campaign.sdrId?._id || campaign.sdrId) === String(req.admin.adminId)
+    role === "sdr" &&
+    String(campaign.sdrId?._id || campaign.sdrId) === adminId
   ) {
     return campaign;
   }
 
   if (
-    req.admin.role === "revenue_head" &&
-    String(campaign.RHId?._id || campaign.RHId) === String(req.admin.adminId)
+    role === "ime" &&
+    String(campaign.IMEId?._id || campaign.IMEId) === adminId
   ) {
     return campaign;
   }
 
-  if (
-    req.admin.role === "ime" &&
-    String(campaign.IMEId?._id || campaign.IMEId) === String(req.admin.adminId)
-  ) {
-    return campaign;
+  if (role === "revenue_head" || role === "rh") {
+    const isOwnedRh =
+      String(campaign.RHId?._id || campaign.RHId) === adminId;
+
+    const isImeCampaign =
+      String(campaign.flowType || "").trim().toLowerCase() === "ime_influencer";
+
+    if (isOwnedRh || isImeCampaign) {
+      return campaign;
+    }
   }
 
   const error = new Error("Forbidden");
@@ -640,21 +691,21 @@ function normalizeContactRow(row = {}) {
 
   const companyName = String(
     normalized.companyname ||
-      normalized.company ||
-      ""
+    normalized.company ||
+    ""
   ).trim();
 
   const contactEmail = normalizeEmail(
     normalized.contactemail ||
-      normalized.email ||
-      normalized.emailaddress ||
-      ""
+    normalized.email ||
+    normalized.emailaddress ||
+    ""
   );
 
   const contactName = String(
     normalized.contactname ||
-      normalized.name ||
-      ""
+    normalized.name ||
+    ""
   ).trim();
 
   const website = String(normalized.website || "").trim();
@@ -855,6 +906,78 @@ function buildGoogleSheetCsvUrl(sheetUrl) {
   return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
 }
 
+function flattenCsvRow(value, prefix = "", target = {}) {
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      if (prefix) target[prefix] = "";
+      return target;
+    }
+
+    const arePrimitive = value.every(
+      (item) => item == null || ["string", "number", "boolean"].includes(typeof item)
+    );
+
+    if (arePrimitive) {
+      if (prefix) target[prefix] = value.join(" | ");
+      return target;
+    }
+
+    value.forEach((item, index) => {
+      flattenCsvRow(item, prefix ? `${prefix}.${index}` : String(index), target);
+    });
+
+    return target;
+  }
+
+  if (value && typeof value === "object") {
+    Object.entries(value).forEach(([key, nestedValue]) => {
+      flattenCsvRow(nestedValue, prefix ? `${prefix}.${key}` : key, target);
+    });
+    return target;
+  }
+
+  if (prefix) {
+    target[prefix] = value == null ? "" : value;
+  }
+
+  return target;
+}
+
+function toCsv(rows = []) {
+  const flatRows = rows.map((row) => flattenCsvRow(row));
+  const headers = Array.from(
+    flatRows.reduce((acc, row) => {
+      Object.keys(row).forEach((key) => acc.add(key));
+      return acc;
+    }, new Set())
+  );
+
+  const escape = (value) => {
+    const stringValue = String(value == null ? "" : value);
+    if (/[,"]|\n/.test(stringValue)) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
+  const lines = [headers.join(",")];
+
+  flatRows.forEach((row) => {
+    lines.push(headers.map((header) => escape(row[header])).join(","));
+  });
+
+  return lines.join("\n");
+}
+
+function extractAnalyticsRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.rows)) return payload.rows;
+  return payload ? [payload] : [];
+}
+
 exports.createOutreachCampaign = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
@@ -880,7 +1003,26 @@ exports.createOutreachCampaign = async (req, res) => {
 
     if (flowType === "ime_influencer") {
       const { ime } = await getImeCreateContext(req);
-      const imeMailbox = await getActiveImeMailbox(ime._id);
+      const imeAssignments = await getActiveImeSenders(ime._id);
+      const primaryIme =
+        imeAssignments.find((item) => item.isPrimary) || imeAssignments[0] || null;
+
+      const defaultImeAccounts = primaryIme?.email
+        ? [normalizeEmail(primaryIme.email)]
+        : [];
+
+      const selectedAccountEmails = resolveSelectedAccountEmails(
+        imeAssignments,
+        req.body?.accountEmails,
+        defaultImeAccounts
+      );
+
+      const selectedSenderEmail = resolveSelectedSenderEmail(
+        imeAssignments,
+        req.body?.senderAccountEmail,
+        primaryIme?.email || "",
+        selectedAccountEmails
+      );
 
       campaign = await OutreachCampaign.create({
         name,
@@ -889,21 +1031,15 @@ exports.createOutreachCampaign = async (req, res) => {
         createdByAdminId: req.admin.adminId,
         configuration,
         instantly: {
-          accountEmails: imeMailbox?.email ? [imeMailbox.email] : [],
-          senderAccountEmail: imeMailbox?.email || "",
+          accountEmails: selectedAccountEmails,
+          senderAccountEmail: selectedSenderEmail,
           leadListId: "",
           campaignId: "",
           rawCampaignPayload: req.body?.instantlyRawCampaignPayload || null,
+          shareLink: "",
         },
         teamMailboxes: {
-          IMEEmail: imeMailbox?.email || "",
-        },
-        status: OUTREACH_CAMPAIGN_STATUS.DRAFT,
-        stats: {
-          totalProspects: 0,
-          totalReplies: 0,
-          totalQualified: 0,
-          totalAssigned: 0,
+          IMEEmail: selectedSenderEmail,
         },
       });
     } else {
@@ -913,6 +1049,23 @@ exports.createOutreachCampaign = async (req, res) => {
         activeSenders.find((item) => item.isPrimary) || activeSenders[0] || null;
       const rhMailbox = await getActiveRhMailbox(rh._id);
 
+      const defaultSelectedAccounts = primarySender?.email
+        ? [normalizeEmail(primarySender.email)]
+        : [];
+
+      const selectedAccountEmails = resolveSelectedAccountEmails(
+        activeSenders,
+        req.body?.accountEmails,
+        defaultSelectedAccounts
+      );
+
+      const selectedSenderEmail = resolveSelectedSenderEmail(
+        activeSenders,
+        req.body?.senderAccountEmail,
+        primarySender?.email || "",
+        selectedAccountEmails
+      );
+
       campaign = await OutreachCampaign.create({
         name,
         flowType,
@@ -921,11 +1074,12 @@ exports.createOutreachCampaign = async (req, res) => {
         createdByAdminId: req.admin.adminId,
         configuration,
         instantly: {
-          accountEmails: activeSenders.map((item) => item.email),
-          senderAccountEmail: primarySender?.email || "",
+          accountEmails: selectedAccountEmails,
+          senderAccountEmail: selectedSenderEmail,
           leadListId: "",
           campaignId: "",
           rawCampaignPayload: req.body?.instantlyRawCampaignPayload || null,
+          shareLink: "",
         },
         teamMailboxes: {
           RHEmail: rhMailbox?.email || "",
@@ -933,9 +1087,20 @@ exports.createOutreachCampaign = async (req, res) => {
         status: OUTREACH_CAMPAIGN_STATUS.DRAFT,
         stats: {
           totalProspects: 0,
+          totalSent: 0,
+          totalClicked: 0,
           totalReplies: 0,
+          totalOpportunities: 0,
           totalQualified: 0,
           totalAssigned: 0,
+          progressPercent: 0,
+        },
+        sync: {
+          providerStatus: "idle",
+          lastErrorCode: "",
+          lastErrorMessage: "",
+          lastSyncedAt: null,
+          lastAnalyticsSyncedAt: null,
         },
       });
     }
@@ -963,19 +1128,26 @@ exports.listOutreachCampaigns = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
 
+    const adminId = String(req.admin?.adminId || req.admin?._id || "");
+    const role = String(req.admin?.role || "").trim().toLowerCase();
     const filter = {};
-    const status = String(req.query?.status || "").trim().toLowerCase();
 
+    const status = String(req.query?.status || "").trim().toLowerCase();
     if (status) {
       filter.status = status;
     }
 
-    if (req.admin.role === "sdr") {
-      filter.sdrId = req.admin.adminId;
-    } else if (req.admin.role === "revenue_head") {
-      filter.RHId = req.admin.adminId;
-    } else if (req.admin.role === "ime") {
-      filter.IMEId = req.admin.adminId;
+    if (role === "sdr") {
+      filter.sdrId = adminId;
+    } else if (role === "ime") {
+      filter.IMEId = adminId;
+    } else if (role === "revenue_head" || role === "rh") {
+      filter.$or = [
+        { RHId: adminId },
+        { flowType: "ime_influencer" },
+      ];
+    } else if (role !== "super_admin") {
+      filter._id = null;
     }
 
     const rows = await OutreachCampaign.find(filter)
@@ -990,7 +1162,7 @@ exports.listOutreachCampaigns = async (req, res) => {
       data: rows,
     });
   } catch (error) {
-    const payload = getAxiosErrorPayload(error, "Internal error");
+    const payload = getAxiosErrorPayload(error, "Failed to list campaigns");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -1007,12 +1179,97 @@ exports.getOutreachCampaignById = async (req, res) => {
       campaign.configuration = normalizeCampaignConfiguration({});
     }
 
+    const templateVariables =
+      Array.isArray(campaign.templateVariables) && campaign.templateVariables.length
+        ? campaign.templateVariables
+        : buildTemplateVariableList(campaign.csvSchema?.columns || []);
+
+    const availableAccountEmails = await getAvailableSenderEmailsForCampaign(campaign);
+
     return res.status(200).json({
       success: true,
-      data: campaign,
+      data: {
+        ...campaign.toObject(),
+        instantly: {
+          ...(campaign.instantly || {}),
+          senderAccountEmail: campaign.instantly?.senderAccountEmail || "",
+          accountEmails: Array.isArray(campaign.instantly?.accountEmails)
+            ? campaign.instantly.accountEmails
+            : [],
+          availableAccountEmails,
+        },
+        templateVariables,
+      },
     });
   } catch (error) {
     const payload = getAxiosErrorPayload(error, "Internal error");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.updateOutreachCampaign = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
+
+    const campaign = await getManagedCampaign(req, req.params.id);
+    const nextName = String(req.body?.name || "").trim();
+
+    if (!nextName) {
+      return res.status(400).json({
+        success: false,
+        message: "Campaign name is required",
+      });
+    }
+
+    campaign.name = nextName;
+    await campaign.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaign updated successfully",
+      data: campaign,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to update campaign");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.deleteOutreachCampaign = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
+
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    if (campaign.instantly?.campaignId) {
+      try {
+        await instantlyService.deleteCampaign(campaign.instantly.campaignId);
+      } catch (error) {
+        if (error?.response?.status !== 404) {
+          const payload = getAxiosErrorPayload(error, "Failed to delete Instantly campaign");
+          return res.status(payload.statusCode).json({
+            success: false,
+            step: "delete_instantly_campaign",
+            ...payload,
+          });
+        }
+      }
+    }
+
+    await campaign.deleteOne();
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaign deleted successfully",
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to delete campaign");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -1025,11 +1282,24 @@ exports.getOutreachCampaignConfiguration = async (req, res) => {
     ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
     const campaign = await getAccessibleCampaign(req, req.params.id);
 
+    let availableAccountEmails = [];
+
+    if (isImeFlow(campaign)) {
+      const imeAssignments = await getActiveImeSenders(campaign.IMEId);
+      availableAccountEmails = imeAssignments.map((item) => normalizeEmail(item.email)).filter(Boolean);
+    } else {
+      const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      availableAccountEmails = senderAssignments.map((item) => normalizeEmail(item.email)).filter(Boolean);
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         configuration: getCampaignConfigurationFromDocument(campaign),
-        instantly: campaign.instantly || {},
+        instantly: {
+          ...(campaign.instantly || {}),
+          availableAccountEmails,
+        },
         status: campaign.status,
         flowType: campaign.flowType || "standard_brand",
       },
@@ -1062,25 +1332,80 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
     await campaign.save();
 
     if (req.body?.syncNow && campaign.instantly?.campaignId) {
+      let senderAssignments = [];
       let senderEmails = [];
-      let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
+      let primarySenderEmail = normalizeEmail(
+        req.body?.senderAccountEmail || campaign.instantly?.senderAccountEmail || ""
+      );
 
       if (isImeFlow(campaign)) {
-        const imeMailbox = await getActiveImeMailbox(campaign.IMEId);
-        if (imeMailbox?.email) {
-          senderEmails = [imeMailbox.email];
-          primarySenderEmail = imeMailbox.email;
-          campaign.teamMailboxes.IMEEmail = imeMailbox.email;
-        }
-      } else {
-        const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
-        const primarySender =
-          senderAssignments.find((item) => item.isPrimary) || senderAssignments[0] || null;
-        const rhMailbox = await getActiveRhMailbox(campaign.RHId);
+        senderAssignments = await getActiveImeSenders(campaign.IMEId);
 
-        senderEmails = senderAssignments.map((item) => item.email);
-        primarySenderEmail = primarySender?.email || primarySenderEmail;
-        campaign.teamMailboxes.RHEmail = rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
+        if (!senderAssignments.length) {
+          return res.status(400).json({
+            success: false,
+            message: "No mailbox is assigned to this IME",
+          });
+        }
+
+        const availableEmails = senderAssignments
+          .map((item) => normalizeEmail(item.email))
+          .filter(Boolean);
+
+        const requestedEmails = Array.isArray(req.body?.accountEmails)
+          ? req.body.accountEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+          : [];
+
+        senderEmails = requestedEmails.length
+          ? requestedEmails.filter((email) => availableEmails.includes(email))
+          : (campaign.instantly?.accountEmails || [])
+            .map((item) => normalizeEmail(item))
+            .filter((email) => availableEmails.includes(email));
+
+        if (!senderEmails.length) {
+          senderEmails = availableEmails;
+        }
+
+        if (!senderEmails.includes(primarySenderEmail)) {
+          primarySenderEmail = senderEmails[0] || "";
+        }
+
+        campaign.teamMailboxes.IMEEmail = primarySenderEmail;
+      } else {
+        senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+
+        if (!senderAssignments.length) {
+          return res.status(400).json({
+            success: false,
+            message: "No sender mailboxes are assigned to this SDR",
+          });
+        }
+
+        const rhMailbox = await getActiveRhMailbox(campaign.RHId);
+        const availableEmails = senderAssignments
+          .map((item) => normalizeEmail(item.email))
+          .filter(Boolean);
+
+        const requestedEmails = Array.isArray(req.body?.accountEmails)
+          ? req.body.accountEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+          : [];
+
+        senderEmails = requestedEmails.length
+          ? requestedEmails.filter((email) => availableEmails.includes(email))
+          : (campaign.instantly?.accountEmails || [])
+            .map((item) => normalizeEmail(item))
+            .filter((email) => availableEmails.includes(email));
+
+        if (!senderEmails.length) {
+          senderEmails = availableEmails;
+        }
+
+        if (!senderEmails.includes(primarySenderEmail)) {
+          primarySenderEmail = senderEmails[0] || "";
+        }
+
+        campaign.teamMailboxes.RHEmail =
+          rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
       }
 
       const updatePayload = buildCampaignCreatePayload({
@@ -1096,6 +1421,10 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
       campaign.instantly.senderAccountEmail = primarySenderEmail;
       campaign.configuration.lastSyncedAt = new Date();
       campaign.configuration.lastSyncedBy = req.admin.adminId;
+      campaign.sync.providerStatus = "synced";
+      campaign.sync.lastErrorCode = "";
+      campaign.sync.lastErrorMessage = "";
+      campaign.sync.lastSyncedAt = new Date();
       await campaign.save();
     }
 
@@ -1128,23 +1457,39 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
       });
     }
 
+    let senderAssignments = [];
     let senderEmails = [];
-    let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
+    let primarySenderEmail = normalizeEmail(
+      req.body?.senderAccountEmail || campaign.instantly?.senderAccountEmail || ""
+    );
 
     if (isImeFlow(campaign)) {
-      const imeMailbox = await getActiveImeMailbox(campaign.IMEId);
-      if (!imeMailbox?.email) {
+      senderAssignments = await getActiveImeSenders(campaign.IMEId);
+
+      if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
           message: "No mailbox is assigned to this IME",
         });
       }
 
-      senderEmails = [imeMailbox.email];
-      primarySenderEmail = imeMailbox.email;
-      campaign.teamMailboxes.IMEEmail = imeMailbox.email;
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
+
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.IMEEmail = primarySenderEmail;
     } else {
-      const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+
       if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
@@ -1152,13 +1497,23 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
         });
       }
 
-      const primarySender =
-        senderAssignments.find((item) => item.isPrimary) || senderAssignments[0] || null;
       const rhMailbox = await getActiveRhMailbox(campaign.RHId);
 
-      senderEmails = senderAssignments.map((item) => item.email);
-      primarySenderEmail = primarySender?.email || primarySenderEmail;
-      campaign.teamMailboxes.RHEmail = rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
+
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.RHEmail =
+        rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
     }
 
     const updatePayload = buildCampaignCreatePayload({
@@ -1177,6 +1532,10 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
     campaign.instantly.senderAccountEmail = primarySenderEmail;
     campaign.configuration.lastSyncedAt = new Date();
     campaign.configuration.lastSyncedBy = req.admin.adminId;
+    campaign.sync.providerStatus = "synced";
+    campaign.sync.lastErrorCode = "";
+    campaign.sync.lastErrorMessage = "";
+    campaign.sync.lastSyncedAt = new Date();
     await campaign.save();
 
     return res.status(200).json({
@@ -1219,76 +1578,75 @@ function textToHtml(value = "") {
 
 exports.sendCampaignTestEmail = async (req, res) => {
   try {
-    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getManagedCampaign(req, req.params.id);
 
-    const campaign = await getAccessibleCampaign(req, req.params.id);
-    const configuration = getCampaignConfigurationFromDocument(campaign);
-    const firstVariant = configuration.sequences?.[0]?.variants?.[0] || {};
+    const toEmail = String(req.body?.toEmail || "").trim();
+    const accountEmail =
+      String(req.body?.accountEmail || "").trim() ||
+      String(campaign?.instantly?.senderAccountEmail || "").trim();
 
-    const senderEmail = String(
-      req.body?.accountEmail ||
-      req.body?.eaccount ||
-      campaign.instantly?.senderAccountEmail ||
-      campaign.instantly?.accountEmails?.[0] ||
-      ""
-    ).trim();
+    const stepOrder = Number(req.body?.stepOrder || 1);
 
-    const toEmail = String(
-      req.body?.toEmail ||
-      req.body?.to_address_email_list ||
-      ""
-    ).trim();
-
-    if (!senderEmail || !toEmail) {
+    if (!toEmail) {
       return res.status(400).json({
         success: false,
-        message: "accountEmail and toEmail are required",
+        message: "toEmail is required",
       });
     }
 
-    const previewVars = {
-      firstName: req.body?.variables?.firstName || "Devansh",
-      companyName: req.body?.variables?.companyName || "CollabGlam",
-      ...req.body?.variables,
+    if (!accountEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "accountEmail is required",
+      });
+    }
+
+    const steps = Array.isArray(campaign?.configuration?.sequences)
+      ? campaign.configuration.sequences
+      : [];
+
+    const step =
+      steps.find((item) => Number(item?.stepOrder) === stepOrder) || steps[0];
+
+    if (!step) {
+      return res.status(400).json({
+        success: false,
+        message: "No sequence step found",
+      });
+    }
+
+    const variant = step?.variants?.[0] || {
+      subject: "",
+      body: "",
+      preheaderText: "",
+      signatureHtml: "",
     };
 
-    const rawSubject = String(
-      req.body?.subject ||
-      firstVariant.subject ||
-      `${campaign.name} test`
-    );
+    const preheaderHtml = variant.preheaderText
+      ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(
+        variant.preheaderText
+      )}</div>`
+      : "";
 
-    const rawBodyText = String(
-      req.body?.bodyText ||
-      firstVariant.body ||
-      ""
-    );
+    const signatureHtml = variant.signatureHtml
+      ? `<div style="margin-top:16px;">${variant.signatureHtml}</div>`
+      : "";
 
-    const renderedSubject = renderTemplate(rawSubject, previewVars);
-    const renderedBodyText = renderTemplate(rawBodyText, previewVars);
+    const html = `${preheaderHtml}${textToHtml(String(variant.body || ""))}${signatureHtml}`;
 
-    const payload = {
-      eaccount: senderEmail,
+    const result = await instantlyService.sendTestEmail({
+      eaccount: accountEmail,
       to_address_email_list: toEmail,
-      subject: renderedSubject,
+      subject: String(variant.subject || ""),
       body: {
-        html: `
-          <div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111111;">
-            ${textToHtml(renderedBodyText)}
-          </div>
-        `,
+        html,
       },
-    };
-
-    const testResult = await instantlyService.sendTestEmail(payload);
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Test email request sent to Instantly",
-      data: {
-        sentPayload: payload,
-        testResult,
-      },
+      message: "Test email sent successfully",
+      data: result,
     });
   } catch (error) {
     const payload = getAxiosErrorPayload(error, "Failed to send test email");
@@ -1395,19 +1753,40 @@ exports.uploadCampaignContactsCsv = async (req, res) => {
       delimiter: [",", "\t", ";"],
     });
 
-    const prospectDocs = await upsertProspectsFromRows(rows);
+    const incomingColumns = req.body?.columns ? JSON.parse(req.body.columns) : [];
+    const columns = normalizeIncomingColumnMappings(incomingColumns, rows);
+    const templateVariables = buildTemplateVariableList(columns);
+
+    const prospectDocs = await upsertProspectsFromMappedRows(
+      rows,
+      columns,
+      req.file.originalname || "contacts.csv"
+    );
+
+    campaign.csvSchema = {
+      fileName: req.file.originalname || "contacts.csv",
+      totalRows: rows.length,
+      columns,
+      updatedAt: new Date(),
+    };
+
+    campaign.templateVariables = templateVariables;
+    await campaign.save();
+
     const result = await attachProspectsToCampaign(campaign, prospectDocs);
 
     return res.status(200).json({
       success: true,
       message: result.instantlySynced
-        ? "CSV uploaded and contacts synced to Instantly"
+        ? "CSV uploaded, mapped, and synced to Instantly"
         : "CSV uploaded successfully",
       data: {
         campaignId: campaign._id,
         addedCount: result.addedCount,
         totalProspects: result.totalProspects,
         instantlySynced: result.instantlySynced,
+        templateVariables,
+        columns,
         addLeadsResult: result.addLeadsResult,
       },
     });
@@ -1429,13 +1808,13 @@ exports.addCampaignContactsManual = async (req, res) => {
     const contacts = Array.isArray(req.body?.contacts)
       ? req.body.contacts
       : [
-          {
-            companyName: req.body?.companyName,
-            contactName: req.body?.contactName,
-            contactEmail: req.body?.contactEmail,
-            website: req.body?.website,
-          },
-        ];
+        {
+          companyName: req.body?.companyName,
+          contactName: req.body?.contactName,
+          contactEmail: req.body?.contactEmail,
+          website: req.body?.website,
+        },
+      ];
 
     const prospectDocs = await upsertProspectsFromRows(contacts);
     const result = await attachProspectsToCampaign(campaign, prospectDocs);
@@ -1527,6 +1906,186 @@ exports.importCampaignContactsFromGoogleSheet = async (req, res) => {
   }
 };
 
+exports.duplicateOutreachCampaign = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
+
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    const duplicate = await OutreachCampaign.create({
+      name: `${campaign.name} Copy`,
+      flowType: campaign.flowType,
+      sdrId: campaign.sdrId || null,
+      RHId: campaign.RHId || null,
+      IMEId: campaign.IMEId || null,
+      createdByAdminId: req.admin.adminId,
+      configuration: getCampaignConfigurationFromDocument(campaign),
+      instantly: {
+        accountEmails: [...(campaign.instantly?.accountEmails || [])],
+        senderAccountEmail: campaign.instantly?.senderAccountEmail || "",
+        leadListId: "",
+        campaignId: "",
+        rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
+        shareLink: "",
+      },
+      teamMailboxes: {
+        RHEmail: campaign.teamMailboxes?.RHEmail || "",
+        IMEEmail: campaign.teamMailboxes?.IMEEmail || "",
+      },
+      prospectIds: [...(campaign.prospectIds || [])],
+      status:
+        (campaign.prospectIds || []).length > 0
+          ? OUTREACH_CAMPAIGN_STATUS.READY
+          : OUTREACH_CAMPAIGN_STATUS.DRAFT,
+      stats: {
+        totalProspects: (campaign.prospectIds || []).length,
+        totalSent: 0,
+        totalClicked: 0,
+        totalReplies: 0,
+        totalOpportunities: 0,
+        totalQualified: 0,
+        totalAssigned: 0,
+        progressPercent: 0,
+      },
+      sync: {
+        providerStatus: "idle",
+        lastErrorCode: "",
+        lastErrorMessage: "",
+        lastSyncedAt: null,
+        lastAnalyticsSyncedAt: null,
+      },
+    });
+
+    const populated = await OutreachCampaign.findById(duplicate._id)
+      .populate("sdrId", "name email role")
+      .populate("RHId", "name email role")
+      .populate("IMEId", "name email role");
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaign duplicated successfully",
+      data: populated,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to duplicate campaign");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.shareOutreachCampaign = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
+
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    if (!campaign.instantly?.campaignId) {
+      return res.status(400).json({
+        success: false,
+        message: "Launch the campaign first before sharing it",
+      });
+    }
+
+    const shareResult = await instantlyService.shareCampaign(
+      campaign.instantly.campaignId,
+      req.body || {}
+    );
+
+    const isHttpUrl = (value) =>
+      typeof value === "string" && /^https?:\/\//i.test(value.trim());
+
+    const pickUrl = (...values) => {
+      for (const value of values) {
+        if (isHttpUrl(value)) return value.trim();
+      }
+      return "";
+    };
+
+    const shareLink =
+      typeof shareResult === "string"
+        ? (isHttpUrl(shareResult) ? shareResult.trim() : "")
+        : pickUrl(
+          shareResult?.shareLink,
+          shareResult?.share_link,
+          shareResult?.shareUrl,
+          shareResult?.share_url,
+          shareResult?.url,
+          shareResult?.data?.shareLink,
+          shareResult?.data?.share_link,
+          shareResult?.data?.shareUrl,
+          shareResult?.data?.share_url,
+          shareResult?.data?.url,
+          campaign.instantly?.shareLink
+        );
+
+    if (shareLink) {
+      campaign.instantly.shareLink = shareLink;
+      await campaign.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: shareLink
+        ? "Campaign shared successfully"
+        : "Campaign shared, but no share URL was returned by Instantly",
+      data: {
+        shareLink,
+        raw: shareResult,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to share campaign");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.downloadOutreachCampaignAnalyticsCsv = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (!campaign.instantly?.campaignId) {
+      return res.status(400).json({
+        success: false,
+        message: "Launch the campaign first to fetch analytics",
+      });
+    }
+
+    const analytics = await instantlyService.getCampaignAnalyticsDaily({
+      campaign_id: campaign.instantly.campaignId,
+    });
+
+    const rows = extractAnalyticsRows(analytics);
+    const csv = toCsv(rows);
+
+    await OutreachCampaign.findByIdAndUpdate(campaign._id, {
+      $set: {
+        "sync.lastAnalyticsSyncedAt": new Date(),
+      },
+    });
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="campaign-analytics-${campaign._id}.csv"`
+    );
+
+    return res.status(200).send(csv);
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to download analytics CSV");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
 exports.launchOutreachCampaign = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
@@ -1543,24 +2102,37 @@ exports.launchOutreachCampaign = async (req, res) => {
 
     const imeFlow = isImeFlow(campaign);
 
+    let senderAssignments = [];
     let senderEmails = [];
-    let primarySenderEmail = "";
-    let createCampaignPayload = null;
+    let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
 
-    if (imeFlow) {
-      const imeMailbox = await getActiveImeMailbox(campaign.IMEId);
-      if (!imeMailbox?.email) {
+    if (isImeFlow(campaign)) {
+      senderAssignments = await getActiveImeSenders(campaign.IMEId);
+
+      if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
-          message: "Selected IME must have one connected mailbox",
+          message: "No mailbox is assigned to this IME",
         });
       }
 
-      senderEmails = [imeMailbox.email];
-      primarySenderEmail = imeMailbox.email;
-      campaign.teamMailboxes.IMEEmail = imeMailbox.email;
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
+
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.IMEEmail = primarySenderEmail;
     } else {
-      const senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+
       if (!senderAssignments.length) {
         return res.status(400).json({
           success: false,
@@ -1568,20 +2140,23 @@ exports.launchOutreachCampaign = async (req, res) => {
         });
       }
 
-      const primarySender =
-        senderAssignments.find((item) => item.isPrimary) || senderAssignments[0];
       const rhMailbox = await getActiveRhMailbox(campaign.RHId);
 
-      if (!rhMailbox) {
-        return res.status(400).json({
-          success: false,
-          message: "Parent Revenue Head mailbox is not connected",
-        });
-      }
+      senderEmails = resolveSelectedAccountEmails(
+        senderAssignments,
+        req.body?.accountEmails,
+        campaign.instantly?.accountEmails
+      );
 
-      senderEmails = senderAssignments.map((item) => item.email);
-      primarySenderEmail = primarySender?.email || "";
-      campaign.teamMailboxes.RHEmail = rhMailbox.email || "";
+      primarySenderEmail = resolveSelectedSenderEmail(
+        senderAssignments,
+        req.body?.senderAccountEmail,
+        campaign.instantly?.senderAccountEmail,
+        senderEmails
+      );
+
+      campaign.teamMailboxes.RHEmail =
+        rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
     }
 
     createCampaignPayload = buildCampaignCreatePayload({
@@ -1599,6 +2174,16 @@ exports.launchOutreachCampaign = async (req, res) => {
         await instantlyService.updateCampaign(campaign.instantly.campaignId, createCampaignPayload);
         await instantlyService.activateCampaign(campaign.instantly.campaignId);
       } catch (error) {
+        campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
+        campaign.sync.providerStatus = "error";
+        campaign.sync.lastErrorCode = String(error?.response?.status || "");
+        campaign.sync.lastErrorMessage =
+          error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to resume campaign in Instantly";
+        await campaign.save();
+
         const payload = getAxiosErrorPayload(error, "Failed to resume campaign in Instantly");
         return res.status(payload.statusCode).json({
           success: false,
@@ -1611,6 +2196,10 @@ exports.launchOutreachCampaign = async (req, res) => {
       campaign.instantly.senderAccountEmail = primarySenderEmail;
       campaign.configuration.lastSyncedAt = new Date();
       campaign.configuration.lastSyncedBy = req.admin.adminId;
+      campaign.sync.providerStatus = "synced";
+      campaign.sync.lastErrorCode = "";
+      campaign.sync.lastErrorMessage = "";
+      campaign.sync.lastSyncedAt = new Date();
       campaign.status = OUTREACH_CAMPAIGN_STATUS.LAUNCHED;
       campaign.pausedAt = null;
       await campaign.save();
@@ -1641,6 +2230,16 @@ exports.launchOutreachCampaign = async (req, res) => {
     try {
       instantlyCampaign = await instantlyService.createCampaign(createCampaignPayload);
     } catch (error) {
+      campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
+      campaign.sync.providerStatus = "error";
+      campaign.sync.lastErrorCode = String(error?.response?.status || "");
+      campaign.sync.lastErrorMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to create campaign in Instantly";
+      await campaign.save();
+
       const payload = getAxiosErrorPayload(error, "Failed to create campaign in Instantly");
       return res.status(payload.statusCode).json({
         success: false,
@@ -1656,6 +2255,12 @@ exports.launchOutreachCampaign = async (req, res) => {
 
     const instantlyCampaignId = readExternalId(instantlyCampaign);
     if (!instantlyCampaignId) {
+      campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
+      campaign.sync.providerStatus = "error";
+      campaign.sync.lastErrorCode = "missing_campaign_id";
+      campaign.sync.lastErrorMessage = "Instantly campaign created but no campaignId was returned";
+      await campaign.save();
+
       return res.status(400).json({
         success: false,
         step: "create_campaign",
@@ -1676,6 +2281,17 @@ exports.launchOutreachCampaign = async (req, res) => {
         })),
       });
     } catch (error) {
+      campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
+      campaign.sync.providerStatus = "error";
+      campaign.sync.lastErrorCode = String(error?.response?.status || "");
+      campaign.sync.lastErrorMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to add leads to Instantly campaign";
+      campaign.instantly.campaignId = instantlyCampaignId;
+      await campaign.save();
+
       const payload = getAxiosErrorPayload(error, "Failed to add leads to Instantly campaign");
       return res.status(payload.statusCode).json({
         success: false,
@@ -1691,6 +2307,17 @@ exports.launchOutreachCampaign = async (req, res) => {
     try {
       await instantlyService.activateCampaign(instantlyCampaignId);
     } catch (error) {
+      campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
+      campaign.sync.providerStatus = "error";
+      campaign.sync.lastErrorCode = String(error?.response?.status || "");
+      campaign.sync.lastErrorMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to activate campaign in Instantly";
+      campaign.instantly.campaignId = instantlyCampaignId;
+      await campaign.save();
+
       const payload = getAxiosErrorPayload(error, "Failed to activate campaign in Instantly");
       return res.status(payload.statusCode).json({
         success: false,
@@ -1708,10 +2335,15 @@ exports.launchOutreachCampaign = async (req, res) => {
     campaign.instantly.senderAccountEmail = primarySenderEmail;
     campaign.configuration.lastSyncedAt = new Date();
     campaign.configuration.lastSyncedBy = req.admin.adminId;
+    campaign.sync.providerStatus = "synced";
+    campaign.sync.lastErrorCode = "";
+    campaign.sync.lastErrorMessage = "";
+    campaign.sync.lastSyncedAt = new Date();
     campaign.status = OUTREACH_CAMPAIGN_STATUS.LAUNCHED;
     campaign.launchValidatedAt = new Date();
     campaign.launchedAt = new Date();
     campaign.pausedAt = null;
+    campaign.stats.progressPercent = 0;
     await campaign.save();
 
     await ProspectBrand.updateMany(
@@ -1764,6 +2396,16 @@ exports.pauseOutreachCampaign = async (req, res) => {
     try {
       await instantlyService.pauseCampaign(campaign.instantly.campaignId);
     } catch (error) {
+      campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
+      campaign.sync.providerStatus = "error";
+      campaign.sync.lastErrorCode = String(error?.response?.status || "");
+      campaign.sync.lastErrorMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to pause campaign in Instantly";
+      await campaign.save();
+
       const payload = getAxiosErrorPayload(error, "Failed to pause campaign in Instantly");
       return res.status(payload.statusCode).json({
         success: false,
@@ -1786,5 +2428,1297 @@ exports.pauseOutreachCampaign = async (req, res) => {
       success: false,
       ...payload,
     });
+  }
+};
+
+function toSafeNumber(...values) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function pickFirstObject(...values) {
+  for (const value of values) {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  }
+  return {};
+}
+
+function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
+  const root = pickFirstObject(payload, payload?.data, payload?.stats, payload?.result);
+
+  const totalSent = toSafeNumber(
+    root.total_sent,
+    root.totalSent,
+    root.sent,
+    root.emails_sent,
+    campaign?.stats?.totalSent
+  );
+
+  const totalClicked = toSafeNumber(
+    root.total_clicked,
+    root.totalClicked,
+    root.clicked,
+    campaign?.stats?.totalClicked
+  );
+
+  const totalReplies = toSafeNumber(
+    root.total_replied,
+    root.totalReplies,
+    root.replied,
+    campaign?.stats?.totalReplies
+  );
+
+  const totalOpportunities = toSafeNumber(
+    root.total_opportunities,
+    root.totalOpportunities,
+    root.opportunities,
+    campaign?.stats?.totalOpportunities
+  );
+
+  const totalQualified = toSafeNumber(
+    root.total_conversions,
+    root.totalQualified,
+    root.qualified,
+    campaign?.stats?.totalQualified
+  );
+
+  const totalProspects = toSafeNumber(
+    root.total_leads,
+    root.totalProspects,
+    root.leads,
+    campaign?.stats?.totalProspects,
+    Array.isArray(campaign?.prospectIds) ? campaign.prospectIds.length : 0
+  );
+
+  const progressPercent =
+    totalProspects > 0 ? Math.min(100, Math.round((totalSent / totalProspects) * 100)) : 0;
+
+  return {
+    totalProspects,
+    totalSent,
+    totalClicked,
+    totalReplies,
+    totalOpportunities,
+    totalQualified,
+    totalAssigned: toSafeNumber(campaign?.stats?.totalAssigned),
+    progressPercent,
+    raw: payload,
+  };
+}
+
+function buildOverviewFallback(campaign) {
+  const totalProspects = toSafeNumber(
+    campaign?.stats?.totalProspects,
+    Array.isArray(campaign?.prospectIds) ? campaign.prospectIds.length : 0
+  );
+  const totalSent = toSafeNumber(campaign?.stats?.totalSent);
+  const totalClicked = toSafeNumber(campaign?.stats?.totalClicked);
+  const totalReplies = toSafeNumber(campaign?.stats?.totalReplies);
+  const totalOpportunities = toSafeNumber(campaign?.stats?.totalOpportunities);
+  const totalQualified = toSafeNumber(campaign?.stats?.totalQualified);
+
+  return {
+    totalProspects,
+    totalSent,
+    totalClicked,
+    totalReplies,
+    totalOpportunities,
+    totalQualified,
+    totalAssigned: toSafeNumber(campaign?.stats?.totalAssigned),
+    progressPercent:
+      totalProspects > 0 ? Math.min(100, Math.round((totalSent / totalProspects) * 100)) : 0,
+    provider: "local",
+    raw: null,
+  };
+}
+
+function buildStepsFallback(campaign) {
+  const steps = normalizeCampaignSequences(campaign?.configuration?.sequences || []);
+  const totalSent = toSafeNumber(campaign?.stats?.totalSent);
+  const totalReplies = toSafeNumber(campaign?.stats?.totalReplies);
+  const totalClicked = toSafeNumber(campaign?.stats?.totalClicked);
+  const totalOpportunities = toSafeNumber(campaign?.stats?.totalOpportunities);
+
+  return steps.map((step, index) => ({
+    stepOrder: step.stepOrder || index + 1,
+    label: `Step ${step.stepOrder || index + 1}`,
+    type: step.type || "email",
+    sent: index === 0 ? totalSent : 0,
+    opened: null,
+    replied: index === 0 ? totalReplies : 0,
+    clicked: index === 0 ? totalClicked : 0,
+    opportunities: index === 0 ? totalOpportunities : 0,
+    subject: step?.variants?.[0]?.subject || "",
+  }));
+}
+
+async function persistOverviewStats(campaign, overview) {
+  campaign.stats.totalProspects = toSafeNumber(
+    overview?.totalProspects,
+    campaign.stats?.totalProspects
+  );
+  campaign.stats.totalSent = toSafeNumber(
+    overview?.totalSent,
+    campaign.stats?.totalSent
+  );
+  campaign.stats.totalClicked = toSafeNumber(
+    overview?.totalClicked,
+    campaign.stats?.totalClicked
+  );
+  campaign.stats.totalReplies = toSafeNumber(
+    overview?.totalReplies,
+    campaign.stats?.totalReplies
+  );
+  campaign.stats.totalOpportunities = toSafeNumber(
+    overview?.totalOpportunities,
+    campaign.stats?.totalOpportunities
+  );
+  campaign.stats.totalQualified = toSafeNumber(
+    overview?.totalQualified,
+    campaign.stats?.totalQualified
+  );
+  campaign.stats.progressPercent = toSafeNumber(
+    overview?.progressPercent,
+    campaign.stats?.progressPercent
+  );
+
+  campaign.sync.lastAnalyticsSyncedAt = new Date();
+  await campaign.save();
+}
+
+exports.getOutreachCampaignAnalyticsOverview = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (!campaign.instantly?.campaignId) {
+      return res.status(200).json({
+        success: true,
+        data: buildOverviewFallback(campaign),
+      });
+    }
+
+    const providerPayload = await instantlyService.getCampaignAnalyticsOverview({
+      campaign_id: campaign.instantly.campaignId,
+      ...(req.query || {}),
+    });
+
+    const normalized = normalizeOverviewAnalyticsPayload(providerPayload, campaign);
+    await persistOverviewStats(campaign, normalized);
+
+    return res.status(200).json({
+      success: true,
+      data: normalized,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load campaign analytics overview");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.getOutreachCampaignAnalyticsDaily = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (!campaign.instantly?.campaignId) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
+    }
+
+    const providerPayload = await instantlyService.getCampaignAnalyticsDaily({
+      campaign_id: campaign.instantly.campaignId,
+      ...(req.query || {}),
+    });
+
+    await OutreachCampaign.findByIdAndUpdate(campaign._id, {
+      $set: {
+        "sync.lastAnalyticsSyncedAt": new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: extractAnalyticsRows(providerPayload),
+      raw: providerPayload,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load campaign analytics daily");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.getOutreachCampaignAnalyticsSteps = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (!campaign.instantly?.campaignId) {
+      return res.status(200).json({
+        success: true,
+        data: buildStepsFallback(campaign),
+      });
+    }
+
+    const providerPayload = await instantlyService.getCampaignAnalyticsSteps({
+      campaign_id: campaign.instantly.campaignId,
+      ...(req.query || {}),
+    });
+
+    await OutreachCampaign.findByIdAndUpdate(campaign._id, {
+      $set: {
+        "sync.lastAnalyticsSyncedAt": new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: Array.isArray(providerPayload?.data)
+        ? providerPayload.data
+        : Array.isArray(providerPayload?.rows)
+          ? providerPayload.rows
+          : Array.isArray(providerPayload)
+            ? providerPayload
+            : buildStepsFallback(campaign),
+      raw: providerPayload,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load campaign analytics steps");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.getOutreachCampaignSendingStatus = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (!campaign.instantly?.campaignId) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          status: campaign.status,
+          providerStatus: campaign.sync?.providerStatus || "idle",
+          instantlyCampaignId: "",
+        },
+      });
+    }
+
+    const providerPayload = await instantlyService.getCampaignSendingStatus(
+      campaign.instantly.campaignId,
+      req.query || {}
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: providerPayload,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load campaign sending status");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.diagnoseOutreachCampaign = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    const diagnostics = {
+      campaignId: campaign._id,
+      name: campaign.name,
+      status: campaign.status,
+      providerStatus: campaign.sync?.providerStatus || "idle",
+      instantlyCampaignId: campaign.instantly?.campaignId || "",
+      senderAccountEmail: campaign.instantly?.senderAccountEmail || "",
+      senderAccounts: campaign.instantly?.accountEmails || [],
+      prospectCount: Array.isArray(campaign.prospectIds) ? campaign.prospectIds.length : 0,
+      scheduleWindows: campaign.configuration?.schedule?.windows?.length || 0,
+      sequenceSteps: campaign.configuration?.sequences?.length || 0,
+      issues: [],
+      warnings: [],
+    };
+
+    if (!campaign.instantly?.accountEmails?.length) {
+      diagnostics.issues.push("No sender mailboxes are assigned");
+    }
+
+    if (!campaign.instantly?.senderAccountEmail) {
+      diagnostics.issues.push("Primary sender mailbox is missing");
+    }
+
+    if (!campaign.configuration?.sequences?.length) {
+      diagnostics.issues.push("No sequence steps configured");
+    }
+
+    if (!campaign.configuration?.schedule?.windows?.length) {
+      diagnostics.issues.push("No sending schedule configured");
+    }
+
+    if (!campaign.prospectIds?.length) {
+      diagnostics.warnings.push("No leads are attached to this campaign");
+    }
+
+    if (campaign.status === OUTREACH_CAMPAIGN_STATUS.ERROR && campaign.sync?.lastErrorMessage) {
+      diagnostics.issues.push(campaign.sync.lastErrorMessage);
+    }
+
+    if (campaign.instantly?.campaignId) {
+      try {
+        const sendingStatus = await instantlyService.getCampaignSendingStatus(
+          campaign.instantly.campaignId,
+          {}
+        );
+        diagnostics.sendingStatus = sendingStatus;
+      } catch (error) {
+        diagnostics.warnings.push(
+          error?.response?.data?.message ||
+          error?.message ||
+          "Unable to fetch provider sending status"
+        );
+      }
+    } else {
+      diagnostics.warnings.push("Campaign has not been launched to Instantly yet");
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: diagnostics.issues.length
+        ? "Campaign has configuration issues"
+        : "Campaign looks healthy",
+      data: diagnostics,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to diagnose campaign");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.updateCampaignContactStage = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+    const { prospectId } = req.params;
+    const stage = String(req.body?.stage || "").trim();
+
+    if (!stage) {
+      return res.status(400).json({
+        success: false,
+        message: "stage is required",
+      });
+    }
+
+    const isAttached = (campaign.prospectIds || []).some(
+      (id) => String(id) === String(prospectId)
+    );
+
+    if (!isAttached) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead is not attached to this campaign",
+      });
+    }
+
+    const updated = await ProspectBrand.findByIdAndUpdate(
+      prospectId,
+      { $set: { stage } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Lead stage updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to update lead stage");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.removeCampaignContact = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
+    const campaign = await getManagedCampaign(req, req.params.id);
+    const { prospectId } = req.params;
+
+    campaign.prospectIds = (campaign.prospectIds || []).filter(
+      (id) => String(id) !== String(prospectId)
+    );
+    campaign.stats.totalProspects = campaign.prospectIds.length;
+    await campaign.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Lead removed from campaign successfully",
+      data: {
+        campaignId: campaign._id,
+        prospectId,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to remove lead from campaign");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+const CSV_COLUMN_TYPE = {
+  IGNORE: "ignore",
+  FIRST_NAME: "first_name",
+  LAST_NAME: "last_name",
+  FULL_NAME: "full_name",
+  EMAIL: "email",
+  COMPANY_NAME: "company_name",
+  JOB_TITLE: "job_title",
+  WEBSITE: "website",
+  PHONE: "phone",
+  LINKEDIN_URL: "linkedin_url",
+  CUSTOM: "custom",
+};
+
+function normalizeTemplateVariableKey(value = "") {
+  const cleaned = String(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim();
+
+  if (!cleaned) return "field";
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const [first, ...rest] = words;
+
+  return [
+    first.toLowerCase(),
+    ...rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()),
+  ].join("");
+}
+
+function inferCsvColumnType(header = "", samples = []) {
+  const key = normalizeHeaderKey(header);
+  const joinedSamples = samples.join(" ").toLowerCase();
+
+  if (key.includes("email")) return CSV_COLUMN_TYPE.EMAIL;
+  if (key.includes("brand") || key.includes("company")) return CSV_COLUMN_TYPE.COMPANY_NAME;
+  if (key.includes("website") || key.includes("site") || key.includes("domain")) {
+    return CSV_COLUMN_TYPE.WEBSITE;
+  }
+  if (key.includes("jobtitle") || key.includes("designation") || key.includes("title")) {
+    return CSV_COLUMN_TYPE.JOB_TITLE;
+  }
+  if (key.includes("phone") || key.includes("mobile") || key.includes("whatsapp")) {
+    return CSV_COLUMN_TYPE.PHONE;
+  }
+  if (key.includes("linkedin")) return CSV_COLUMN_TYPE.LINKEDIN_URL;
+  if (key === "name" || key.includes("fullname") || key.includes("contactname")) {
+    return CSV_COLUMN_TYPE.FULL_NAME;
+  }
+  if (key.includes("firstname") || key === "fname" || key === "poc") {
+    return CSV_COLUMN_TYPE.FIRST_NAME;
+  }
+  if (key.includes("lastname") || key === "lname") {
+    return CSV_COLUMN_TYPE.LAST_NAME;
+  }
+
+  if (joinedSamples.includes("@")) return CSV_COLUMN_TYPE.EMAIL;
+  if (joinedSamples.includes("http")) return CSV_COLUMN_TYPE.WEBSITE;
+
+  return CSV_COLUMN_TYPE.CUSTOM;
+}
+
+function collectSampleValues(rows = [], header = "", limit = 4) {
+  const values = [];
+
+  for (const row of rows) {
+    const value = row?.[header];
+    const stringValue = String(value ?? "").trim();
+    if (!stringValue) continue;
+    values.push(stringValue);
+    if (values.length >= limit) break;
+  }
+
+  return values;
+}
+
+function buildCsvPreviewColumns(rows = []) {
+  const headers = rows.length ? Object.keys(rows[0]) : [];
+
+  return headers.map((header) => {
+    const samples = collectSampleValues(rows, header, 4);
+    const inferredType = inferCsvColumnType(header, samples);
+
+    return {
+      header,
+      variableKey: normalizeTemplateVariableKey(header),
+      inferredType,
+      selectedType: inferredType,
+      samples,
+    };
+  });
+}
+
+function normalizeIncomingColumnMappings(inputColumns = [], rows = []) {
+  const fallbackColumns = buildCsvPreviewColumns(rows);
+  const fallbackMap = new Map(fallbackColumns.map((item) => [item.header, item]));
+
+  return (Array.isArray(inputColumns) ? inputColumns : [])
+    .map((item) => {
+      const base = fallbackMap.get(item?.header) || {
+        header: item?.header || "",
+        variableKey: normalizeTemplateVariableKey(item?.header || ""),
+        inferredType: CSV_COLUMN_TYPE.CUSTOM,
+        selectedType: CSV_COLUMN_TYPE.CUSTOM,
+        samples: [],
+      };
+
+      return {
+        header: String(item?.header || base.header || "").trim(),
+        variableKey: normalizeTemplateVariableKey(item?.variableKey || base.variableKey || item?.header || ""),
+        inferredType: String(item?.inferredType || base.inferredType || CSV_COLUMN_TYPE.CUSTOM),
+        selectedType: String(item?.selectedType || base.selectedType || CSV_COLUMN_TYPE.CUSTOM),
+        samples: Array.isArray(item?.samples) && item.samples.length ? item.samples : base.samples,
+      };
+    })
+    .filter((item) => item.header);
+}
+
+function buildTemplateVariableList(columns = []) {
+  const vars = new Set();
+
+  columns.forEach((column) => {
+    if (!column?.variableKey) return;
+    vars.add(`{{${column.variableKey}}}`);
+
+    if (column.selectedType === CSV_COLUMN_TYPE.FIRST_NAME) vars.add("{{firstName}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.LAST_NAME) vars.add("{{lastName}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.FULL_NAME) vars.add("{{fullName}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.EMAIL) vars.add("{{email}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.COMPANY_NAME) vars.add("{{companyName}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.WEBSITE) vars.add("{{website}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.JOB_TITLE) vars.add("{{jobTitle}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.PHONE) vars.add("{{phone}}");
+    if (column.selectedType === CSV_COLUMN_TYPE.LINKEDIN_URL) vars.add("{{linkedinUrl}}");
+  });
+
+  return [...vars];
+}
+
+function getMappedCellValue(row = {}, columns = [], type) {
+  const match = columns.find((column) => column.selectedType === type);
+  if (!match) return "";
+  return String(row?.[match.header] ?? "").trim();
+}
+
+function buildTemplateVariableMapFromRow(row = {}, columns = []) {
+  const variables = {};
+
+  columns.forEach((column) => {
+    const rawValue = row?.[column.header];
+    const stringValue = String(rawValue ?? "").trim();
+
+    variables[column.variableKey] = stringValue;
+
+    if (column.selectedType === CSV_COLUMN_TYPE.FIRST_NAME) variables.firstName = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.LAST_NAME) variables.lastName = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.FULL_NAME) variables.fullName = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.EMAIL) variables.email = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.COMPANY_NAME) variables.companyName = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.WEBSITE) variables.website = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.JOB_TITLE) variables.jobTitle = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.PHONE) variables.phone = stringValue;
+    if (column.selectedType === CSV_COLUMN_TYPE.LINKEDIN_URL) variables.linkedinUrl = stringValue;
+  });
+
+  return variables;
+}
+
+async function upsertProspectsFromMappedRows(rows = [], columns = [], sourceFileName = "") {
+  const docs = [];
+
+  for (const row of rows) {
+    const email = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.EMAIL).toLowerCase();
+    if (!email) continue;
+
+    const companyName =
+      getMappedCellValue(row, columns, CSV_COLUMN_TYPE.COMPANY_NAME) ||
+      String(row?.brand || row?.company || row?.Company || "").trim();
+
+    const firstName = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.FIRST_NAME);
+    const lastName = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.LAST_NAME);
+    const fullName =
+      getMappedCellValue(row, columns, CSV_COLUMN_TYPE.FULL_NAME) ||
+      [firstName, lastName].filter(Boolean).join(" ").trim();
+
+    const title = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.JOB_TITLE);
+    const website = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.WEBSITE);
+    const linkedinUrl = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.LINKEDIN_URL);
+    const phone = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.PHONE);
+
+    const templateVariables = buildTemplateVariableMapFromRow(row, columns);
+
+    const doc = await ProspectBrand.findOneAndUpdate(
+      { "primaryContact.email": email },
+      {
+        $set: {
+          companyName: companyName || templateVariables.companyName || "Unknown",
+          website: website || templateVariables.website || "",
+          source: "csv",
+          primaryContact: {
+            name: fullName || firstName || "",
+            email,
+            title: title || "",
+            linkedinUrl: linkedinUrl || "",
+            phone: phone || "",
+          },
+          customFields: row,
+          templateVariables,
+          csvMeta: {
+            headers: Object.keys(row || {}),
+            mappedAt: new Date(),
+            sourceFileName,
+          },
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    docs.push(doc);
+  }
+
+  if (!docs.length) {
+    const error = new Error("No valid contacts found");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return docs;
+}
+
+function buildDefaultSequence() {
+  return [
+    {
+      stepOrder: 1,
+      type: "email",
+      delay: 0,
+      delayUnit: "days",
+      preDelay: 0,
+      preDelayUnit: "days",
+      variants: [
+        {
+          subject: "Collab opportunity with {{companyName}}",
+          body: [
+            "Hi {{firstName}},",
+            "",
+            "We’d love to explore a collaboration opportunity with {{companyName}}.",
+            "",
+            "Would you be open to a quick conversation?",
+            "",
+            "Best,",
+            "CollabGlam",
+          ].join("\n"),
+        },
+      ],
+    },
+  ];
+}
+
+exports.previewCampaignContactsCsv = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
+
+    await getManagedCampaign(req, req.params.id);
+
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV file is required",
+      });
+    }
+
+    const csvText = req.file.buffer.toString("utf-8");
+
+    const rows = parse(csvText, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      bom: true,
+      relax_column_count: true,
+      delimiter: [",", "\t", ";"],
+    });
+
+    const columns = buildCsvPreviewColumns(rows);
+    const templateVariables = buildTemplateVariableList(columns);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        fileName: req.file.originalname || "contacts.csv",
+        totalRows: rows.length,
+        columns,
+        templateVariables,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to preview CSV");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+exports.getCampaignTemplateVariables = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    const columns = Array.isArray(campaign.csvSchema?.columns) ? campaign.csvSchema.columns : [];
+    const templateVariables =
+      Array.isArray(campaign.templateVariables) && campaign.templateVariables.length
+        ? campaign.templateVariables
+        : buildTemplateVariableList(columns);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        templateVariables,
+        columns,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load template variables");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
+function normalizeSequenceVariants(variants = []) {
+  const rows = Array.isArray(variants) ? variants : [];
+  if (!rows.length) return [{ subject: "", body: "" }];
+
+  return rows.map((variant) => ({
+    subject: String(variant?.subject || "").trim(),
+    body: String(variant?.body || ""),
+  }));
+}
+
+function normalizeCampaignSequences(input = []) {
+  const rows = Array.isArray(input) ? input : [];
+
+  if (!rows.length) {
+    return [
+      {
+        stepOrder: 1,
+        type: "email",
+        delay: 0,
+        delayUnit: "days",
+        preDelay: 0,
+        preDelayUnit: "days",
+        variants: [{ subject: "", body: "" }],
+      },
+    ];
+  }
+
+  return rows.map((step, index) => {
+    const isFirstStep = index === 0;
+
+    return {
+      stepOrder: index + 1,
+      type: "email",
+      delay: isFirstStep ? 0 : Math.max(1, Number(step?.delay || 1)),
+      delayUnit: isFirstStep
+        ? "days"
+        : ["minutes", "hours", "days"].includes(step?.delayUnit)
+          ? step.delayUnit
+          : "days",
+      preDelay: 0,
+      preDelayUnit: "days",
+      variants: normalizeSequenceVariants(step?.variants),
+    };
+  });
+}
+
+function normalizeSubsequenceSteps(input = []) {
+  const rows = Array.isArray(input) ? input : [];
+
+  if (!rows.length) {
+    return [
+      {
+        stepOrder: 1,
+        type: "email",
+        delay: 1,
+        delayUnit: "days",
+        variants: [{ subject: "", body: "" }],
+      },
+    ];
+  }
+
+  return rows.map((step, index) => ({
+    stepOrder: index + 1,
+    type: "email",
+    delay: Math.max(0, Number(step?.delay || (index === 0 ? 0 : 1))),
+    delayUnit: ["minutes", "hours", "days"].includes(step?.delayUnit)
+      ? step.delayUnit
+      : "days",
+    variants: normalizeSequenceVariants(step?.variants),
+  }));
+}
+
+function buildSystemTemplates() {
+  return [
+    {
+      _id: "system_lead_generation_quick_question",
+      isSystem: true,
+      category: "lead_generation",
+      name: "Quick question",
+      subject: "{{firstName}} - quick question",
+      body: `Hey {{firstName}},
+
+Your LinkedIn was impressive and I wanted to reach out directly :)
+
+So we’re helping {{companyName}} from {{location}} to fill their cal with 5-12 calls with their ideal customer daily. If you let me have a call with you about how we can do the same for you, I will send you a burger with UberEats :D
+
+Are you free any time this week for a quick chat?
+
+Cheers,
+NAME
+
+Reply “No thanks” if you wish to no longer receive messages from me.`,
+    },
+    {
+      _id: "system_follow_up_gentle",
+      isSystem: true,
+      category: "follow_ups",
+      name: "Gentle follow-up",
+      subject: "",
+      body: `Hey {{firstName}},
+
+Just wanted to follow up on my previous note in case it got buried.
+
+Would love to know if this is relevant for {{companyName}}.
+
+Best,
+NAME`,
+    },
+  ];
+}
+
+function buildSubsequencePhraseList(phrases = []) {
+  return (Array.isArray(phrases) ? phrases : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+exports.listCampaignTemplates = async (req, res) => {
+  try {
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    const customTemplates = await OutreachTemplate.find({
+      workspaceId: String(campaign._id),
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        systemTemplates: buildSystemTemplates(),
+        customTemplates,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load templates");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.createCampaignTemplate = async (req, res) => {
+  try {
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    const template = await OutreachTemplate.create({
+      workspaceId: String(campaign._id),
+      createdBy: req.admin?.adminId || req.admin?._id || null,
+      category: String(req.body?.category || "custom_templates"),
+      name: String(req.body?.name || "").trim(),
+      subject: String(req.body?.subject || ""),
+      body: String(req.body?.body || ""),
+      isSystem: false,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Template created successfully",
+      data: template,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to create template");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.updateCampaignTemplate = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const template = await OutreachTemplate.findByIdAndUpdate(
+      req.params.templateId,
+      {
+        $set: {
+          name: String(req.body?.name || "").trim(),
+          category: String(req.body?.category || "custom_templates"),
+          subject: String(req.body?.subject || ""),
+          body: String(req.body?.body || ""),
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Template updated successfully",
+      data: template,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to update template");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.deleteCampaignTemplate = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+    await OutreachTemplate.findByIdAndDelete(req.params.templateId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Template deleted successfully",
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to delete template");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.listCampaignSubsequences = async (req, res) => {
+  try {
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    if (campaign.status !== "launched") {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: { launchRequired: true },
+      });
+    }
+
+    const subsequences = await OutreachSubsequence.find({
+      campaignId: campaign._id,
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: subsequences,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load subsequences");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.createCampaignSubsequence = async (req, res) => {
+  try {
+    const campaign = await getManagedCampaign(req, req.params.id);
+
+    if (campaign.status !== "launched") {
+      return res.status(400).json({
+        success: false,
+        message: "Subsequences are available only after the campaign is launched",
+      });
+    }
+
+    const subsequence = await OutreachSubsequence.create({
+      campaignId: campaign._id,
+      name: String(req.body?.name || "New subsequence").trim(),
+      trigger: {
+        statuses: Array.isArray(req.body?.trigger?.statuses) ? req.body.trigger.statuses : [],
+        activities: Array.isArray(req.body?.trigger?.activities) ? req.body.trigger.activities : [],
+        phrases: buildSubsequencePhraseList(req.body?.trigger?.phrases),
+      },
+      scheduleMode: req.body?.scheduleMode || "inherit",
+      schedule: req.body?.schedule || campaign.configuration?.schedule || {},
+      dailyLimitMode: req.body?.dailyLimitMode || "inherit",
+      dailyLimit: Number(req.body?.dailyLimit || 0),
+      ignoreAccountDailyLimits: Boolean(req.body?.ignoreAccountDailyLimits),
+      sequences: normalizeSubsequenceSteps(req.body?.sequences),
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subsequence created successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to create subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.getCampaignSubsequenceById = async (req, res) => {
+  try {
+    await getAccessibleCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOne({
+      _id: req.params.subsequenceId,
+      campaignId: req.params.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to load subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.updateCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOneAndUpdate(
+      { _id: req.params.subsequenceId, campaignId: req.params.id },
+      {
+        $set: {
+          name: String(req.body?.name || "").trim(),
+          trigger: {
+            statuses: Array.isArray(req.body?.trigger?.statuses) ? req.body.trigger.statuses : [],
+            activities: Array.isArray(req.body?.trigger?.activities) ? req.body.trigger.activities : [],
+            phrases: buildSubsequencePhraseList(req.body?.trigger?.phrases),
+          },
+          scheduleMode: req.body?.scheduleMode || "inherit",
+          schedule: req.body?.schedule || {},
+          dailyLimitMode: req.body?.dailyLimitMode || "inherit",
+          dailyLimit: Number(req.body?.dailyLimit || 0),
+          ignoreAccountDailyLimits: Boolean(req.body?.ignoreAccountDailyLimits),
+          sequences: normalizeSubsequenceSteps(req.body?.sequences),
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence updated successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to update subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.deleteCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    await OutreachSubsequence.deleteOne({
+      _id: req.params.subsequenceId,
+      campaignId: req.params.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence deleted successfully",
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to delete subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.launchCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOneAndUpdate(
+      { _id: req.params.subsequenceId, campaignId: req.params.id },
+      { $set: { status: "launched" } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence launched successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to launch subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.pauseCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findOneAndUpdate(
+      { _id: req.params.subsequenceId, campaignId: req.params.id },
+      { $set: { status: "paused" } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subsequence paused successfully",
+      data: subsequence,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to pause subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.duplicateCampaignSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const source = await OutreachSubsequence.findOne({
+      _id: req.params.subsequenceId,
+      campaignId: req.params.id,
+    }).lean();
+
+    if (!source) {
+      return res.status(404).json({
+        success: false,
+        message: "Subsequence not found",
+      });
+    }
+
+    delete source._id;
+    delete source.createdAt;
+    delete source.updatedAt;
+
+    const duplicated = await OutreachSubsequence.create({
+      ...source,
+      name: `${source.name} (Copy)`,
+      status: "draft",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subsequence duplicated successfully",
+      data: duplicated,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to duplicate subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.moveLeadsToSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
+    const subsequence = await OutreachSubsequence.findById(req.params.subsequenceId);
+
+    if (!subsequence) {
+      return res.status(404).json({
+        success: false,
+        message: "Subsequence not found",
+      });
+    }
+
+    const prospects = await ProspectBrand.find({
+      _id: { $in: leadIds },
+    });
+
+    const providerLeadIds = prospects
+      .map((item) => item?.instantly?.leadId)
+      .filter(Boolean);
+
+    let providerResult = null;
+    if (providerLeadIds.length && subsequence?.instantly?.subsequenceId) {
+      providerResult = await instantlyService.moveLeadsToSubsequence({
+        lead_ids: providerLeadIds,
+        subsequence_id: subsequence.instantly.subsequenceId,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Leads moved to subsequence successfully",
+      data: {
+        movedCount: leadIds.length,
+        providerResult,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to move leads to subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
+  }
+};
+
+exports.removeLeadFromSubsequence = async (req, res) => {
+  try {
+    await getManagedCampaign(req, req.params.id);
+
+    const subsequence = await OutreachSubsequence.findById(req.params.subsequenceId);
+    const prospect = await ProspectBrand.findById(req.body?.leadId);
+
+    if (!subsequence || !prospect) {
+      return res.status(404).json({
+        success: false,
+        message: "Subsequence or lead not found",
+      });
+    }
+
+    let providerResult = null;
+    if (prospect?.instantly?.leadId && subsequence?.instantly?.subsequenceId) {
+      providerResult = await instantlyService.removeLeadFromSubsequence({
+        lead_id: prospect.instantly.leadId,
+        subsequence_id: subsequence.instantly.subsequenceId,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Lead removed from subsequence successfully",
+      data: providerResult,
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to remove lead from subsequence");
+    return res.status(payload.statusCode).json({ success: false, ...payload });
   }
 };

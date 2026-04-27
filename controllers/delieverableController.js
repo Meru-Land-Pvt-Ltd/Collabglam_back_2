@@ -5,6 +5,7 @@ const Campaign = require("../models/campaign");
 const { InfluencerModel: Influencer } = require("../models/influencer"); // adjust path if needed
 const Milestone = require("../models/milestone");
 const Notification = require("../models/notification");
+const ApplyCampaign = require("../models/applyCampaign");
 
 const escapeRegex = (s = "") => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -53,6 +54,51 @@ const normalizeDoc = (obj) => {
     milestoneHistoryId: raw.milestoneHistoryId ? String(raw.milestoneHistoryId) : "",
   };
 };
+
+async function hasInfluencerAppliedOnCampaign({ campaignId, influencerId }) {
+  const campaignObjectId = toObjectId(campaignId);
+  const influencerObjectId = toObjectId(influencerId);
+
+  const influencerLookupValues = [String(influencerObjectId), influencerObjectId];
+  const campaignLookupValues = [String(campaignObjectId), campaignObjectId];
+
+  const applyDoc = await ApplyCampaign.findOne({
+    $and: [
+      { campaignId: { $in: campaignLookupValues } },
+      {
+        $or: [
+          { "applicants.influencerId": { $in: influencerLookupValues } },
+          { "approved.influencerId": { $in: influencerLookupValues } },
+        ],
+      },
+    ],
+  })
+    .select("_id campaignId applicants approved")
+    .lean();
+
+  if (applyDoc) return true;
+
+  const inviteDoc = await CampaignInvite.findOne({
+    campaignId: campaignObjectId,
+    influencerId: influencerObjectId,
+  })
+    .select("_id campaignId influencerId")
+    .lean();
+
+  return Boolean(inviteDoc);
+}
+
+function getAdminActorId(req) {
+  return String(
+    req.admin?._id ||
+      req.admin?.adminId ||
+      req.user?._id ||
+      req.user?.adminId ||
+      req.adminUser?._id ||
+      req.adminUser?.adminId ||
+      ""
+  ).trim();
+}
 
 const createNotificationSafe = async (payload) => {
   try {
@@ -1128,6 +1174,205 @@ exports.getDeliverableStatusByInfluencerIdPost = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverable status by influencerId and campaignId.",
+      error: err.message,
+    });
+  }
+};
+
+exports.adminCreateDeliverableApproval = async (req, res) => {
+  try {
+    const {
+      brandId,
+      influencerId,
+      campaignId,
+      title,
+      description,
+      url,
+      milestoneHistoryId,
+    } = req.body || {};
+
+    if (!brandId || !influencerId || !campaignId || !title || !milestoneHistoryId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "brandId, influencerId, campaignId, title, and milestoneHistoryId are required.",
+      });
+    }
+
+    if (
+      !isValidObjectId(brandId) ||
+      !isValidObjectId(influencerId) ||
+      !isValidObjectId(campaignId) ||
+      !isValidObjectId(milestoneHistoryId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more ids are invalid.",
+      });
+    }
+
+    const brandObjectId = toObjectId(brandId);
+    const influencerObjectId = toObjectId(influencerId);
+    const campaignObjectId = toObjectId(campaignId);
+    const milestoneHistoryObjectId = toObjectId(milestoneHistoryId);
+
+    const [campaignDoc, influencerDoc] = await Promise.all([
+      Campaign.findById(campaignObjectId)
+        .select("_id brandId campaignTitle brandName")
+        .lean(),
+      Influencer.findById(influencerObjectId)
+        .select("_id name email")
+        .lean(),
+    ]);
+
+    if (!campaignDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found.",
+      });
+    }
+
+    if (!influencerDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Influencer not found.",
+      });
+    }
+
+    if (String(campaignDoc.brandId || "") !== String(brandObjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId does not match campaign brandId.",
+      });
+    }
+
+    const isApplied = await hasInfluencerAppliedOnCampaign({
+      campaignId,
+      influencerId,
+    });
+
+    if (!isApplied) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Admin can add deliverables only for influencers who applied/approved/invited on this campaign.",
+      });
+    }
+
+    const msDoc = await Milestone.findOne({
+      "milestoneHistory._id": milestoneHistoryObjectId,
+    })
+      .select("_id brandId milestoneHistory")
+      .lean();
+
+    if (!msDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history not found for given milestoneHistoryId.",
+      });
+    }
+
+    const historyItem = (msDoc.milestoneHistory || []).find(
+      (h) => String(h._id) === String(milestoneHistoryObjectId)
+    );
+
+    if (!historyItem) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history item not found.",
+      });
+    }
+
+    if (String(msDoc.brandId) !== String(brandObjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId does not match milestone brandId.",
+      });
+    }
+
+    if (String(historyItem.campaignId) !== String(campaignObjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "campaignId does not match milestone history campaignId.",
+      });
+    }
+
+    if (String(historyItem.influencerId) !== String(influencerObjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "influencerId does not match milestone history influencerId.",
+      });
+    }
+
+    const deliverableApprovalId = new mongoose.Types.ObjectId().toString();
+    const adminActorId = getAdminActorId(req);
+
+    const doc = await Delieverable.create({
+      brandId: brandObjectId,
+      influencerId: influencerObjectId,
+      campaignId: campaignObjectId,
+      milestoneId: msDoc._id,
+      milestoneHistoryId: milestoneHistoryObjectId,
+      delieverableApprovalId: deliverableApprovalId,
+
+      title: String(title || "").trim(),
+      description: String(description || "").trim(),
+      url: normalizeUrls(url),
+
+      status: "pending",
+      approvedRole: "",
+      comments: "",
+      approvalId: "",
+
+      // Add these fields in schema if strict mode removes unknown fields.
+      submittedByRole: "Admin",
+      submittedByAdmin: isValidObjectId(adminActorId) ? toObjectId(adminActorId) : null,
+      submittedOnBehalfOfInfluencer: true,
+    });
+
+    const influencerName = influencerDoc?.name || "Influencer";
+    const campaignName = campaignDoc?.campaignTitle || "Campaign";
+    const milestoneTitle = historyItem?.milestoneTitle || "";
+
+    await Promise.all([
+      createNotificationSafe({
+        brandId: String(brandObjectId),
+        type: "deliverable.submitted.by_admin",
+        title: "Deliverable added by admin",
+        message: `Admin added a deliverable on behalf of ${influencerName} for ${campaignName}${
+          milestoneTitle ? ` (Milestone: ${milestoneTitle})` : ""
+        }.`,
+        entityType: "deliverable",
+        entityId: String(doc._id),
+        actionPath: `/brand/deliverables?campaignId=${campaignId}`,
+        isRead: false,
+      }),
+
+      createNotificationSafe({
+        influencerId: String(influencerObjectId),
+        type: "deliverable.submitted.by_admin",
+        title: "Deliverable submitted on your behalf",
+        message: `Admin added a deliverable for you in ${campaignName}${
+          milestoneTitle ? ` (Milestone: ${milestoneTitle})` : ""
+        }.`,
+        entityType: "deliverable",
+        entityId: String(doc._id),
+        actionPath: `/influencer/campaigns-invite/${String(campaignObjectId)}`,
+        isRead: false,
+      }),
+    ]);
+
+    return res.status(201).json({
+      success: true,
+      message: "Deliverable created by admin on behalf of influencer.",
+      data: normalizeDoc(doc),
+    });
+  } catch (err) {
+    console.error("adminCreateDeliverableApproval error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create deliverable by admin.",
       error: err.message,
     });
   }

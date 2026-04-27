@@ -44,6 +44,7 @@ const EMAIL_RX = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
 const HANDLE_RX = /^@[A-Za-z0-9._\-]+$/;
 
 void PortalSettings;
+void BrandWalletModel;
 
 const escapeRegex = (s = "") => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(String(v || ""));
@@ -92,6 +93,76 @@ function buildAdminDisplay(admin = {}) {
   };
 }
 
+function formatAdminRoleLabel(role = "") {
+  const normalized = String(role || "").trim().toLowerCase();
+
+  if (normalized === ROLES.SUPER_ADMIN) return "Super Admin";
+  if (normalized === ROLES.REVENUE_HEAD) return "RH";
+  if (normalized === ROLES.BME) return "BME";
+  if (normalized === ROLES.IME) return "IME";
+  if (normalized === ROLES.SDR) return "SDR";
+
+  return normalized ? normalized.replace(/_/g, " ").toUpperCase() : "Admin";
+}
+
+function buildCreatorPayload(doc = {}, adminMap = new Map(), selfLabel = "User") {
+  const isAdminCreated = doc?.isAdminCreated === true;
+
+  if (isAdminCreated) {
+    const adminId = doc?.createdByAdmin ? String(doc.createdByAdmin) : "";
+    const admin = adminId ? adminMap.get(adminId) : null;
+    const adminRole = String(doc?.adminCreatedRole || admin?.role || "").trim();
+    const adminName = String(admin?.name || "").trim();
+    const adminEmail = String(admin?.email || "").trim();
+
+    return {
+      createdBySource: "admin",
+      createdByLabel: adminName || adminEmail || "Admin",
+      createdByAdminName: adminName,
+      createdByAdminEmail: adminEmail,
+      createdByAdminRole: adminRole,
+      createdByRoleLabel: formatAdminRoleLabel(adminRole),
+    };
+  }
+
+  return {
+    createdBySource: selfLabel.toLowerCase(),
+    createdByLabel: selfLabel,
+    createdByAdminName: "",
+    createdByAdminEmail: "",
+    createdByAdminRole: "",
+    createdByRoleLabel: "Self signup",
+  };
+}
+
+function buildSignupCurrentStatus(doc = {}) {
+  if (doc?.isAdminCreated === true && doc?.signupCompleted === false) {
+    return {
+      currentStatus: "pending_signup",
+      currentStatusLabel: "Pending Signup",
+      currentStatusSubLabel: "Admin-created placeholder",
+    };
+  }
+
+  return {
+    currentStatus: "active",
+    currentStatusLabel: "Active",
+    currentStatusSubLabel: "Signup completed",
+  };
+}
+
+async function getAdminMapByIds(ids = []) {
+  const objectIds = [...new Set(ids.map((id) => String(id || "")).filter(isObjectId))].map(toObjectId);
+
+  if (!objectIds.length) return new Map();
+
+  const admins = await AdminModel.find({ _id: { $in: objectIds } })
+    .select("_id name email role")
+    .lean();
+
+  return new Map(admins.map((admin) => [String(admin._id), admin]));
+}
+
 async function enrichLiteCampaignCreatedBy(rows = []) {
   const adminIds = [
     ...new Set(
@@ -107,8 +178,8 @@ async function enrichLiteCampaignCreatedBy(rows = []) {
 
   const adminDocs = adminIds.length
     ? await ASSIGNEE_MODEL.find({ _id: { $in: adminIds.map(toObjectId) } })
-      .select("_id name email role")
-      .lean()
+        .select("_id name email role")
+        .lean()
     : [];
 
   const adminMap = new Map(
@@ -236,6 +307,10 @@ function getBrandFieldValue(brand, field) {
       return brand.expiresAt || brand.subscription?.expiresAt || "";
     case "status":
       return brand.status || getStatusFromSubscription(brand) || "";
+    case "createdBy":
+      return brand.createdByLabel || brand.createdByAdminName || brand.createdByAdminEmail || "";
+    case "currentStatus":
+      return brand.currentStatusLabel || brand.currentStatus || "";
     case "assignedRh":
     case "assignedRm":
       return brand.assignedRh || brand.assignedRm || "";
@@ -458,10 +533,8 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
 async function getScopedCampaignBrandKeysForAdmin(actor = {}) {
   const scopedBrandObjectIds = await getScopedBrandIdsForAdmin(actor);
 
-  // super admin => no restriction
   if (scopedBrandObjectIds === null) return null;
 
-  // BME / IME / RH with nothing assigned => no campaigns
   if (!Array.isArray(scopedBrandObjectIds) || !scopedBrandObjectIds.length) {
     return [];
   }
@@ -670,7 +743,9 @@ exports.adminAssignBrandPlan = async (req, res) => {
 
 exports.adminAssignInfluencerPlan = async (req, res) => {
   try {
-    const influencerId = String(req.body?.influencerId || "").trim();
+    const influencerMongoId = String(
+      req.body?._id || req.body?.id || req.body?.influencerId || ""
+    ).trim();
     const planId = String(req.body?.planId || "").trim();
 
     const durationDays = req.body?.durationDays;
@@ -678,15 +753,15 @@ exports.adminAssignInfluencerPlan = async (req, res) => {
     const durationMins = req.body?.durationMins;
     const expiresAt = req.body?.expiresAt;
 
-    if (!influencerId || !planId) {
-      return res.status(400).json({ message: "influencerId and planId required" });
+    if (!influencerMongoId || !planId) {
+      return res.status(400).json({ message: "influencer _id and planId required" });
     }
 
-    if (!isObjectId(influencerId)) {
+    if (!isObjectId(influencerMongoId)) {
       return res.status(400).json({ message: "Valid influencer _id required" });
     }
 
-    const existingInfluencer = await Influencer.findById(influencerId)
+    const existingInfluencer = await Influencer.findById(influencerMongoId)
       .select("_id name email proxyEmail subscription subscriptionExpired")
       .lean();
 
@@ -720,7 +795,7 @@ exports.adminAssignInfluencerPlan = async (req, res) => {
     subscription.lastExpiredEmailSentAt = null;
 
     const updated = await Influencer.findByIdAndUpdate(
-      influencerId,
+      influencerMongoId,
       {
         $set: {
           subscription,
@@ -918,7 +993,6 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
     $or: assigneeFilters,
   };
 
-  // SDR should only see brands that are still in outreach stage
   if (role === ROLES.SDR) {
     baseQuery.$and = [
       {
@@ -976,29 +1050,49 @@ exports.getAllBrands = async (req, res) => {
       .lean();
 
     const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
+    const adminMap = await getAdminMapByIds(
+      enrichedBrands
+        .filter((brand) => brand?.isAdminCreated === true)
+        .map((brand) => brand?.createdByAdmin)
+    );
+
+    const displayBrands = enrichedBrands.map((brand) => ({
+      ...brand,
+      ...buildCreatorPayload(brand, adminMap, "Brand"),
+      ...buildSignupCurrentStatus(brand),
+    }));
+
     const re = safeRegex(search);
 
     const filtered = re
-      ? enrichedBrands.filter((brand) =>
-        [
-          brand.name,
-          brand.brandName,
-          brand.email,
-          brand.phone,
-          brand.callingcode,
-          brand.companySize,
-          brand.industry,
-          brand.planName,
-          brand.status,
-          brand.assignedRh,
-          brand.assignedRm,
-          brand.assignedBme,
-          brand.assignedBm,
-          brand.assignedIme,
-          brand.assignedIm,
-        ].some((value) => re.test(String(value || "")))
-      )
-      : enrichedBrands;
+      ? displayBrands.filter((brand) =>
+          [
+            brand.name,
+            brand.brandName,
+            brand.email,
+            brand.phone,
+            brand.callingcode,
+            brand.companySize,
+            brand.industry,
+            brand.planName,
+            brand.status,
+            brand.assignedRh,
+            brand.assignedRm,
+            brand.assignedBme,
+            brand.assignedBm,
+            brand.assignedIme,
+            brand.assignedIm,
+            brand.createdByLabel,
+            brand.createdByAdminName,
+            brand.createdByAdminEmail,
+            brand.adminCreatedRole,
+            brand.createdByRoleLabel,
+            brand.currentStatus,
+            brand.currentStatusLabel,
+            brand.currentStatusSubLabel,
+          ].some((value) => re.test(String(value || "")))
+        )
+      : displayBrands;
 
     const allowedSortFields = new Set([
       "name",
@@ -1008,6 +1102,8 @@ exports.getAllBrands = async (req, res) => {
       "createdAt",
       "expiresAt",
       "status",
+      "createdBy",
+      "currentStatus",
       "assignedRh",
       "assignedRm",
       "assignedBme",
@@ -1209,6 +1305,7 @@ exports.getByInfluencerId = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id));
 
 const toObjectIds = (ids = []) => {
@@ -1237,7 +1334,6 @@ const getDocsByIds = async (Model, ids = []) => {
 const buildSubcategoryDetails = (categoryDoc, subcategoryIds = []) => {
   if (!categoryDoc || !Array.isArray(subcategoryIds)) return [];
 
-  // case 1: subcategories stored inside category document
   const nestedSubcategories =
     categoryDoc.subcategories ||
     categoryDoc.subcategory ||
@@ -1265,7 +1361,6 @@ const buildSubcategoryDetails = (categoryDoc, subcategoryIds = []) => {
       .filter(Boolean);
   }
 
-  // case 2: fallback from campaign.categories if available
   return [];
 };
 
@@ -1305,11 +1400,7 @@ exports.getCampaignById = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found." });
     }
 
-    // category details
     const categoryDetails = await getDocById(Category, campaign.categoryId);
-
-    // if your project has Brand model, uncomment and use this
-    // const brandDetails = await getDocById(Brand, campaign.brandId);
 
     const [
       campaignGoalDetails,
@@ -1334,7 +1425,6 @@ exports.getCampaignById = async (req, res) => {
       campaign.subcategoryIds || []
     );
 
-    // fallback: if campaign.categories already has names, use that
     if (!subcategoryDetails.length && Array.isArray(campaign.categories)) {
       subcategoryDetails = campaign.categories.map((item) => ({
         _id: item.subcategoryId,
@@ -1346,9 +1436,7 @@ exports.getCampaignById = async (req, res) => {
 
     const fullCampaign = {
       ...campaign,
-
-      // full detail objects
-      brandDetails: null, // replace with brandDetails after adding Brand model
+      brandDetails: null,
       categoryDetails: categoryDetails || null,
       subcategoryDetails: subcategoryDetails || [],
       campaignGoalDetails: campaignGoalDetails || [],
@@ -1372,7 +1460,6 @@ exports.getCampaignById = async (req, res) => {
     });
   }
 };
-
 
 exports.getCampaignsByBrandId = async (req, res) => {
   try {
@@ -1457,10 +1544,10 @@ exports.getCampaignsByBrandId = async (req, res) => {
 
 exports.adminGetInfluencerById = async (req, res) => {
   try {
-    const id = String(req.body?.id || req.body?.influencerId || "").trim();
+    const id = String(req.body?._id || req.body?.id || req.body?.influencerId || "").trim();
 
     if (!id) {
-      return res.status(400).json({ message: 'Body parameter "id" is required.' });
+      return res.status(400).json({ message: 'Body parameter "_id" or "id" is required.' });
     }
 
     if (!isObjectId(id)) {
@@ -1528,6 +1615,11 @@ async function loadSocialProfilesFromModashBulk(influencerIds = []) {
 
 exports.adminGetInfluencerList = async (req, res) => {
   try {
+    const params = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
+
     const {
       page = 1,
       limit = 20,
@@ -1538,7 +1630,7 @@ exports.adminGetInfluencerList = async (req, res) => {
       hasProxyEmail,
       sortBy = "createdAt",
       sortOrder = "desc",
-    } = req.query || {};
+    } = params;
 
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
     const limitNum = Math.max(Math.min(parseInt(limit, 10) || 20, 100), 1);
@@ -1609,6 +1701,13 @@ exports.adminGetInfluencerList = async (req, res) => {
             "ispage2Skip",
             "ispage3Skip",
             "proxyEmail",
+            "primaryPlatform",
+            "isAdminCreated",
+            "signupCompleted",
+            "createdByAdmin",
+            "adminCreatedRole",
+            "adminCreatedAt",
+            "signupCompletedAt",
             "createdAt",
             "updatedAt",
           ].join(" ")
@@ -1623,6 +1722,12 @@ exports.adminGetInfluencerList = async (req, res) => {
       docs.map((doc) => doc._id)
     );
 
+    const adminMap = await getAdminMapByIds(
+      docs
+        .filter((doc) => doc?.isAdminCreated === true)
+        .map((doc) => doc?.createdByAdmin)
+    );
+
     const influencers = docs.map((doc) => {
       const routeInfo = computeInfluencerNextRoute(doc);
 
@@ -1632,18 +1737,20 @@ exports.adminGetInfluencerList = async (req, res) => {
 
       const primaryPlatform = primaryPage1Profile
         ? String(
-          primaryPage1Profile.platform ||
-          primaryPage1Profile.provider ||
-          ""
-        ).toLowerCase() || null
+            primaryPage1Profile.platform ||
+              primaryPage1Profile.provider ||
+              ""
+          ).toLowerCase() || null
         : null;
 
       const socialProfiles =
         socialProfilesMap[String(doc._id)] || [];
 
+      const createdByPayload = buildCreatorPayload(doc, adminMap, "Influencer");
+      const currentStatusPayload = buildSignupCurrentStatus(doc);
+
       return {
         _id: doc._id,
-        influencerId: String(doc._id),
         email: doc.email || "",
         name: doc.name || "",
         country: {
@@ -1652,27 +1759,32 @@ exports.adminGetInfluencerList = async (req, res) => {
         },
         languages: Array.isArray(doc.languages)
           ? doc.languages.map((item) => ({
-            _id: item?._id || null,
-            name: item?.name || "",
-          }))
+              _id: item?._id || null,
+              name: item?.name || "",
+            }))
           : [],
         categories: Array.isArray(doc.categories)
           ? doc.categories.map((item) => ({
-            _id: item?._id || null,
-            name: item?.name || "",
-          }))
+              _id: item?._id || null,
+              name: item?.name || "",
+            }))
           : [],
         proxyEmail: doc.proxyEmail || null,
-
-        primaryPlatform,
+        primaryPlatform: primaryPlatform || doc.primaryPlatform || null,
         socialProfiles,
-
+        isAdminCreated: doc.isAdminCreated === true,
+        signupCompleted: doc.signupCompleted !== false,
+        createdByAdmin: doc.createdByAdmin || null,
+        adminCreatedRole: doc.adminCreatedRole || createdByPayload.createdByAdminRole || "",
+        adminCreatedAt: doc.adminCreatedAt || null,
+        signupCompletedAt: doc.signupCompletedAt || null,
+        ...createdByPayload,
+        ...currentStatusPayload,
         pageCounts: {
           page1: Array.isArray(doc.page1) ? doc.page1.length : 0,
           page2: Array.isArray(doc.page2) ? doc.page2.length : 0,
           page3: Array.isArray(doc.page3) ? doc.page3.length : 0,
         },
-
         onboarding: {
           route: routeInfo.route,
           page1Done: routeInfo.page1Done,
@@ -1681,7 +1793,6 @@ exports.adminGetInfluencerList = async (req, res) => {
           ispage2Skip: Boolean(doc.ispage2Skip),
           ispage3Skip: Boolean(doc.ispage3Skip),
         },
-
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
       };
@@ -2351,60 +2462,27 @@ exports.assignBrand = async (req, res) => {
 
 exports.getCampaignsByInfluencerId = async (req, res) => {
   try {
-    const influencerId = String(
-      req.body?.influencerId ||
-        req.query?.influencerId ||
-        req.params?.influencerId ||
-        req.body?.id ||
-        ""
+    const influencerMongoId = String(
+      req.body?._id || req.body?.id || req.body?.influencerId || ""
     ).trim();
+    const page = parsePositiveInt(req.body?.page, 1);
+    const limit = parsePositiveInt(req.body?.limit, 10);
+    const search = String(req.body?.search || "").trim();
+    const sortBy = String(req.body?.sortBy || "createdAt").trim();
+    const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
+    const statusFilter = String(req.body?.status || "all").trim().toLowerCase();
 
-    const page = parsePositiveInt(req.body?.page || req.query?.page, 1);
-    const limit = parsePositiveInt(req.body?.limit || req.query?.limit, 10);
-    const search = String(req.body?.search || req.query?.search || "").trim();
-
-    const sortBy = String(
-      req.body?.sortBy ||
-        req.body?.sortField ||
-        req.query?.sortBy ||
-        req.query?.sortField ||
-        "createdAt"
-    ).trim();
-
-    const rawSortOrder =
-      req.body?.sortOrder !== undefined
-        ? req.body.sortOrder
-        : req.query?.sortOrder;
-
-    const sortOrder =
-      rawSortOrder === 1 || rawSortOrder === "1" || rawSortOrder === "asc"
-        ? "asc"
-        : "desc";
-
-    const statusFilter = String(
-      req.body?.status ||
-        req.body?.filterStatus ||
-        req.query?.status ||
-        req.query?.filterStatus ||
-        "all"
-    )
-      .trim()
-      .toLowerCase();
-
-    const debug =
-      String(req.body?.debug || req.query?.debug || "").toLowerCase() === "true";
-
-    if (!influencerId) {
-      return res.status(400).json({ message: "influencerId is required" });
+    if (!influencerMongoId) {
+      return res.status(400).json({ message: "influencer _id is required" });
     }
 
-    if (!isObjectId(influencerId)) {
-      return res.status(400).json({ message: "Invalid influencerId" });
+    if (!isObjectId(influencerMongoId)) {
+      return res.status(400).json({ message: "Invalid influencer _id" });
     }
 
     const influencerObjectId = toObjectId(influencerId);
 
-    const influencer = await Influencer.findById(influencerObjectId)
+    const influencer = await Influencer.findById(influencerMongoId)
       .select("_id name email")
       .lean();
 
@@ -2412,37 +2490,12 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       return res.status(404).json({ message: "Influencer not found" });
     }
 
-    /*
-      Route uses adminAuth, so admin data may be in req.user instead of req.admin.
-      Do not apply brand scope if admin data is not available.
-    */
-    const rawActor = req.admin || req.user || req.adminUser || req.auth || {};
-    const actor = await resolveActorFromMaster(rawActor);
+    const invitationFilter = {
+      influencerId: String(influencerMongoId),
+    };
 
-    let visibleBrandKeys = null;
-
-    if (actor?.adminId && actor?.role) {
-      visibleBrandKeys = await getScopedCampaignBrandKeysForAdmin(actor);
-    }
-
-    /*
-      Main fix:
-      apply/list is using ApplyCampaign.
-      So get campaigns by influencer must also read ApplyCampaign first.
-    */
-    const influencerLookupValues = [influencerId];
-
-    if (isObjectId(influencerId)) {
-      influencerLookupValues.push(influencerObjectId);
-    }
-
-    const applyRows = await ApplyCampaign.find({
-      $or: [
-        { "applicants.influencerId": { $in: influencerLookupValues } },
-        { "approved.influencerId": { $in: influencerLookupValues } },
-      ],
-    })
-      .select("campaignId applicants approved createdAt updatedAt")
+    const invitations = await Invitation.find(invitationFilter)
+      .select("campaignId invitationId status createdAt updatedAt")
       .lean();
 
     const getMatchedApplicant = (row) => {
@@ -2540,7 +2593,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         count: 0,
         campaigns: [],
         influencer: {
-          influencerId: String(influencer._id),
+          _id: String(influencer._id),
           name: influencer.name || "",
           email: influencer.email || "",
         },
@@ -2582,7 +2635,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           count: 0,
           campaigns: [],
           influencer: {
-            influencerId: String(influencer._id),
+            _id: String(influencer._id),
             name: influencer.name || "",
             email: influencer.email || "",
           },
@@ -2752,7 +2805,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       count: campaigns.length,
       campaigns,
       influencer: {
-        influencerId: String(influencer._id),
+        _id: String(influencer._id),
         name: influencer.name || "",
         email: influencer.email || "",
       },
@@ -3081,8 +3134,470 @@ exports.adminAddCampaignFunds = async (req, res) => {
   }
 };
 
-module.exports.findCampaignByAnyId = findCampaignByAnyId;
-module.exports.findModashByUserId = findModashByUserId;
-module.exports.extractHandleFromModash = extractHandleFromModash;
-module.exports.enrichBrandsWithAssignments = enrichBrandsWithAssignments;
+const ADMIN_BRAND_CREATE_ROLES = new Set([
+  ROLES.SUPER_ADMIN,
+  ROLES.REVENUE_HEAD,
+  ROLES.BME,
+]);
 
+function normalizeBrandEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isPendingAdminCreatedBrand(doc = {}) {
+  return doc?.isAdminCreated === true && doc?.signupCompleted === false;
+}
+
+async function resolveAdminActor(actor = {}) {
+  const adminId = String(actor?.adminId || actor?._id || "").trim();
+
+  if (!adminId || !mongoose.Types.ObjectId.isValid(adminId)) {
+    return null;
+  }
+
+  return AdminModel.findById(adminId)
+    .select("_id email role parentAdmin rootAdmin status")
+    .lean();
+}
+
+async function ensureBrandAssignmentForCreator({ brandId, actor }) {
+  const role = String(actor?.role || "").toLowerCase();
+  const normalizedBrandId = new mongoose.Types.ObjectId(String(brandId));
+
+  if (role !== ROLES.REVENUE_HEAD && role !== ROLES.BME) {
+    return null;
+  }
+
+  const set = {
+    status: "active",
+  };
+
+  if (role === ROLES.REVENUE_HEAD) {
+    set.RHId = actor._id;
+  }
+
+  if (role === ROLES.BME) {
+    set.bdmId = actor._id;
+
+    if (actor.parentAdmin) {
+      set.RHId = actor.parentAdmin;
+    }
+  }
+
+  return BrandAssigned.findOneAndUpdate(
+    { brandId: normalizedBrandId, status: "active" },
+    {
+      $setOnInsert: {
+        brandId: normalizedBrandId,
+      },
+      $set: set,
+    },
+    {
+      new: true,
+      upsert: true,
+    }
+  ).exec();
+}
+
+exports.adminCreateBrand = async (req, res) => {
+  try {
+    const actor = await resolveAdminActor(req.admin || {});
+
+    if (!actor || actor.status !== "active") {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const actorRole = String(actor.role || "").toLowerCase();
+
+    if (!ADMIN_BRAND_CREATE_ROLES.has(actorRole)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Super Admin, Revenue Head, or BME can create a brand.",
+      });
+    }
+
+    const brandName = String(req.body?.brandName || req.body?.name || "").trim();
+    const email = normalizeBrandEmail(req.body?.email);
+
+    if (!brandName) {
+      return res.status(400).json({
+        success: false,
+        message: "Brand name is required",
+      });
+    }
+
+    if (!email || !EMAIL_RX.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid email is required",
+      });
+    }
+
+    const existingBrand = await Brand.findOne({ email })
+      .select("_id email brandName name isAdminCreated signupCompleted subscription")
+      .lean();
+
+    if (existingBrand && !isPendingAdminCreatedBrand(existingBrand)) {
+      return res.status(409).json({
+        success: false,
+        message: "Brand already exists with this email.",
+      });
+    }
+
+    const freePlan = await SubscriptionPlan.findOne({
+      role: "Brand",
+      name: "free",
+      status: "active",
+    }).lean();
+
+    const placeholderPayload = {
+      email,
+      brandName,
+      name: brandName,
+      companySize: "",
+      industry: "",
+      isAdminCreated: true,
+      signupCompleted: false,
+      createdByAdmin: actor._id,
+      adminCreatedRole: actorRole,
+      adminCreatedAt: new Date(),
+      subscriptionExpired: false,
+    };
+
+    if (freePlan) {
+      placeholderPayload.subscription = buildSubscriptionFromPlan(freePlan, {
+        billingCycle: "monthly",
+      });
+    }
+
+    let brandDoc;
+
+    if (existingBrand) {
+      brandDoc = await Brand.findByIdAndUpdate(
+        existingBrand._id,
+        {
+          $set: placeholderPayload,
+        },
+        {
+          new: true,
+          runValidators: true,
+        }
+      )
+        .select("-password -__v")
+        .lean();
+    } else {
+      const created = await Brand.create(placeholderPayload);
+      brandDoc = created.toObject();
+      delete brandDoc.password;
+      delete brandDoc.__v;
+    }
+
+    await ensureBrandAssignmentForCreator({
+      brandId: brandDoc._id,
+      actor,
+    });
+
+    return res.status(existingBrand ? 200 : 201).json({
+      success: true,
+      message: existingBrand
+        ? "Brand placeholder updated successfully."
+        : "Brand created successfully.",
+      brand: {
+        ...brandDoc,
+        brandId: String(brandDoc._id),
+        ...buildCreatorPayload(
+          brandDoc,
+          await getAdminMapByIds([brandDoc.createdByAdmin]),
+          "Brand"
+        ),
+        ...buildSignupCurrentStatus(brandDoc),
+      },
+    });
+  } catch (error) {
+    console.error("adminCreateBrand error:", error);
+
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Brand already exists with this email.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
+  }
+};
+
+const ADMIN_INFLUENCER_CREATE_ROLES = new Set([
+  ROLES.SUPER_ADMIN,
+  ROLES.REVENUE_HEAD,
+  ROLES.IME,
+]);
+
+function normalizeAdminInfluencerPlatform(value) {
+  const v = String(value || "").trim().toLowerCase();
+
+  if (["yt", "youtube", "youTube"].map(String).map(x => x.toLowerCase()).includes(v)) {
+    return "youtube";
+  }
+
+  if (["ig", "instagram"].includes(v)) {
+    return "instagram";
+  }
+
+  if (["tk", "tt", "tiktok", "tikTok"].map(String).map(x => x.toLowerCase()).includes(v)) {
+    return "tiktok";
+  }
+
+  return "";
+}
+
+function normalizeAdminInfluencerUsername(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .trim();
+}
+
+exports.adminCreateInfluencer = async (req, res) => {
+  try {
+    const actor = await resolveActorFromMaster(req.admin || req.user || {});
+    const actorRole = String(actor?.role || "").trim().toLowerCase();
+    const actorId = actor?.adminId && isObjectId(actor.adminId)
+      ? toObjectId(actor.adminId)
+      : null;
+
+    if (!ADMIN_INFLUENCER_CREATE_ROLES.has(actorRole)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Super Admin, Revenue Head, or IME can create influencers.",
+      });
+    }
+
+    const name = String(req.body?.name || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const platform = normalizeAdminInfluencerPlatform(req.body?.platform);
+    const username = normalizeAdminInfluencerUsername(req.body?.username);
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Influencer name is required.",
+      });
+    }
+
+    if (!email || !EMAIL_RX.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid influencer email is required.",
+      });
+    }
+
+    if (!platform) {
+      return res.status(400).json({
+        success: false,
+        message: "Platform is required. Allowed values: youtube, instagram, tiktok.",
+      });
+    }
+
+    if (!username) {
+      return res.status(400).json({
+        success: false,
+        message: "Username is required.",
+      });
+    }
+
+    const handle = normalizeHandle(username);
+
+    if (!HANDLE_RX.test(handle)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid username format.",
+      });
+    }
+
+    const emailRegexCI = new RegExp(`^${escapeRegex(email)}$`, "i");
+
+    const existingBrand = await Brand.findOne({ email: emailRegexCI })
+      .select("_id email brandName name")
+      .lean();
+
+    if (existingBrand) {
+      return res.status(409).json({
+        success: false,
+        message: "This email is already registered as a brand. Please use another email.",
+      });
+    }
+
+    const existingInfluencer = await Influencer.findOne({ email: emailRegexCI })
+      .select("+password")
+      .exec();
+
+    if (
+      existingInfluencer &&
+      !(
+        existingInfluencer.isAdminCreated === true &&
+        existingInfluencer.signupCompleted === false
+      )
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "Influencer already exists with this email.",
+      });
+    }
+
+    const page1Profile = {
+      platform,
+      provider: platform,
+      username,
+      handle,
+      isPrimary: true,
+      addedByAdmin: true,
+      addedAt: new Date(),
+    };
+
+    let influencerDoc;
+
+    if (existingInfluencer) {
+      existingInfluencer.name = name;
+      existingInfluencer.email = email;
+
+      existingInfluencer.countryName = existingInfluencer.countryName || "";
+      existingInfluencer.country = existingInfluencer.country || "";
+      existingInfluencer.location = existingInfluencer.location || "";
+
+      existingInfluencer.languages = existingInfluencer.languages || [];
+      existingInfluencer.categories = existingInfluencer.categories || [];
+
+      existingInfluencer.primaryPlatform = platform;
+      existingInfluencer.page1 = [page1Profile];
+      existingInfluencer.page2 = [];
+      existingInfluencer.page3 = [];
+
+      existingInfluencer.ispage2Skip = false;
+      existingInfluencer.ispage3Skip = false;
+
+      existingInfluencer.isAdminCreated = true;
+      existingInfluencer.signupCompleted = false;
+      existingInfluencer.createdByAdmin = actorId;
+      existingInfluencer.adminCreatedRole = actorRole;
+      existingInfluencer.adminCreatedAt =
+        existingInfluencer.adminCreatedAt || new Date();
+
+      influencerDoc = await existingInfluencer.save();
+    } else {
+      influencerDoc = await Influencer.create({
+        name,
+        email,
+
+        countryName: "",
+        country: "",
+        location: "",
+
+        languages: [],
+        categories: [],
+
+        primaryPlatform: platform,
+
+        page1: [page1Profile],
+        page2: [],
+        page3: [],
+
+        ispage2Skip: false,
+        ispage3Skip: false,
+
+        isAdminCreated: true,
+        signupCompleted: false,
+        createdByAdmin: actorId,
+        adminCreatedRole: actorRole,
+        adminCreatedAt: new Date(),
+      });
+    }
+
+    await Modash.findOneAndUpdate(
+      {
+        provider: platform,
+        userId: username,
+      },
+      {
+        $set: {
+          influencer: influencerDoc._id,
+
+          // Existing Modash schema field name is influencerId.
+          // Store MongoDB _id string here.
+          influencerId: String(influencerDoc._id),
+
+          provider: platform,
+          userId: username,
+          username,
+          handle,
+          followers: 0,
+          url: null,
+          picture: null,
+          providerRaw: {
+            source: "admin_create",
+            platform,
+            username,
+            handle,
+          },
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    const influencer = influencerDoc.toObject();
+    delete influencer.password;
+    delete influencer.__v;
+
+    return res.status(existingInfluencer ? 200 : 201).json({
+      success: true,
+      message: existingInfluencer
+        ? "Influencer placeholder updated successfully."
+        : "Influencer created successfully.",
+      influencer: {
+        ...influencer,
+        _id: String(influencer._id),
+        primaryPlatform: platform,
+        ...buildCreatorPayload(
+          influencer,
+          await getAdminMapByIds([influencer.createdByAdmin]),
+          "Influencer"
+        ),
+        ...buildSignupCurrentStatus(influencer),
+        socialProfiles: [
+          {
+            provider: platform,
+            username,
+            handle,
+            followers: 0,
+            url: null,
+            picture: null,
+          },
+        ],
+      },
+    });
+  } catch (error) {
+    console.error("adminCreateInfluencer error:", error);
+
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Influencer already exists with this email.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
+  }
+};

@@ -146,6 +146,104 @@ exports.getCampaignSendingStatus = createHandler(async (req) =>
   instantlyService.getCampaignSendingStatus(req.params.id, req.query || {})
 );
 
+function flattenCsvRow(value, prefix = "", target = {}) {
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      if (prefix) target[prefix] = "";
+      return target;
+    }
+
+    const arePrimitive = value.every(
+      (item) => item == null || ["string", "number", "boolean"].includes(typeof item)
+    );
+
+    if (arePrimitive) {
+      if (prefix) target[prefix] = value.join(" | ");
+      return target;
+    }
+
+    value.forEach((item, index) => {
+      flattenCsvRow(item, prefix ? `${prefix}.${index}` : String(index), target);
+    });
+
+    return target;
+  }
+
+  if (value && typeof value === "object") {
+    Object.entries(value).forEach(([key, nestedValue]) => {
+      flattenCsvRow(nestedValue, prefix ? `${prefix}.${key}` : key, target);
+    });
+    return target;
+  }
+
+  if (prefix) {
+    target[prefix] = value == null ? "" : value;
+  }
+
+  return target;
+}
+
+function toCsv(rows = []) {
+  const flatRows = rows.map((row) => flattenCsvRow(row));
+  const headers = Array.from(
+    flatRows.reduce((acc, row) => {
+      Object.keys(row).forEach((key) => acc.add(key));
+      return acc;
+    }, new Set())
+  );
+
+  const escape = (value) => {
+    const stringValue = String(value == null ? "" : value);
+    if (/[,"]|\n/.test(stringValue)) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
+  const lines = [headers.join(",")];
+
+  flatRows.forEach((row) => {
+    lines.push(headers.map((header) => escape(row[header])).join(","));
+  });
+
+  return lines.join("\n");
+}
+
+function extractAnalyticsRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.rows)) return payload.rows;
+  return payload ? [payload] : [];
+}
+
+exports.downloadCampaignAnalyticsCsv = async (req, res) => {
+  try {
+    const params = { ...(req.query || {}) };
+
+    if (req.params.id) {
+      params.campaign_id = params.campaign_id || req.params.id;
+      params.campaignId = params.campaignId || req.params.id;
+      params.id = params.id || req.params.id;
+    }
+
+    const analytics = await instantlyService.getCampaignAnalyticsDaily(params);
+    const rows = extractAnalyticsRows(analytics);
+    const csv = toCsv(rows);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="campaign-analytics-${req.params.id}.csv"`
+    );
+
+    return res.status(200).send(csv);
+  } catch (error) {
+    return fail(res, error);
+  }
+};
+
 /* =========================
    Emails
 ========================= */

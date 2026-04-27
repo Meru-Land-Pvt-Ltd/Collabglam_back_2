@@ -4,6 +4,7 @@ const OUTREACH_CAMPAIGN_STATUS = {
   LAUNCHED: "launched",
   PAUSED: "paused",
   COMPLETED: "completed",
+  ERROR: "error",
 };
 
 const PROSPECT_STAGE = {

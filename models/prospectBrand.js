@@ -15,6 +15,7 @@ const ProspectBrandSchema = new Schema(
       email: { type: String, trim: true, lowercase: true, required: true },
       title: { type: String, trim: true, default: "" },
       linkedinUrl: { type: String, trim: true, default: "" },
+      phone: { type: String, trim: true, default: "" },
     },
 
     source: {
@@ -26,26 +27,48 @@ const ProspectBrandSchema = new Schema(
     notes: { type: String, trim: true, default: "" },
     tags: { type: [String], default: [] },
 
+    customFields: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: {},
+    },
+
+    templateVariables: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+
+    csvMeta: {
+      headers: { type: [String], default: [] },
+      mappedAt: { type: Date, default: null },
+      sourceFileName: { type: String, default: "" },
+    },
+
     sdrId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     RHId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     preAssignedBmeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     assignedBmeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
     assignedImeId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+
     flowType: {
       type: String,
       enum: ["standard_brand", "ime_influencer"],
       default: "standard_brand",
     },
+
     contactType: {
       type: String,
       enum: ["brand", "influencer"],
       default: "brand",
     },
+
     currentOwnerRole: {
       type: String,
       enum: Object.values(OWNER_ROLE),
       default: OWNER_ROLE.SDR,
     },
+
     currentOwnerId: { type: Schema.Types.ObjectId, ref: "Master", default: null },
 
     stage: {
