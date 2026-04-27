@@ -178,8 +178,8 @@ async function enrichLiteCampaignCreatedBy(rows = []) {
 
   const adminDocs = adminIds.length
     ? await ASSIGNEE_MODEL.find({ _id: { $in: adminIds.map(toObjectId) } })
-        .select("_id name email role")
-        .lean()
+      .select("_id name email role")
+      .lean()
     : [];
 
   const adminMap = new Map(
@@ -530,8 +530,8 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
 
   const assignees = uniqueAssigneeIds.length
     ? await ASSIGNEE_MODEL.find({ _id: { $in: uniqueAssigneeIds } })
-        .select("_id name email")
-        .lean()
+      .select("_id name email")
+      .lean()
     : [];
 
   const assigneeMap = {};
@@ -1054,7 +1054,61 @@ exports.getAllBrands = async (req, res) => {
     const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
     const dir = sortOrder === "asc" ? 1 : -1;
 
-const brandQuery = {};
+    const actor = req.admin || {};
+    const actorRole = String(actor?.role || "").trim().toLowerCase();
+    const actorId = String(actor?.adminId || actor?._id || "").trim();
+
+    const brandQuery = {};
+
+    // Brands page rule:
+    // Super Admin -> all brands
+    // Revenue Head -> all brands
+    // BME -> only brands assigned to this BME
+    if (actorRole === ROLES.BME) {
+      if (!actorId) {
+        return res.status(200).json({
+          page,
+          limit,
+          total: 0,
+          totalPages: 1,
+          sortBy,
+          sortOrder,
+          brands: [],
+        });
+      }
+
+      const bmeFilters = [{ bdmId: actorId }];
+
+      if (isObjectId(actorId)) {
+        bmeFilters.push({ bdmId: toObjectId(actorId) });
+      }
+
+      const assignments = await BrandAssigned.find({
+        status: "active",
+        $or: bmeFilters,
+      })
+        .select("brandId")
+        .lean();
+
+      const assignedBrandIds = assignments
+        .map((item) => String(item.brandId || ""))
+        .filter((id) => isObjectId(id))
+        .map((id) => toObjectId(id));
+
+      if (!assignedBrandIds.length) {
+        return res.status(200).json({
+          page,
+          limit,
+          total: 0,
+          totalPages: 1,
+          sortBy,
+          sortOrder,
+          brands: [],
+        });
+      }
+
+      brandQuery._id = { $in: assignedBrandIds };
+    }
 
     const rawBrands = await Brand.find(brandQuery)
       .select("-password -__v")
@@ -1077,32 +1131,32 @@ const brandQuery = {};
 
     const filtered = re
       ? displayBrands.filter((brand) =>
-          [
-            brand.name,
-            brand.brandName,
-            brand.email,
-            brand.phone,
-            brand.callingcode,
-            brand.companySize,
-            brand.industry,
-            brand.planName,
-            brand.status,
-            brand.assignedRh,
-            brand.assignedRm,
-            brand.assignedBme,
-            brand.assignedBm,
-            brand.assignedIme,
-            brand.assignedIm,
-            brand.createdByLabel,
-            brand.createdByAdminName,
-            brand.createdByAdminEmail,
-            brand.adminCreatedRole,
-            brand.createdByRoleLabel,
-            brand.currentStatus,
-            brand.currentStatusLabel,
-            brand.currentStatusSubLabel,
-          ].some((value) => re.test(String(value || "")))
-        )
+        [
+          brand.name,
+          brand.brandName,
+          brand.email,
+          brand.phone,
+          brand.callingcode,
+          brand.companySize,
+          brand.industry,
+          brand.planName,
+          brand.status,
+          brand.assignedRh,
+          brand.assignedRm,
+          brand.assignedBme,
+          brand.assignedBm,
+          brand.assignedIme,
+          brand.assignedIm,
+          brand.createdByLabel,
+          brand.createdByAdminName,
+          brand.createdByAdminEmail,
+          brand.adminCreatedRole,
+          brand.createdByRoleLabel,
+          brand.currentStatus,
+          brand.currentStatusLabel,
+          brand.currentStatusSubLabel,
+        ].some((value) => re.test(String(value || "")))
+      )
       : displayBrands;
 
     const allowedSortFields = new Set([
@@ -1748,10 +1802,10 @@ exports.adminGetInfluencerList = async (req, res) => {
 
       const primaryPlatform = primaryPage1Profile
         ? String(
-            primaryPage1Profile.platform ||
-              primaryPage1Profile.provider ||
-              ""
-          ).toLowerCase() || null
+          primaryPage1Profile.platform ||
+          primaryPage1Profile.provider ||
+          ""
+        ).toLowerCase() || null
         : null;
 
       const socialProfiles =
@@ -1770,15 +1824,15 @@ exports.adminGetInfluencerList = async (req, res) => {
         },
         languages: Array.isArray(doc.languages)
           ? doc.languages.map((item) => ({
-              _id: item?._id || null,
-              name: item?.name || "",
-            }))
+            _id: item?._id || null,
+            name: item?.name || "",
+          }))
           : [],
         categories: Array.isArray(doc.categories)
           ? doc.categories.map((item) => ({
-              _id: item?._id || null,
-              name: item?.name || "",
-            }))
+            _id: item?._id || null,
+            name: item?.name || "",
+          }))
           : [],
         proxyEmail: doc.proxyEmail || null,
         primaryPlatform: primaryPlatform || doc.primaryPlatform || null,
@@ -2610,12 +2664,12 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         },
         ...(debug
           ? {
-              debug: {
-                reason: "No ApplyCampaign rows found for this influencer",
-                influencerId,
-                applyRowsFound: applyRows.length,
-              },
-            }
+            debug: {
+              reason: "No ApplyCampaign rows found for this influencer",
+              influencerId,
+              applyRowsFound: applyRows.length,
+            },
+          }
           : {}),
       });
     }
@@ -2652,13 +2706,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           },
           ...(debug
             ? {
-                debug: {
-                  reason: "Admin has no visible brand keys",
-                  rawActor,
-                  resolvedActor: actor,
-                  appliedCampaignIds,
-                },
-              }
+              debug: {
+                reason: "Admin has no visible brand keys",
+                rawActor,
+                resolvedActor: actor,
+                appliedCampaignIds,
+              },
+            }
             : {}),
         });
       }
@@ -2746,16 +2800,16 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       statusFilter === "all"
         ? normalized
         : normalized.filter((item) => {
-            if (statusFilter === "active") {
-              return item.status !== "rejected";
-            }
+          if (statusFilter === "active") {
+            return item.status !== "rejected";
+          }
 
-            return (
-              item.status === statusFilter ||
-              String(item.statusBrand || "").toLowerCase() === statusFilter ||
-              String(item.statusInfluencer || "").toLowerCase() === statusFilter
-            );
-          });
+          return (
+            item.status === statusFilter ||
+            String(item.statusBrand || "").toLowerCase() === statusFilter ||
+            String(item.statusInfluencer || "").toLowerCase() === statusFilter
+          );
+        });
 
     const field = getCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -2822,16 +2876,16 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       },
       ...(debug
         ? {
-            debug: {
-              rawActor,
-              resolvedActor: actor,
-              visibleBrandKeys,
-              influencerId,
-              applyRowsFound: applyRows.length,
-              appliedCampaignIds,
-              campaignDocsFound: campaignDocs.length,
-            },
-          }
+          debug: {
+            rawActor,
+            resolvedActor: actor,
+            visibleBrandKeys,
+            influencerId,
+            applyRowsFound: applyRows.length,
+            appliedCampaignIds,
+            campaignDocsFound: campaignDocs.length,
+          },
+        }
         : {}),
     });
   } catch (error) {
@@ -3192,12 +3246,12 @@ async function buildBrandAssignmentPayload(assignment) {
 
   const admins = ids.length
     ? await AdminModel.find({
-        _id: {
-          $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
-        },
-      })
-        .select("_id name email")
-        .lean()
+      _id: {
+        $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+    })
+      .select("_id name email")
+      .lean()
     : [];
 
   const adminMap = {};
@@ -3307,12 +3361,12 @@ async function buildBrandAssignmentPayload(assignment) {
 
   const admins = ids.length
     ? await AdminModel.find({
-        _id: {
-          $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
-        },
-      })
-        .select("_id name email")
-        .lean()
+      _id: {
+        $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+    })
+      .select("_id name email")
+      .lean()
     : [];
 
   const adminMap = {};

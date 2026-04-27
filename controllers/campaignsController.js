@@ -6090,7 +6090,13 @@ exports.getPublicCampaignByToken = async (req, res) => {
 
 exports.uploadImagesToS3 = async (req, res) => {
   try {
-    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+    const imageFiles = Array.isArray(req.files)
+      ? req.files
+      : Array.isArray(req.files?.image)
+        ? req.files.image
+        : [];
+
+    if (!imageFiles.length) {
       return res.status(400).json({
         success: false,
         message: "At least one image is required",
@@ -6098,7 +6104,7 @@ exports.uploadImagesToS3 = async (req, res) => {
     }
 
     const uploadedImages = await uploadMultipleFilesToS3(
-      req.files,
+      imageFiles,
       "campaign-images"
     );
 
@@ -6106,7 +6112,8 @@ exports.uploadImagesToS3 = async (req, res) => {
       success: true,
       message: "Images uploaded successfully",
       count: uploadedImages.length,
-      urls: uploadedImages.map((item) => item.url),
+      urls: uploadedImages.map((item) => item.url || item.dataUrl),
+      images: uploadedImages,
     });
   } catch (error) {
     console.error("uploadImagesToS3 error:", error);
