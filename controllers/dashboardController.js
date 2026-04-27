@@ -2444,6 +2444,87 @@ const rhDashIsWorkingApplicant = (applicant = {}, fromApprovedArray = false) => 
   );
 };
 
+const rhDashRefId = (value) => {
+  if (!value) return "";
+
+  if (typeof value === "object") {
+    if (value._id) return String(value._id);
+    if (value.id) return String(value.id);
+  }
+
+  return String(value || "").trim();
+};
+
+const rhDashPickRefId = (doc = {}, keys = []) => {
+  for (const key of keys) {
+    const value = doc?.[key];
+    const id = rhDashRefId(value);
+
+    if (id) return id;
+  }
+
+  return "";
+};
+
+const rhDashUniqueObjectIds = (ids = []) => {
+  return [
+    ...new Set(
+      ids
+        .map((id) => String(id || "").trim())
+        .filter((id) => id && rhDashIsObjectId(id))
+    ),
+  ].map((id) => rhDashToObjectId(id));
+};
+
+const rhDashGetAssignmentBmeId = (assignment = {}) => {
+  return rhDashPickRefId(assignment, [
+    "bdmId",
+    "bmeId",
+    "BMEId",
+    "assignedBmeId",
+    "assignedBMEId",
+    "assignedBme",
+    "assignedBME",
+    "bme",
+    "bdm",
+  ]);
+};
+
+const rhDashGetAssignmentImeId = (assignment = {}) => {
+  return rhDashPickRefId(assignment, [
+    "idmId",
+    "imeId",
+    "IMEId",
+    "assignedImeId",
+    "assignedIMEId",
+    "assignedIme",
+    "assignedIME",
+    "ime",
+    "idm",
+  ]);
+};
+
+const rhDashBuildAdminMap = async (adminIds = []) => {
+  const objectIds = rhDashUniqueObjectIds(adminIds);
+
+  if (!objectIds.length) {
+    return new Map();
+  }
+
+  const admins = await AdminModel.find({ _id: { $in: objectIds } })
+    .select("_id name email role status proxyEmail teamType createdAt updatedAt")
+    .lean();
+
+  return new Map(admins.map((admin) => [String(admin._id), admin]));
+};
+
+const rhDashGetAdminFromMap = (adminMap, id) => {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) return null;
+
+  return adminMap.get(cleanId) || null;
+};
+
 exports.getRevenueHeadDetails = async (req, res) => {
   try {
     const loggedInAdmin = req.admin || {};
@@ -2508,10 +2589,10 @@ exports.getRevenueHeadDetails = async (req, res) => {
     }
 
     const [brandAssignments, employees] = await Promise.all([
+      // IMPORTANT:
+      // No populate here. This avoids StrictPopulateError for bmeId / imeId / idmId
+      // when your real BrandAssigned schema uses different field names.
       BrandAssigned.find({ RHId: revenueHeadObjectId })
-        .populate("RHId", "_id name email role status proxyEmail teamType")
-        .populate("bdmId", "_id name email role status proxyEmail teamType")
-        .populate("idmId", "_id name email role status proxyEmail teamType")
         .sort({ createdAt: -1 })
         .lean(),
 
@@ -2534,22 +2615,35 @@ exports.getRevenueHeadDetails = async (req, res) => {
         .lean(),
     ]);
 
-    const assignedBrandObjectIds = [
+    const assignmentAdminIds = brandAssignments.flatMap((assignment) => {
+      return [
+        rhDashRefId(assignment.RHId),
+        rhDashGetAssignmentBmeId(assignment),
+        rhDashGetAssignmentImeId(assignment),
+      ].filter(Boolean);
+    });
+
+    const assignmentAdminMap = await rhDashBuildAdminMap([
+      revenueHeadId,
+      ...assignmentAdminIds,
+    ]);
+
+    const assignedBrandIds = [
       ...new Set(
         brandAssignments
-          .map((item) => String(item.brandId || ""))
+          .map((item) => rhDashRefId(item.brandId))
           .filter(Boolean)
       ),
     ];
 
-    const brandObjectIds = assignedBrandObjectIds
+    const brandObjectIds = assignedBrandIds
       .filter((id) => rhDashIsObjectId(id))
       .map((id) => rhDashToObjectId(id));
 
     const brands = brandObjectIds.length
       ? await Brand.find({ _id: { $in: brandObjectIds } })
-        .select("-password -__v")
-        .lean()
+          .select("-password -__v")
+          .lean()
       : [];
 
     const brandMap = new Map(
@@ -2557,11 +2651,32 @@ exports.getRevenueHeadDetails = async (req, res) => {
     );
 
     const assignedBrands = brandAssignments.map((assignment) => {
-      const brand = brandMap.get(String(assignment.brandId || "")) || null;
+      const brandId = rhDashRefId(assignment.brandId);
+      const brand = brandMap.get(brandId) || null;
 
-      const assignedBME = rhDashSerializeAdmin(assignment.bdmId);
-      const assignedIDM = rhDashSerializeAdmin(assignment.idmId);
-      const assignedRH = rhDashSerializeAdmin(assignment.RHId);
+      const assignedRH =
+        rhDashSerializeAdmin(
+          rhDashGetAdminFromMap(
+            assignmentAdminMap,
+            rhDashRefId(assignment.RHId)
+          )
+        ) || rhDashSerializeAdmin(revenueHead);
+
+      const assignedBME = rhDashSerializeAdmin(
+        rhDashGetAdminFromMap(
+          assignmentAdminMap,
+          rhDashGetAssignmentBmeId(assignment)
+        )
+      );
+
+      const assignedIME = rhDashSerializeAdmin(
+        rhDashGetAdminFromMap(
+          assignmentAdminMap,
+          rhDashGetAssignmentImeId(assignment)
+        )
+      );
+
+      const isFullyManaged = Boolean(assignedBME && assignedIME);
 
       return {
         assignmentId: String(assignment._id || ""),
@@ -2569,30 +2684,44 @@ exports.getRevenueHeadDetails = async (req, res) => {
         assignedAt: assignment.createdAt || null,
         updatedAt: assignment.updatedAt || null,
 
-        isFullyManaged: Boolean(assignedBME && assignedIDM),
+        isFullyManaged,
 
         assignedPersons: {
           revenueHead: assignedRH,
           bme: assignedBME,
-          idm: assignedIDM,
+          ime: assignedIME,
         },
 
         plan: brand ? rhDashGetBrandPlan(brand) : null,
 
         brand: brand
           ? {
-            ...brand,
-            _id: String(brand._id || ""),
-            brandName: rhDashGetBrandDisplayName(brand),
-          }
+              ...brand,
+              _id: String(brand._id || ""),
+              brandId: String(brand._id || ""),
+              brandName: rhDashGetBrandDisplayName(brand),
+              planName:
+                brand.subscription?.planName ||
+                brand.planName ||
+                brand.plan ||
+                "free",
+              fullyManagedSubscription: isFullyManaged,
+              isFullyManaged,
+            }
           : {
-            _id: String(assignment.brandId || ""),
-            brandName: "",
-          },
+              _id: brandId,
+              brandId,
+              brandName: "",
+              planName: "",
+              fullyManagedSubscription: isFullyManaged,
+              isFullyManaged,
+            },
       };
     });
 
-    const employeeRows = employees.map(rhDashSerializeAdmin);
+    const employeeRows = employees
+      .map(rhDashSerializeAdmin)
+      .filter(Boolean);
 
     const employeesByRole = {
       bme: employeeRows.filter((item) => item.role === MASTER_ROLES.BME),
@@ -2600,8 +2729,8 @@ exports.getRevenueHeadDetails = async (req, res) => {
       sdr: employeeRows.filter((item) => item.role === MASTER_ROLES.SDR),
     };
 
-    const campaignFilter = assignedBrandObjectIds.length
-      ? rhDashCampaignBrandFilter(assignedBrandObjectIds)
+    const campaignFilter = assignedBrandIds.length
+      ? rhDashCampaignBrandFilter(assignedBrandIds)
       : { _id: null };
 
     const campaignsRaw = await Campaign.find(campaignFilter)
@@ -2623,8 +2752,8 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
     const applyRows = campaignKeys.length
       ? await ApplyCampaign.find({ campaignId: { $in: campaignKeys } })
-        .select("campaignId applicants approved createdAt updatedAt")
-        .lean()
+          .select("campaignId applicants approved createdAt updatedAt")
+          .lean()
       : [];
 
     const influencerIds = [
@@ -2645,13 +2774,13 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
     const influencers = influencerObjectIds.length
       ? await Influencer.find({
-        $or: [
-          { _id: { $in: influencerObjectIds } },
-          { influencerId: { $in: influencerIds } },
-        ],
-      })
-        .select("_id influencerId name email proxyEmail countryName")
-        .lean()
+          $or: [
+            { _id: { $in: influencerObjectIds } },
+            { influencerId: { $in: influencerIds } },
+          ],
+        })
+          .select("_id influencerId name email proxyEmail countryName")
+          .lean()
       : [];
 
     const influencerMap = new Map();
@@ -2688,8 +2817,9 @@ exports.getRevenueHeadDetails = async (req, res) => {
         String(campaign.campaignId || ""),
       ].filter(Boolean);
 
-      const campaignApplyRows = possibleKeys
-        .flatMap((key) => applyMap.get(key) || []);
+      const campaignApplyRows = possibleKeys.flatMap(
+        (key) => applyMap.get(key) || []
+      );
 
       const applicants = campaignApplyRows.flatMap((row) =>
         Array.isArray(row.applicants) ? row.applicants : []
@@ -2726,24 +2856,31 @@ exports.getRevenueHeadDetails = async (req, res) => {
       totalApprovedApplicants += normalizedApproved.length;
       totalWorkingApplicants += workingApplicants.length;
 
-      const brandId = String(campaign.brandId || "");
-      const brand =
-        brandMap.get(brandId) ||
-        brandMap.get(String(campaign.brandId?._id || "")) ||
-        null;
+      const campaignBrandId = rhDashRefId(campaign.brandId);
+      const brand = brandMap.get(campaignBrandId) || null;
 
       return {
         ...campaign,
         _id: String(campaign._id || ""),
 
+        brandId: campaignBrandId,
+        brandName:
+          campaign.brandName ||
+          (brand ? rhDashGetBrandDisplayName(brand) : ""),
+
         brand: brand
           ? {
-            _id: String(brand._id || ""),
-            brandName: rhDashGetBrandDisplayName(brand),
-            email: brand.email || "",
-            plan: rhDashGetBrandPlan(brand),
-          }
+              _id: String(brand._id || ""),
+              brandId: String(brand._id || ""),
+              brandName: rhDashGetBrandDisplayName(brand),
+              email: brand.email || "",
+              plan: rhDashGetBrandPlan(brand),
+            }
           : null,
+
+        applicantCount:
+          Number(campaign.applicantCount || 0) ||
+          normalizedApplicants.length + normalizedApproved.length,
 
         applicationSummary: {
           totalApplyRows: campaignApplyRows.length,
@@ -2795,9 +2932,9 @@ exports.getRevenueHeadDetails = async (req, res) => {
   } catch (error) {
     console.error("Error in getRevenueHeadDetails:", error);
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Internal server error",
+      message: error.message || "Internal server error",
       error: error.message,
     });
   }
