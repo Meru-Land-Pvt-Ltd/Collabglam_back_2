@@ -26,6 +26,7 @@ const Invitation = require("../models/NewInvitations");
 const SubscriptionPlan = require("../models/subscription");
 const PortalSettings = require("../models/portalSettings");
 const BrandAssigned = require("../models/brandAssigned");
+const ApplyCampaign = require("../models/applyCampaign");
 
 const { BrandWalletModel } = require("../models/brandWallet");
 const {
@@ -2479,8 +2480,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       return res.status(400).json({ message: "Invalid influencer _id" });
     }
 
-    const actor = req.admin || {};
-    const visibleBrandKeys = await getScopedCampaignBrandKeysForAdmin(actor);
+    const influencerObjectId = toObjectId(influencerId);
 
     const influencer = await Influencer.findById(influencerMongoId)
       .select("_id name email")
@@ -2498,120 +2498,231 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       .select("campaignId invitationId status createdAt updatedAt")
       .lean();
 
-    const invitedCampaignIds = [
-      ...new Set(
-        invitations
-          .map((item) => String(item.campaignId || "").trim())
-          .filter(Boolean)
-      ),
-    ];
+    const getMatchedApplicant = (row) => {
+      const applicants = Array.isArray(row?.applicants) ? row.applicants : [];
+      const approved = Array.isArray(row?.approved) ? row.approved : [];
 
-    if (!invitedCampaignIds.length) {
+      const approvedMatch = approved.find(
+        (item) => String(item?.influencerId || "") === influencerId
+      );
+
+      if (approvedMatch) {
+        return {
+          applicant: approvedMatch,
+          fromApprovedArray: true,
+        };
+      }
+
+      const applicantMatch = applicants.find(
+        (item) => String(item?.influencerId || "") === influencerId
+      );
+
+      return {
+        applicant: applicantMatch || null,
+        fromApprovedArray: false,
+      };
+    };
+
+    const getApplicantStatus = (applicant, fromApprovedArray = false) => {
+      const statusBrand = String(applicant?.statusBrand || "").toLowerCase();
+      const statusInfluencer = String(applicant?.statusInfluencer || "").toLowerCase();
+
+      if (
+        Number(applicant?.isRejected || 0) === 1 ||
+        statusBrand.includes("rejected") ||
+        statusInfluencer.includes("rejected")
+      ) {
+        return "rejected";
+      }
+
+      if (
+        fromApprovedArray ||
+        statusBrand.includes("contractaccept") ||
+        statusInfluencer.includes("contractaccept")
+      ) {
+        return "approved";
+      }
+
+      if (Number(applicant?.isShortlisted || 0) === 1) {
+        return "shortlisted";
+      }
+
+      if (Number(applicant?.isUndicided || 0) === 1) {
+        return "undecided";
+      }
+
+      if (statusBrand) {
+        return statusBrand;
+      }
+
+      if (statusInfluencer) {
+        return statusInfluencer;
+      }
+
+      return "active";
+    };
+
+    const applyMap = new Map();
+
+    for (const row of applyRows) {
+      const campaignId = String(row?.campaignId || "").trim();
+      if (!campaignId) continue;
+
+      const { applicant, fromApprovedArray } = getMatchedApplicant(row);
+      if (!applicant) continue;
+
+      applyMap.set(campaignId, {
+        campaignId,
+        applicant,
+        fromApprovedArray,
+        status: getApplicantStatus(applicant, fromApprovedArray),
+        appliedAt: applicant?.appliedAt || row?.createdAt || null,
+      });
+    }
+
+    const appliedCampaignIds = [...applyMap.keys()];
+
+    if (!appliedCampaignIds.length) {
       return res.status(200).json({
+        success: true,
         page,
         limit,
         total: 0,
         pages: 1,
+        totalPages: 1,
+        count: 0,
         campaigns: [],
         influencer: {
           _id: String(influencer._id),
           name: influencer.name || "",
           email: influencer.email || "",
         },
+        ...(debug
+          ? {
+              debug: {
+                reason: "No ApplyCampaign rows found for this influencer",
+                influencerId,
+                applyRowsFound: applyRows.length,
+              },
+            }
+          : {}),
       });
     }
 
-    const objectIds = invitedCampaignIds
+    const campaignObjectIds = appliedCampaignIds
       .filter((id) => isObjectId(id))
       .map((id) => toObjectId(id));
 
-    const campaignFilter = {
-      $or: [
-        { campaignsId: { $in: invitedCampaignIds } },
-        { _id: { $in: objectIds } },
-      ],
-    };
+    const andFilters = [
+      {
+        $or: [
+          { _id: { $in: campaignObjectIds } },
+          { campaignsId: { $in: appliedCampaignIds } },
+          { campaignId: { $in: appliedCampaignIds } },
+        ],
+      },
+    ];
 
     if (Array.isArray(visibleBrandKeys)) {
       if (!visibleBrandKeys.length) {
         return res.status(200).json({
+          success: true,
           page,
           limit,
           total: 0,
           pages: 1,
+          totalPages: 1,
+          count: 0,
           campaigns: [],
           influencer: {
             _id: String(influencer._id),
             name: influencer.name || "",
             email: influencer.email || "",
           },
+          ...(debug
+            ? {
+                debug: {
+                  reason: "Admin has no visible brand keys",
+                  rawActor,
+                  resolvedActor: actor,
+                  appliedCampaignIds,
+                },
+              }
+            : {}),
         });
       }
 
-      campaignFilter.brandId = { $in: visibleBrandKeys };
+      const visibleBrandObjectIds = visibleBrandKeys
+        .filter((id) => isObjectId(id))
+        .map((id) => toObjectId(id));
+
+      andFilters.push({
+        $or: [
+          { brandId: { $in: visibleBrandKeys } },
+          { brandId: { $in: visibleBrandObjectIds } },
+        ],
+      });
     }
 
     const re = safeRegex(search);
+
     if (re) {
-      campaignFilter.$and = [
-        {
-          $or: [
-            { campaignTitle: re },
-            { productOrServiceName: re },
-            { brandName: re },
-            { description: re },
-            { goal: re },
-          ],
-        },
-      ];
+      andFilters.push({
+        $or: [
+          { campaignTitle: re },
+          { productOrServiceName: re },
+          { brandName: re },
+          { description: re },
+          { goal: re },
+        ],
+      });
     }
 
-    const field = getCampaignSortField(sortBy);
-    const dir = sortOrder === "asc" ? 1 : -1;
+    const campaignFilter = { $and: andFilters };
 
     const campaignDocs = await Campaign.find(campaignFilter)
       .select(
-        "_id brandId brandName campaignsId campaignTitle productOrServiceName goal budget applicantCount isActive isDraft campaignStatus timeline.startDate timeline.endDate createdAt updatedAt"
+        "_id brandId brandName campaignsId campaignId campaignTitle productOrServiceName goal budget applicantCount isActive isDraft campaignStatus timeline.startDate timeline.endDate createdAt updatedAt"
       )
       .lean();
-
-    const invitationMap = new Map();
-    invitations.forEach((inv) => {
-      const key = String(inv.campaignId || "").trim();
-      if (!key) return;
-      if (!invitationMap.has(key)) invitationMap.set(key, inv);
-    });
 
     const normalized = campaignDocs.map((doc) => {
       const summary = toCampaignSummary(doc);
 
-      const invitation =
-        invitationMap.get(String(doc.campaignsId || "").trim()) ||
-        invitationMap.get(String(doc._id || "").trim()) ||
-        null;
+      const possibleCampaignKeys = [
+        String(doc._id || ""),
+        String(doc.campaignsId || ""),
+        String(doc.campaignId || ""),
+      ].filter(Boolean);
 
-      const rawStatus = String(
-        invitation?.status || doc.campaignStatus || ""
-      ).toLowerCase();
+      const applyInfo =
+        possibleCampaignKeys.map((key) => applyMap.get(key)).find(Boolean) || null;
 
-      let status = "pending";
-      if (rawStatus.includes("approve")) status = "approved";
-      else if (rawStatus.includes("reject")) status = "rejected";
-      else if (rawStatus.includes("accept")) status = "approved";
-      else if (rawStatus.includes("decline")) status = "rejected";
+      const applicant = applyInfo?.applicant || {};
+      const status = applyInfo?.status || "active";
 
       return {
         _id: String(doc._id || ""),
         id: summary.campaignId,
         campaignId: summary.campaignId,
+
         name: summary.name,
         campaignName: summary.name,
+
+        brandId: String(doc.brandId || ""),
         brandName: doc.brandName || "—",
-        appliedDate:
-          invitation?.createdAt ||
-          doc.createdAt ||
-          null,
+
+        appliedDate: applyInfo?.appliedAt || doc.createdAt || null,
+
         status,
+        statusBrand: applicant.statusBrand || "",
+        statusInfluencer: applicant.statusInfluencer || "",
+
+        isShortlisted: Number(applicant.isShortlisted || 0),
+        isUndicided: Number(applicant.isUndicided || 0),
+        isRejected: Number(applicant.isRejected || 0),
+        contractId: applicant.contractId || "",
+
         startDate: summary.startDate,
         endDate: summary.endDate,
         goal: summary.goal,
@@ -2623,31 +2734,61 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     const filteredByStatus =
       statusFilter === "all"
         ? normalized
-        : normalized.filter((item) => item.status === statusFilter);
+        : normalized.filter((item) => {
+            if (statusFilter === "active") {
+              return item.status !== "rejected";
+            }
+
+            return (
+              item.status === statusFilter ||
+              String(item.statusBrand || "").toLowerCase() === statusFilter ||
+              String(item.statusInfluencer || "").toLowerCase() === statusFilter
+            );
+          });
+
+    const field = getCampaignSortField(sortBy);
+    const dir = sortOrder === "asc" ? 1 : -1;
+
+    const getSortValue = (item) => {
+      switch (field) {
+        case "campaignTitle":
+          return item.name || "";
+
+        case "goal":
+          return item.goal || "";
+
+        case "timeline.startDate":
+          return new Date(item.startDate || 0).getTime();
+
+        case "timeline.endDate":
+          return new Date(item.endDate || 0).getTime();
+
+        case "applicantCount":
+          return Number(item.applicantCount || 0);
+
+        case "isActive":
+          return Number(item.isActive || 0);
+
+        case "createdAt":
+        default:
+          return new Date(item.appliedDate || 0).getTime();
+      }
+    };
 
     const sorted = [...filteredByStatus].sort((a, b) => {
-      const aVal =
-        field === "campaignTitle"
-          ? a.name || ""
-          : field === "createdAt"
-            ? new Date(a.appliedDate || 0).getTime()
-            : 0;
-
-      const bVal =
-        field === "campaignTitle"
-          ? b.name || ""
-          : field === "createdAt"
-            ? new Date(b.appliedDate || 0).getTime()
-            : 0;
+      const aVal = getSortValue(a);
+      const bVal = getSortValue(b);
 
       if (typeof aVal === "number" && typeof bVal === "number") {
         return (aVal - bVal) * dir;
       }
 
-      return String(aVal).localeCompare(String(bVal), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }) * dir;
+      return (
+        String(aVal).localeCompare(String(bVal), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }) * dir
+      );
     });
 
     const total = sorted.length;
@@ -2655,20 +2796,39 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     const campaigns = sorted.slice((page - 1) * limit, page * limit);
 
     return res.status(200).json({
+      success: true,
       page,
       limit,
       total,
       pages,
+      totalPages: pages,
+      count: campaigns.length,
       campaigns,
       influencer: {
         _id: String(influencer._id),
         name: influencer.name || "",
         email: influencer.email || "",
       },
+      ...(debug
+        ? {
+            debug: {
+              rawActor,
+              resolvedActor: actor,
+              visibleBrandKeys,
+              influencerId,
+              applyRowsFound: applyRows.length,
+              appliedCampaignIds,
+              campaignDocsFound: campaignDocs.length,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     console.error("Error in getCampaignsByInfluencerId:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
