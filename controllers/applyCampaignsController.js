@@ -495,6 +495,14 @@ exports.getListByCampaign = async (req, res) => {
   }
 
   try {
+    const forceManagedActive =
+      req.body?.forceActiveForManaged === true ||
+      req.body?.forceManagedActive === true ||
+      req.body?.pitchFolderAssigned === true ||
+      String(req.body?.forceActiveForManaged || '').toLowerCase() === 'true' ||
+      String(req.body?.forceManagedActive || '').toLowerCase() === 'true' ||
+      String(req.body?.pitchFolderAssigned || '').toLowerCase() === 'true';
+
     const normalizeText = (value) => String(value ?? '').trim().toLowerCase();
     const normalizeStatus = (value) => String(value ?? '').trim().toUpperCase();
     const normalizeRole = (value) => String(value ?? '').trim().toLowerCase();
@@ -964,6 +972,50 @@ exports.getListByCampaign = async (req, res) => {
       return list;
     };
 
+    const campaignObjectIdFilters = [];
+    if (mongoose.Types.ObjectId.isValid(String(campaignId))) {
+      campaignObjectIdFilters.push({ _id: new mongoose.Types.ObjectId(String(campaignId)) });
+    }
+
+    const campaignDoc = await Campaign.findOne({
+      $or: [
+        { campaignsId: String(campaignId) },
+        { campaignId: String(campaignId) },
+        ...campaignObjectIdFilters,
+      ],
+    })
+      .select("_id brandId campaignsId campaignId createdBy approvalMode fullyManagedSubscription brandPlanName subscription planName")
+      .lean();
+
+    let brandForCampaign = null;
+    if (campaignDoc?.brandId) {
+      try {
+        const brandFilter = [{ _id: campaignDoc.brandId }, { brandId: String(campaignDoc.brandId) }];
+        if (mongoose.Types.ObjectId.isValid(String(campaignDoc.brandId))) {
+          brandFilter.push({ _id: new mongoose.Types.ObjectId(String(campaignDoc.brandId)) });
+        }
+        brandForCampaign = await Brand.findOne({ $or: brandFilter })
+          .select("_id brandId subscription planName fullyManagedSubscription")
+          .lean();
+      } catch {
+        brandForCampaign = null;
+      }
+    }
+
+    const isAdminCreatedOrFullyManagedCampaign =
+      normalizeRole(campaignDoc?.createdBy?.role) === "admin" ||
+      normalizeText(campaignDoc?.approvalMode) === "admin_review" ||
+      campaignDoc?.fullyManagedSubscription === true ||
+      brandForCampaign?.fullyManagedSubscription === true ||
+      normalizeText(campaignDoc?.brandPlanName).includes("fully managed") ||
+      normalizeText(campaignDoc?.subscription?.planName).includes("fully managed") ||
+      normalizeText(campaignDoc?.planName).includes("fully managed") ||
+      normalizeText(brandForCampaign?.subscription?.planName).includes("fully managed") ||
+      normalizeText(brandForCampaign?.planName).includes("fully managed");
+
+    const shouldForceManagedApplicantsActive =
+      forceManagedActive || isAdminCreatedOrFullyManagedCampaign;
+
     const record = await ApplyCampaign.findOne({
       campaignId: String(campaignId)
     }).lean();
@@ -1165,10 +1217,6 @@ exports.getListByCampaign = async (req, res) => {
           : 0;
 
       const applicantStatuses = resolveApplicantStatuses(applicant);
-      const applicantMarkedActive =
-        Number(applicant?.isActive) === 1 ||
-        normalizeText(applicantStatuses.statusBrand) === 'active' ||
-        normalizeText(applicantStatuses.statusInfluencer) === 'active';
 
       const appliedAt = resolveApplicantDate(applicant, recordCreatedAt);
 
@@ -1176,6 +1224,30 @@ exports.getListByCampaign = async (req, res) => {
       const isContracted = contract ? 1 : 0;
       const isAccepted = contract?.isAccepted === 1 ? 1 : 0;
       const isContractRejected = contract?.isRejected === 1 ? 1 : 0;
+
+      const applicantStatusTokens = [
+        applicant?.statusBrand,
+        applicant?.statusInfluencer,
+        applicant?.brandStatus,
+        applicant?.influencerStatus,
+        applicant?.status,
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase());
+
+      const isPitchFolderActiveApplicant =
+        Number(applicant?.isActive) === 1 ||
+        applicant?.activeSource === "pitch_folder_assignment" ||
+        applicant?.source === "pitch_folder_assignment" ||
+        applicant?.assignedFromPitchFolder === true ||
+        applicant?.createdFromPitchFolder === true ||
+        applicantStatusTokens.includes("active") ||
+        (
+          shouldForceManagedApplicantsActive &&
+          isRejected !== 1 &&
+          normalizeText(applicantStatuses.statusBrand) !== "rejected" &&
+          normalizeText(applicantStatuses.statusInfluencer) !== "rejected"
+        );
 
       const baseRow = {
         influencerId: infIdStr,
@@ -1204,8 +1276,8 @@ exports.getListByCampaign = async (req, res) => {
         brandStatus: applicantStatuses.statusBrand,
         influencerStatus: applicantStatuses.statusInfluencer,
 
-        isInvited: applicantMarkedActive ? 0 : lifecycle.isInvited,
-        isActive: applicantMarkedActive ? 1 : lifecycle.isActive,
+        isInvited: isPitchFolderActiveApplicant ? 0 : lifecycle.isInvited,
+        isActive: isPitchFolderActiveApplicant ? 1 : lifecycle.isActive,
         isCompleted: lifecycle.isCompleted,
         lifecycleStatus: lifecycle.lifecycleStatus,
         lifecycleStatusRaw: lifecycle.lifecycleStatusRaw,
@@ -1340,7 +1412,8 @@ exports.getListByCampaign = async (req, res) => {
         date: selectedDateFilter || null,
         sortBy: sortBy || null,
         sortField: sortField || null,
-        sortOrder
+        sortOrder,
+        forceManagedActive: shouldForceManagedApplicantsActive
       },
       isContracted: isContractedCampaign,
       contractId: contracts[0]?._id || null,

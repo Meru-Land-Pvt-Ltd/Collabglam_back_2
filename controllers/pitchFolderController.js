@@ -9,8 +9,8 @@ const PitchFolder = require('../models/pitchFolder');
 const { AdminModel, ROLES } = require('../models/master');
 const InfluencerProfile = require('../models/youtube');
 
-const ApplyCampaign = require('../models/applyCampaign');
 const Campaign = require('../models/campaign');
+const ApplyCampaign = require('../models/applyCampaign');
 const { InfluencerModel } = require('../models/influencer');
 
 const ALLOWED_PROVIDERS = ['instagram', 'youtube', 'tiktok'];
@@ -25,18 +25,6 @@ function hasOwn(obj, key) {
 function cleanStr(v) {
   if (v === undefined || v === null) return '';
   return String(v).trim();
-}
-
-function escapeRegex(value = '') {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function exactEmailRegex(email = '') {
-  return new RegExp(`^${escapeRegex(String(email).trim())}$`, 'i');
-}
-
-function normalizeEmail(value = '') {
-  return cleanStr(value).toLowerCase();
 }
 
 async function findCampaignByAnyIdForAssignment(campaignId) {
@@ -869,225 +857,6 @@ function serializeAssignedCampaign(assignedCampaign) {
   };
 }
 
-async function activateGoodFitInfluencersForCampaign(folder, campaign) {
-  const campaignObjectId = String(campaign?._id || '');
-  const allItems = Array.isArray(folder?.items) ? folder.items : [];
-  const goodFitItems = allItems.filter((item) => item?.goodFit === true);
-
-  const summary = {
-    campaignId: campaignObjectId,
-    totalGoodFit: goodFitItems.length,
-    withEmail: 0,
-    matched: 0,
-    activated: 0,
-    alreadyInCampaign: 0,
-    missingEmail: 0,
-    influencerNotFound: 0,
-    applicantCount: 0,
-    activatedInfluencers: [],
-    alreadyInCampaignInfluencers: [],
-    missingEmailItems: [],
-    influencerNotFoundItems: [],
-  };
-
-  if (!campaignObjectId || !goodFitItems.length) {
-    return summary;
-  }
-
-  const emailToFolderItem = new Map();
-
-  for (const item of goodFitItems) {
-    const email = normalizeEmail(item?.email);
-
-    if (!email) {
-      summary.missingEmailItems.push({
-        itemId: String(item?._id || ''),
-        name: cleanStr(item?.name),
-        handle: cleanStr(item?.handle),
-      });
-      continue;
-    }
-
-    if (!emailToFolderItem.has(email)) {
-      emailToFolderItem.set(email, item);
-    }
-  }
-
-  const emails = [...emailToFolderItem.keys()];
-  summary.withEmail = emails.length;
-  summary.missingEmail = summary.missingEmailItems.length;
-
-  if (!emails.length) {
-    return summary;
-  }
-
-  const emailRegexes = emails.map(exactEmailRegex);
-  const influencerDocs = await InfluencerModel.find({
-    $or: [
-      { email: { $in: emailRegexes } },
-      { proxyEmail: { $in: emailRegexes } },
-    ],
-  })
-    .select('_id name email proxyEmail')
-    .lean();
-
-  const influencerByEmail = new Map();
-
-  for (const influencer of influencerDocs) {
-    const email = normalizeEmail(influencer?.email);
-    const proxyEmail = normalizeEmail(influencer?.proxyEmail);
-
-    if (email) influencerByEmail.set(email, influencer);
-    if (proxyEmail) influencerByEmail.set(proxyEmail, influencer);
-  }
-
-  const matchedByInfluencerId = new Map();
-
-  for (const email of emails) {
-    const influencer = influencerByEmail.get(email);
-    const folderItem = emailToFolderItem.get(email);
-
-    if (!influencer?._id) {
-      summary.influencerNotFoundItems.push({
-        email,
-        name: cleanStr(folderItem?.name),
-        handle: cleanStr(folderItem?.handle),
-      });
-      continue;
-    }
-
-    const influencerId = String(influencer._id);
-
-    if (!matchedByInfluencerId.has(influencerId)) {
-      matchedByInfluencerId.set(influencerId, {
-        influencer,
-        folderItem,
-        matchedEmail: email,
-      });
-    }
-  }
-
-  const matchedInfluencers = [...matchedByInfluencerId.values()];
-  summary.matched = matchedInfluencers.length;
-  summary.influencerNotFound = summary.influencerNotFoundItems.length;
-
-  if (!matchedInfluencers.length) {
-    return summary;
-  }
-
-  const existingApply = await ApplyCampaign.findOne({
-    campaignId: campaignObjectId,
-  }).lean();
-
-  const alreadyAppliedIds = new Set(
-    Array.isArray(existingApply?.applicants)
-      ? existingApply.applicants
-          .map((applicant) => String(applicant?.influencerId || ''))
-          .filter(Boolean)
-      : []
-  );
-
-  const applicantsToPush = [];
-  const now = new Date();
-
-  for (const row of matchedInfluencers) {
-    const influencerId = String(row.influencer._id);
-    const name = row.influencer.name || row.folderItem?.name || '';
-
-    if (alreadyAppliedIds.has(influencerId)) {
-      summary.alreadyInCampaignInfluencers.push({
-        influencerId,
-        email: row.matchedEmail,
-        name,
-      });
-      continue;
-    }
-
-    applicantsToPush.push({
-      influencerId,
-      name,
-      isShortlisted: 0,
-      isUndicided: 0,
-      isRejected: 0,
-      isActive: 1,
-      statusBrand: 'active',
-      statusInfluencer: 'active',
-      appliedAt: now,
-      activatedAt: now,
-      activeSource: 'pitch_folder_assignment',
-    });
-  }
-
-  if (applicantsToPush.length > 0) {
-    summary.activatedInfluencers = applicantsToPush.map((item) => ({
-      influencerId: item.influencerId,
-      name: item.name,
-    }));
-  }
-
-  const matchedIds = matchedInfluencers.map((row) => String(row.influencer._id));
-
-  let updatedApply = null;
-
-  if (applicantsToPush.length > 0) {
-    updatedApply = await ApplyCampaign.findOneAndUpdate(
-      { campaignId: campaignObjectId },
-      {
-        $setOnInsert: {
-          campaignId: campaignObjectId,
-        },
-        $push: {
-          applicants: {
-            $each: applicantsToPush,
-          },
-        },
-      },
-      {
-        new: true,
-        upsert: true,
-      }
-    ).lean();
-  }
-
-  await ApplyCampaign.updateOne(
-    { campaignId: campaignObjectId },
-    {
-      $set: {
-        'applicants.$[applicant].isShortlisted': 0,
-        'applicants.$[applicant].isUndicided': 0,
-        'applicants.$[applicant].isRejected': 0,
-        'applicants.$[applicant].isActive': 1,
-        'applicants.$[applicant].statusBrand': 'active',
-        'applicants.$[applicant].statusInfluencer': 'active',
-        'applicants.$[applicant].activatedAt': now,
-        'applicants.$[applicant].activeSource': 'pitch_folder_assignment',
-      },
-    },
-    {
-      arrayFilters: [{ 'applicant.influencerId': { $in: matchedIds } }],
-    }
-  );
-
-  if (!updatedApply) {
-    updatedApply = await ApplyCampaign.findOne({ campaignId: campaignObjectId }).lean();
-  }
-
-  summary.activated = matchedInfluencers.length;
-  summary.alreadyInCampaign = summary.alreadyInCampaignInfluencers.length;
-  summary.applicantCount = Array.isArray(updatedApply?.applicants)
-    ? updatedApply.applicants.length
-    : (existingApply?.applicants?.length || 0) + applicantsToPush.length;
-
-  await Campaign.findByIdAndUpdate(campaignObjectId, {
-    $set: {
-      applicantCount: summary.applicantCount,
-      hasApplied: summary.applicantCount > 0 ? 1 : 0,
-    },
-  });
-
-  return summary;
-}
-
 function getLegacyComments(source = {}) {
   if (!source) return '';
 
@@ -1234,6 +1003,113 @@ async function findAccessibleFolder(folderId, actor) {
     .exec();
 }
 
+function serializeCampaignActivation(campaignActivation) {
+  if (!campaignActivation?.campaignId && !campaignActivation?.activeAt) return null;
+
+  const rawCampaignId = campaignActivation?.campaignId;
+  const campaignId = rawCampaignId?._id ? rawCampaignId._id : rawCampaignId;
+  const rawInfluencerId = campaignActivation?.influencerId;
+  const influencerId = rawInfluencerId?._id ? rawInfluencerId._id : rawInfluencerId;
+
+  return {
+    active: !!campaignActivation?.activeAt,
+    campaignId: campaignId ? String(campaignId) : null,
+    campaignsId: campaignActivation?.campaignsId || '',
+    influencerId: influencerId ? String(influencerId) : null,
+    activeAt: campaignActivation?.activeAt || null,
+    activatedByAdminId: campaignActivation?.activatedByAdminId
+      ? String(campaignActivation.activatedByAdminId)
+      : null,
+  };
+}
+
+function getAssignedCampaignIdString(assignedCampaign = {}) {
+  const rawCampaignId = assignedCampaign?.campaignId;
+  const campaignId = rawCampaignId?._id ? rawCampaignId._id : rawCampaignId;
+  return campaignId ? String(campaignId) : '';
+}
+
+function isActiveCampaignApplicant(applicant = {}) {
+  if (Number(applicant?.isActive || 0) === 1) return true;
+
+  return [
+    applicant?.statusBrand,
+    applicant?.statusInfluencer,
+    applicant?.brandStatus,
+    applicant?.influencerStatus,
+    applicant?.lifecycleStatus,
+  ]
+    .filter(Boolean)
+    .map((value) => cleanStr(value).toLowerCase())
+    .includes('active');
+}
+
+async function getActiveApplicantMapForAssignedCampaign(folderDoc) {
+  const assignedCampaign = folderDoc?.assignedCampaign || {};
+  const campaignId = getAssignedCampaignIdString(assignedCampaign);
+
+  if (!campaignId) return new Map();
+
+  const applyRecord = await ApplyCampaign.findOne({ campaignId })
+    .select('applicants')
+    .lean();
+
+  const activeMap = new Map();
+
+  for (const applicant of applyRecord?.applicants || []) {
+    if (!isActiveCampaignApplicant(applicant)) continue;
+
+    const itemId = cleanStr(applicant?.pitchFolderItemId);
+    if (!itemId) continue;
+
+    activeMap.set(itemId, {
+      active: true,
+      campaignId,
+      campaignsId: assignedCampaign?.campaignsId || '',
+      influencerId: cleanStr(applicant?.influencerId) || null,
+      activeAt: applicant?.activeAt || applicant?.appliedAt || null,
+      activatedByAdminId: applicant?.assignedByAdminId || null,
+    });
+  }
+
+  return activeMap;
+}
+
+async function serializeFolderDetailWithCampaignState(doc) {
+  const base = serializeFolderDetail(doc);
+  const activeMap = await getActiveApplicantMapForAssignedCampaign(doc);
+  const assignedCampaignId = base?.assignedCampaign?.campaignId || '';
+
+  base.items = (base.items || []).map((item) => {
+    const activeFromApply = activeMap.get(String(item._id));
+
+    if (activeFromApply) {
+      return {
+        ...item,
+        campaignActivation: activeFromApply,
+      };
+    }
+
+    const existing = item.campaignActivation;
+    const existingCampaignId = existing?.campaignId ? String(existing.campaignId) : '';
+    const isSameAssignedCampaign =
+      !!existingCampaignId && !!assignedCampaignId && existingCampaignId === String(assignedCampaignId);
+
+    return {
+      ...item,
+      campaignActivation:
+        existing && isSameAssignedCampaign
+          ? {
+            ...existing,
+            active: !!existing.activeAt,
+          }
+          : null,
+    };
+  });
+
+  return base;
+}
+
 function serializeFolderItemForAdmin(item) {
   const resolvedShippingAddress = getPreferredShippingAddress(item);
 
@@ -1293,6 +1169,8 @@ function serializeFolderItemForAdmin(item) {
           reviewedAt: item.mediaKit.reviewedAt || null,
         }
       : null,
+
+    campaignActivation: serializeCampaignActivation(item.campaignActivation),
 
     rateCardHistory: Array.isArray(item.rateCardHistory)
       ? item.rateCardHistory
@@ -1729,7 +1607,7 @@ exports.getFolderById = async (req, res) => {
 
     return res.json({
       success: true,
-      data: serializeFolderDetail(doc),
+      data: await serializeFolderDetailWithCampaignState(doc),
     });
   } catch (err) {
     console.error('[getFolderById] Error:', err);
@@ -2923,6 +2801,364 @@ exports.moveFolderItems = async (req, res) => {
   }
 };
 
+function escapeRegexForExact(value = '') {
+  return String(value).replace(/[.*+?^${}()|[]\]/g, '\$&');
+}
+
+function normalizePitchItemHandle(value) {
+  const raw = cleanStr(value).replace(/^@+/, '');
+  return raw ? `@${raw.toLowerCase()}` : '';
+}
+
+async function findInfluencerForFolderItem(item = {}) {
+  const email = cleanStr(item.email).toLowerCase();
+  const provider = normalizeProvider(item.provider);
+  const handle = normalizePitchItemHandle(item.handle);
+  const username = handle.replace(/^@+/, '');
+
+  const or = [];
+
+  if (email) {
+    const emailRx = new RegExp(`^${escapeRegexForExact(email)}$`, 'i');
+    or.push({ email: emailRx }, { proxyEmail: emailRx });
+  }
+
+  if (provider && username) {
+    or.push({
+      page1: {
+        $elemMatch: {
+          $and: [
+            { $or: [{ platform: provider }, { provider }] },
+            { $or: [{ handle }, { username }] },
+          ],
+        },
+      },
+    });
+  }
+
+  if (!or.length) return null;
+
+  return InfluencerModel.findOne({ $or: or })
+    .select('_id name email proxyEmail primaryPlatform page1')
+    .lean();
+}
+
+function buildActiveApplicantPatch({ influencer, item, folder, actorId, now }) {
+  return {
+    'applicants.$.name': influencer.name || item.name || '',
+    'applicants.$.isShortlisted': 0,
+    'applicants.$.isUndicided': 0,
+    'applicants.$.isRejected': 0,
+    'applicants.$.isActive': 1,
+    'applicants.$.statusBrand': 'active',
+    'applicants.$.statusInfluencer': 'active',
+    'applicants.$.brandStatus': 'active',
+    'applicants.$.influencerStatus': 'active',
+    'applicants.$.activeSource': 'pitch_folder_assignment',
+    'applicants.$.activeAt': now,
+    'applicants.$.pitchFolderId': String(folder._id),
+    'applicants.$.pitchFolderItemId': String(item._id),
+    'applicants.$.assignedByAdminId': actorId ? String(actorId) : null,
+  };
+}
+
+function buildActiveApplicantPush({ influencer, item, folder, actorId, now }) {
+  return {
+    influencerId: String(influencer._id),
+    name: influencer.name || item.name || '',
+    isShortlisted: 0,
+    isUndicided: 0,
+    isRejected: 0,
+    isActive: 1,
+    statusBrand: 'active',
+    statusInfluencer: 'active',
+    brandStatus: 'active',
+    influencerStatus: 'active',
+    activeSource: 'pitch_folder_assignment',
+    activeAt: now,
+    appliedAt: now,
+    pitchFolderId: String(folder._id),
+    pitchFolderItemId: String(item._id),
+    assignedByAdminId: actorId ? String(actorId) : null,
+  };
+}
+
+async function updateCampaignApplicantCount(campaign) {
+  const campaignId = String(campaign?._id || '').trim();
+
+  const applyRecord = await ApplyCampaign.findOne({ campaignId })
+    .select('applicants')
+    .lean();
+
+  const applicantCount = Array.isArray(applyRecord?.applicants)
+    ? applyRecord.applicants.length
+    : 0;
+
+  await Campaign.updateOne(
+    { _id: campaign._id },
+    {
+      $set: {
+        applicantCount,
+        hasApplied: applicantCount > 0 ? 1 : 0,
+      },
+    }
+  );
+
+  return applicantCount;
+}
+
+async function upsertFolderItemAsActiveApplicant({ folder, campaign, item, influencer, actorId }) {
+  const campaignId = String(campaign?._id || '').trim();
+  const influencerId = String(influencer?._id || '').trim();
+  const now = new Date();
+
+  if (!campaignId || !influencerId) {
+    return { added: false, updated: false, alreadyActive: false };
+  }
+
+  const existingApplyRecord = await ApplyCampaign.findOne(
+    { campaignId, 'applicants.influencerId': influencerId },
+    { 'applicants.$': 1 }
+  ).lean();
+
+  const existingApplicant = Array.isArray(existingApplyRecord?.applicants)
+    ? existingApplyRecord.applicants[0]
+    : null;
+
+  const alreadyActive = isActiveCampaignApplicant(existingApplicant || {});
+
+  const updateExisting = await ApplyCampaign.updateOne(
+    { campaignId, 'applicants.influencerId': influencerId },
+    { $set: buildActiveApplicantPatch({ influencer, item, folder, actorId, now }) }
+  );
+
+  if (Number(updateExisting.matchedCount || updateExisting.n || 0) > 0) {
+    return { added: false, updated: !alreadyActive, alreadyActive };
+  }
+
+  await ApplyCampaign.updateOne(
+    { campaignId },
+    {
+      $setOnInsert: { campaignId },
+      $push: { applicants: buildActiveApplicantPush({ influencer, item, folder, actorId, now }) },
+    },
+    { upsert: true }
+  );
+
+  return { added: true, updated: false, alreadyActive: false };
+}
+
+async function syncFolderGoodFitsToActiveCampaign({ folder, campaign, actorId }) {
+  const campaignId = String(campaign?._id || '').trim();
+
+  if (!folder || !campaignId) {
+    return {
+      goodFitCount: 0,
+      matchedInfluencerCount: 0,
+      addedCount: 0,
+      updatedCount: 0,
+      skippedCount: 0,
+      applicantCount: 0,
+      skippedItems: [],
+    };
+  }
+
+  const now = new Date();
+  const goodFitItems = (Array.isArray(folder.items) ? folder.items : []).filter(
+    (item) => item && item.goodFit === true
+  );
+
+  let addedCount = 0;
+  let updatedCount = 0;
+  const matchedInfluencerIds = new Set();
+  const skippedItems = [];
+
+  for (const item of goodFitItems) {
+    const influencer = await findInfluencerForFolderItem(item);
+
+    if (!influencer?._id) {
+      skippedItems.push({
+        itemId: String(item?._id || ''),
+        name: cleanStr(item?.name),
+        email: cleanStr(item?.email),
+        handle: cleanStr(item?.handle),
+        reason: 'Influencer record not found. Create the influencer first, then assign/sync again.',
+      });
+      continue;
+    }
+
+    const influencerId = String(influencer._id);
+    matchedInfluencerIds.add(influencerId);
+
+    const applicantPatch = {
+      'applicants.$.name': influencer.name || item.name || '',
+      'applicants.$.isShortlisted': 0,
+      'applicants.$.isUndicided': 0,
+      'applicants.$.isRejected': 0,
+      'applicants.$.isActive': 1,
+      'applicants.$.statusBrand': 'active',
+      'applicants.$.statusInfluencer': 'active',
+      'applicants.$.brandStatus': 'active',
+      'applicants.$.influencerStatus': 'active',
+      'applicants.$.activeSource': 'pitch_folder_assignment',
+      'applicants.$.activeAt': now,
+      'applicants.$.pitchFolderId': String(folder._id),
+      'applicants.$.pitchFolderItemId': String(item._id),
+      'applicants.$.assignedByAdminId': actorId ? String(actorId) : null,
+    };
+
+    const updateExisting = await ApplyCampaign.updateOne(
+      {
+        campaignId,
+        'applicants.influencerId': influencerId,
+      },
+      { $set: applicantPatch }
+    );
+
+    if (Number(updateExisting.matchedCount || updateExisting.n || 0) > 0) {
+      updatedCount += 1;
+      continue;
+    }
+
+    await ApplyCampaign.updateOne(
+      { campaignId },
+      {
+        $setOnInsert: { campaignId },
+        $push: {
+          applicants: {
+            influencerId,
+            name: influencer.name || item.name || '',
+            isShortlisted: 0,
+            isUndicided: 0,
+            isRejected: 0,
+            isActive: 1,
+            statusBrand: 'active',
+            statusInfluencer: 'active',
+            brandStatus: 'active',
+            influencerStatus: 'active',
+            activeSource: 'pitch_folder_assignment',
+            activeAt: now,
+            appliedAt: now,
+            pitchFolderId: String(folder._id),
+            pitchFolderItemId: String(item._id),
+            assignedByAdminId: actorId ? String(actorId) : null,
+          },
+        },
+      },
+      { upsert: true }
+    );
+
+    addedCount += 1;
+  }
+
+  const applyRecord = await ApplyCampaign.findOne({ campaignId })
+    .select('applicants')
+    .lean();
+
+  const applicantCount = Array.isArray(applyRecord?.applicants)
+    ? applyRecord.applicants.length
+    : 0;
+
+  await Campaign.updateOne(
+    { _id: campaign._id },
+    {
+      $set: {
+        applicantCount,
+        hasApplied: applicantCount > 0 ? 1 : 0,
+      },
+    }
+  );
+
+  return {
+    goodFitCount: goodFitItems.length,
+    matchedInfluencerCount: matchedInfluencerIds.size,
+    addedCount,
+    updatedCount,
+    skippedCount: skippedItems.length,
+    applicantCount,
+    skippedItems,
+  };
+}
+
+exports.activateFolderItemOnAssignedCampaign = async (req, res) => {
+  try {
+    if (!canCreateOrManagePitchFolders(req.admin)) {
+      return res.status(403).json({ success: false, error: 'You are not allowed to activate pitch folder influencers on campaigns' });
+    }
+
+    const actorId = getActorAdminId(req.admin);
+    const folderId = cleanStr(req.params?.id || req.body?.folderId);
+    const itemId = cleanStr(req.params?.itemId || req.body?.itemId);
+
+    if (!mongoose.Types.ObjectId.isValid(folderId) || !mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({ success: false, error: 'Valid folderId and itemId are required' });
+    }
+
+    const folder = await findAccessibleFolder(folderId, req.admin);
+    if (!folder) return res.status(404).json({ success: false, error: 'Pitch folder not found' });
+
+    if (!hasAssignedCampaign(folder)) {
+      return res.status(400).json({ success: false, error: 'Assign a campaign to this pitch folder first' });
+    }
+
+    const item = folder.items.id(itemId);
+    if (!item) return res.status(404).json({ success: false, error: 'Folder item not found' });
+
+    const campaignLookupId = cleanStr(folder.assignedCampaign?.campaignsId) || getAssignedCampaignIdString(folder.assignedCampaign);
+    const campaign = await findCampaignByAnyIdForAssignment(campaignLookupId);
+    if (!campaign) return res.status(404).json({ success: false, error: 'Assigned campaign not found' });
+
+    const influencer = await findInfluencerForFolderItem(item);
+    if (!influencer?._id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Influencer account not found. Create the influencer first, then activate on campaign.',
+      });
+    }
+
+    const activation = await upsertFolderItemAsActiveApplicant({ folder, campaign, item, influencer, actorId });
+    const now = new Date();
+
+    item.goodFit = true;
+    item.campaignActivation = {
+      campaignId: campaign._id,
+      campaignsId: cleanStr(campaign.campaignsId),
+      influencerId: influencer._id,
+      activeAt: now,
+      activatedByAdminId: actorId && mongoose.Types.ObjectId.isValid(String(actorId))
+        ? new mongoose.Types.ObjectId(String(actorId))
+        : null,
+    };
+    item.updatedByAdmin = actorId || null;
+    folder.updatedByAdmin = actorId || null;
+
+    await updateCampaignApplicantCount(campaign);
+    const hydrated = await saveAndHydrateFolder(folder);
+
+    return res.json({
+      success: true,
+      message: activation.alreadyActive
+        ? 'Influencer is already active on this campaign.'
+        : 'Influencer activated on campaign successfully.',
+      data: {
+        folderId: String(hydrated._id),
+        itemId,
+        campaignId: String(campaign._id),
+        campaignsId: cleanStr(campaign.campaignsId),
+        influencerId: String(influencer._id),
+        alreadyActive: activation.alreadyActive,
+        added: activation.added,
+        updated: activation.updated,
+        assignedCampaign: serializeAssignedCampaign(hydrated.assignedCampaign),
+        folder: await serializeFolderDetailWithCampaignState(hydrated),
+      },
+    });
+  } catch (err) {
+    console.error('[activateFolderItemOnAssignedCampaign] Error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Internal error' });
+  }
+};
+
 exports.assignCampaignToFolder = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {
@@ -2969,7 +3205,8 @@ exports.assignCampaignToFolder = async (req, res) => {
     }
 
     const assignedCampaign = folder.assignedCampaign || {};
-    let assignmentChanged = false;
+    let hydrated = null;
+    let alreadyAssignedToSameCampaign = false;
 
     if (hasAssignedCampaign(folder)) {
       const currentCampaignObjectId = String(assignedCampaign.campaignId?._id || assignedCampaign.campaignId || '');
@@ -2991,33 +3228,39 @@ exports.assignCampaignToFolder = async (req, res) => {
           },
         });
       }
+
+      alreadyAssignedToSameCampaign = true;
+      hydrated = folder;
     } else {
       folder.assignedCampaign = buildAssignedCampaignPayload(campaign, actorId);
       folder.updatedByAdmin = actorId || null;
-      assignmentChanged = true;
-      await folder.save();
+      hydrated = await saveAndHydrateFolder(folder);
     }
 
-    const activationSummary = await activateGoodFitInfluencersForCampaign(folder, campaign);
+    const syncResult = await syncFolderGoodFitsToActiveCampaign({
+      folder: hydrated,
+      campaign,
+      actorId,
+    });
 
-    const hydrated = await PitchFolder.findById(folder._id)
-      .populate(buildCreatorPopulate())
-      .populate(buildUpdatedByPopulate())
-      .populate(buildSharedByPopulate())
-      .lean();
+    if (alreadyAssignedToSameCampaign) {
+      hydrated = await PitchFolder.findById(folder._id)
+        .populate(buildCreatorPopulate())
+        .populate(buildUpdatedByPopulate())
+        .populate(buildSharedByPopulate())
+        .lean();
+    }
 
     return res.json({
       success: true,
-      message: activationSummary.totalGoodFit > 0
-        ? `Campaign assigned and ${activationSummary.activated} Good Fit influencer(s) moved to Active`
-        : 'Campaign assigned to pitch folder successfully. No Good Fit influencers found to activate.',
+      message: alreadyAssignedToSameCampaign
+        ? 'Pitch folder is already assigned to this campaign. Good Fit influencers synced to Active.'
+        : 'Campaign assigned to pitch folder and Good Fit influencers synced to Active.',
       data: {
         folderId: String(hydrated._id),
-        campaignId: String(campaign._id),
-        assignmentChanged,
         assignedCampaign: serializeAssignedCampaign(hydrated.assignedCampaign),
-        activation: activationSummary,
-        folder: serializeFolderDetail(hydrated),
+        syncResult,
+        folder: await serializeFolderDetailWithCampaignState(hydrated),
       },
     });
   } catch (err) {
