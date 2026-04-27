@@ -12,7 +12,10 @@ const Milestone = require("../models/milestone");
 const Dispute = require("../models/dispute");
 const Contract = require("../models/contract");
 const ApplyCampaign = require("../models/applyCampaign");
+const Modash = require("../models/modash");
 const { ProductServiceGoalModel } = require("../models/productServiceGoal");
+const { AdminModel, ROLES: MASTER_ROLES } = require("../models/master");
+const BrandAssigned = require("../models/brandAssigned");
 
 const { CONTRACT_STATUS } = require("../constants/contract");
 
@@ -93,80 +96,13 @@ function pendingContractFilter(extra = {}) {
   };
 }
 
-// ------------------------- controllers -------------------------
-
-/**
- * Brand dashboard (basic)
- * brandId = Brand._id (ObjectId string)
- */
-// exports.getDashboard = async (req, res) => {
-//   try {
-//     const brandIdRaw = req.body?.brandId || req.user?.brandId;
-//     if (!brandIdRaw) return res.status(400).json({ error: "brandId is required" });
-
-//     const brandObjectId = toObjectIdStrict(brandIdRaw, "brandId");
-
-//     // 1) Fetch brand by _id
-//     const brand = await Brand.findById(brandObjectId).lean();
-//     if (!brand) return res.status(404).json({ error: "Brand not found" });
-
-//     // 2) All campaigns for this brand
-//     const campaigns = await Campaign.find(brandFilter("brandId", brandObjectId), "campaignsId isActive").lean();
-//     const totalCreatedCampaigns = campaigns.length;
-
-//     const activeCampaignIds = campaigns
-//       .filter((c) => Number(c.isActive) === 1)
-//       .map((c) => String(c.campaignsId || ""))
-//       .filter(Boolean);
-
-//     // 3) Total hired influencers from ACTIVE campaigns (distinct)
-//     let totalHiredInfluencers = 0;
-//     if (activeCampaignIds.length > 0) {
-//       const hiredAgg = await Contract.aggregate([
-//         {
-//           $match: acceptedContractFilter({
-//             ...brandFilter("brandId", brandObjectId),
-//             campaignId: { $in: activeCampaignIds },
-//           }),
-//         },
-//         { $group: { _id: "$influencerId" } },
-//         { $count: "total" },
-//       ]);
-
-//       totalHiredInfluencers = hiredAgg?.[0]?.total || 0;
-//     }
-
-//     // 4) Total influencers who have milestones with this brand
-//     const milestoneAgg = await Milestone.aggregate([
-//       { $match: brandFilter("brandId", brandObjectId) },
-//       { $unwind: "$milestoneHistory" },
-//       { $group: { _id: "$milestoneHistory.influencerId" } },
-//       { $count: "total" },
-//     ]);
-//     const totalMilestoneInfluencers = milestoneAgg?.[0]?.total || 0;
-
-//     // 5) Budget remaining (brand wallet)
-//     const milestoneDoc = await Milestone.findOne(brandFilter("brandId", brandObjectId), "walletBalance").lean();
-//     const budgetRemaining = Number(milestoneDoc?.walletBalance ?? 0);
-
-//     return res.status(200).json({
-//       brandId: brand._id.toString(),
-//       brandName: brand.brandName || brand.name || "",
-//       totalCreatedCampaigns,
-//       totalHiredInfluencers,
-//       totalMilestoneInfluencers,
-//       budgetRemaining,
-//     });
-//   } catch (err) {
-//     console.error("Dashboard error:", err);
-//     return res.status(err?.status || 500).json({ error: err?.message || "Server error" });
-//   }
-// };
 
 /**
  * Influencer dashboard:
  * - Requires req.user.influencerId
  */
+
+
 exports.getDashboardInf = async (req, res) => {
   try {
     const { influencerId } = req.user || {};
@@ -461,1623 +397,6 @@ exports.getBrandDashboardHome = async (req, res) => {
 
 
 
-
-
-
-
-
-// const ROLES = {
-//   SUPER_ADMIN: "super_admin",
-//   REVENUE_HEAD: "revenue_head",
-//   IME: "ime",
-//   BME: "bme",
-// };
-
-// // ------------------------- basic helpers -------------------------
-
-// const parsePositiveInt = (value, fallback = 1) => {
-//   const num = Number.parseInt(value, 10);
-//   return Number.isFinite(num) && num > 0 ? num : fallback;
-// };
-
-// const normalizeSortOrder = (value, fallback = "desc") => {
-//   const clean = String(value || "").trim().toLowerCase();
-
-//   if (clean === "asc" || clean === "1") return "asc";
-//   if (clean === "desc" || clean === "-1") return "desc";
-
-//   return fallback;
-// };
-
-// const escapeRegex = (value = "") => {
-//   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// };
-
-// const safeRegex = (value) => {
-//   const clean = String(value || "").trim();
-//   if (!clean) return null;
-//   return new RegExp(escapeRegex(clean), "i");
-// };
-
-// const isObjectId = (id) => mongoose.isValidObjectId(String(id || ""));
-
-// const toObjectId = (id) => new mongoose.Types.ObjectId(String(id));
-
-// const normalizeRole = (req) => {
-//   return String(
-//     req.admin?.role ||
-//     req.user?.role ||
-//     req.adminUser?.role ||
-//     req.auth?.role ||
-//     ""
-//   )
-//     .trim()
-//     .toLowerCase();
-// };
-
-// const getActor = (req) => {
-//   return req.admin || req.user || req.adminUser || req.auth || {};
-// };
-
-// const getPagination = (req, key = "") => {
-//   const body = req.body || {};
-//   const query = req.query || {};
-
-//   const pageKey = key ? `${key}Page` : "page";
-//   const limitKey = key ? `${key}Limit` : "limit";
-
-//   return {
-//     page: parsePositiveInt(body[pageKey] || query[pageKey] || body.page || query.page, 1),
-//     limit: parsePositiveInt(body[limitKey] || query[limitKey] || body.limit || query.limit, 10),
-//   };
-// };
-
-// const getSearch = (req, key = "") => {
-//   const body = req.body || {};
-//   const query = req.query || {};
-
-//   const searchKey = key ? `${key}Search` : "search";
-
-//   return String(body[searchKey] || query[searchKey] || body.search || query.search || "").trim();
-// };
-
-// const brandIdVariantsFromValues = (values = []) => {
-//   const stringValues = values.map((id) => String(id || "").trim()).filter(Boolean);
-
-//   const objectIds = stringValues
-//     .filter((id) => isObjectId(id))
-//     .map((id) => toObjectId(id));
-
-//   return {
-//     stringValues,
-//     objectIds,
-//   };
-// };
-
-// const makeBrandScopeFilter = (brandKeys = []) => {
-//   const { stringValues, objectIds } = brandIdVariantsFromValues(brandKeys);
-
-//   if (!stringValues.length && !objectIds.length) {
-//     return { _id: null };
-//   }
-
-//   return {
-//     $or: [
-//       { brandId: { $in: stringValues } },
-//       { brandId: { $in: objectIds } },
-//       { _id: { $in: objectIds } },
-//     ],
-//   };
-// };
-
-// const getAdminIdentityValues = (actor = {}) => {
-//   return [
-//     actor._id,
-//     actor.id,
-//     actor.adminId,
-//     actor.userId,
-//     actor.email,
-//     actor.name,
-//     actor.fullName,
-//   ]
-//     .map((value) => String(value || "").trim())
-//     .filter(Boolean);
-// };
-
-// // ------------------------- brand assignment helpers -------------------------
-
-// const isEmptyAssignment = (value) => {
-//   const normalized = String(value || "").trim().toLowerCase();
-
-//   return (
-//     !normalized ||
-//     normalized === "—" ||
-//     normalized === "-" ||
-//     normalized === "null" ||
-//     normalized === "undefined" ||
-//     normalized === "unassigned" ||
-//     normalized === "not assigned"
-//   );
-// };
-
-// const isUnassignedBrand = (brand = {}) => {
-//   return [
-//     "assignedRh",
-//     "assignedRm",
-//     "assignedBme",
-//     "assignedBm",
-//     "assignedIme",
-//     "assignedIm",
-//     "revenueHead",
-//     "revenueManager",
-//     "bme",
-//     "bm",
-//     "ime",
-//     "im",
-//   ].every((field) => isEmptyAssignment(brand?.[field]));
-// };
-
-// const getRoleBrandScopeFilter = (role, actor = {}) => {
-//   if (role === ROLES.SUPER_ADMIN || role === ROLES.REVENUE_HEAD) {
-//     return {};
-//   }
-
-//   const values = getAdminIdentityValues(actor);
-
-//   if (!values.length) {
-//     return { _id: null };
-//   }
-
-//   if (role === ROLES.IME) {
-//     return {
-//       $or: [
-//         { assignedIme: { $in: values } },
-//         { assignedIm: { $in: values } },
-//         { ime: { $in: values } },
-//         { im: { $in: values } },
-//         { assignedImeId: { $in: values } },
-//         { assignedImId: { $in: values } },
-//       ],
-//     };
-//   }
-
-//   if (role === ROLES.BME) {
-//     return {
-//       $or: [
-//         { assignedBme: { $in: values } },
-//         { assignedBm: { $in: values } },
-//         { bme: { $in: values } },
-//         { bm: { $in: values } },
-//         { assignedBmeId: { $in: values } },
-//         { assignedBmId: { $in: values } },
-//       ],
-//     };
-//   }
-
-//   return { _id: null };
-// };
-
-// const getScopedBrandKeysForRole = async (role, actor = {}) => {
-//   const scopeFilter = getRoleBrandScopeFilter(role, actor);
-
-//   if (!Object.keys(scopeFilter).length) {
-//     return null;
-//   }
-
-//   const brands = await Brand.find(scopeFilter).select("_id brandId").lean();
-
-//   return brands.flatMap((brand) =>
-//     [
-//       String(brand._id || ""),
-//       String(brand.brandId || ""),
-//     ].filter(Boolean)
-//   );
-// };
-
-// // ------------------------- dashboard summary helpers -------------------------
-
-// const getDateRanges = () => {
-//   const now = new Date();
-
-//   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-//   const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
-//   const startOfQuarter = new Date(now.getFullYear(), quarterStartMonth, 1);
-
-//   const startOfYear = new Date(now.getFullYear(), 0, 1);
-
-//   return {
-//     now,
-//     startOfMonth,
-//     startOfQuarter,
-//     startOfYear,
-//   };
-// };
-
-// const buildCampaignMatch = ({ brandKeys = null, extraFilters = [] } = {}) => {
-//   const andFilters = [
-//     {
-//       $or: [
-//         { isDraft: { $exists: false } },
-//         { isDraft: false },
-//         { isDraft: 0 },
-//       ],
-//     },
-//     ...extraFilters,
-//   ];
-
-//   if (Array.isArray(brandKeys)) {
-//     andFilters.push(makeBrandScopeFilter(brandKeys));
-//   }
-
-//   return { $and: andFilters };
-// };
-
-// const getRevenueTotal = async ({ startDate, endDate, brandKeys = null }) => {
-//   const match = buildCampaignMatch({
-//     brandKeys,
-//     extraFilters: [
-//       {
-//         createdAt: {
-//           $gte: startDate,
-//           $lte: endDate,
-//         },
-//       },
-//     ],
-//   });
-
-//   const result = await Campaign.aggregate([
-//     { $match: match },
-//     {
-//       $addFields: {
-//         dashboardRevenueNumber: {
-//           $convert: {
-//             input: {
-//               $ifNull: ["$budget", "$campaignBudget"],
-//             },
-//             to: "double",
-//             onError: 0,
-//             onNull: 0,
-//           },
-//         },
-//       },
-//     },
-//     {
-//       $group: {
-//         _id: null,
-//         total: { $sum: "$dashboardRevenueNumber" },
-//       },
-//     },
-//   ]);
-
-//   return Number(result?.[0]?.total || 0);
-// };
-
-// const getCampaignCounts = async ({ brandKeys = null } = {}) => {
-//   const now = new Date();
-
-//   const activeMatch = buildCampaignMatch({
-//     brandKeys,
-//     extraFilters: [
-//       {
-//         $or: [
-//           { isActive: true },
-//           { isActive: 1 },
-//           { campaignStatus: { $regex: "active", $options: "i" } },
-//           {
-//             $and: [
-//               { "timeline.startDate": { $lte: now } },
-//               {
-//                 $or: [
-//                   { "timeline.endDate": { $exists: false } },
-//                   { "timeline.endDate": null },
-//                   { "timeline.endDate": { $gte: now } },
-//                 ],
-//               },
-//             ],
-//           },
-//         ],
-//       },
-//     ],
-//   });
-
-//   const completedMatch = buildCampaignMatch({
-//     brandKeys,
-//     extraFilters: [
-//       {
-//         $or: [
-//           { campaignStatus: { $regex: "completed", $options: "i" } },
-//           { campaignStatus: { $regex: "complete", $options: "i" } },
-//           { "timeline.endDate": { $lt: now } },
-//         ],
-//       },
-//     ],
-//   });
-
-//   const [activeCampaigns, completedCampaigns] = await Promise.all([
-//     Campaign.countDocuments(activeMatch),
-//     Campaign.countDocuments(completedMatch),
-//   ]);
-
-//   return {
-//     activeCampaigns,
-//     completedCampaigns,
-//   };
-// };
-
-// const getRevenueMetrics = async ({ brandKeys = null } = {}) => {
-//   const { now, startOfMonth, startOfQuarter, startOfYear } = getDateRanges();
-
-//   const [
-//     totalRevenueThisMonth,
-//     totalRevenueThisQuarter,
-//     totalRevenueThisYear,
-//     campaignCounts,
-//   ] = await Promise.all([
-//     getRevenueTotal({
-//       startDate: startOfMonth,
-//       endDate: now,
-//       brandKeys,
-//     }),
-//     getRevenueTotal({
-//       startDate: startOfQuarter,
-//       endDate: now,
-//       brandKeys,
-//     }),
-//     getRevenueTotal({
-//       startDate: startOfYear,
-//       endDate: now,
-//       brandKeys,
-//     }),
-//     getCampaignCounts({ brandKeys }),
-//   ]);
-
-//   return {
-//     totalRevenueThisMonth,
-//     totalRevenueThisQuarter,
-//     totalRevenueThisYear,
-//     activeCampaigns: campaignCounts.activeCampaigns,
-//     completedCampaigns: campaignCounts.completedCampaigns,
-//   };
-// };
-
-// // ------------------------- brands list -------------------------
-
-// const getBrandsList = async (req, options = {}) => {
-//   const { page, limit } = getPagination(req, "brands");
-//   const search = getSearch(req, "brands");
-
-//   const sortBy = String(
-//     req.body?.brandsSortBy ||
-//     req.query?.brandsSortBy ||
-//     req.body?.sortBy ||
-//     req.query?.sortBy ||
-//     "createdAt"
-//   ).trim();
-
-//   const sortOrder = normalizeSortOrder(
-//     req.body?.brandsSortOrder ||
-//     req.query?.brandsSortOrder ||
-//     req.body?.sortOrder ||
-//     req.query?.sortOrder,
-//     "desc"
-//   );
-
-//   const allowedSortFields = new Set([
-//     "name",
-//     "brandName",
-//     "email",
-//     "phone",
-//     "planName",
-//     "createdAt",
-//     "expiresAt",
-//     "status",
-//     "assignedRh",
-//     "assignedRm",
-//     "assignedBme",
-//     "assignedBm",
-//     "assignedIme",
-//     "assignedIm",
-//   ]);
-
-//   const field = allowedSortFields.has(sortBy) ? sortBy : "createdAt";
-//   const dir = sortOrder === "asc" ? 1 : -1;
-
-//   const filter = {
-//     ...(options.extraFilter || {}),
-//   };
-
-//   const re = safeRegex(search);
-
-//   if (re) {
-//     filter.$or = [
-//       { name: re },
-//       { brandName: re },
-//       { email: re },
-//       { phone: re },
-//       { callingcode: re },
-//       { companySize: re },
-//       { industry: re },
-//       { planName: re },
-//       { status: re },
-//       { assignedRh: re },
-//       { assignedRm: re },
-//       { assignedBme: re },
-//       { assignedBm: re },
-//       { assignedIme: re },
-//       { assignedIm: re },
-//     ];
-//   }
-
-//   const total = await Brand.countDocuments(filter);
-
-//   const brands = await Brand.find(filter)
-//     .select("-password -__v")
-//     .sort({ [field]: dir, createdAt: -1 })
-//     .skip((page - 1) * limit)
-//     .limit(limit)
-//     .lean();
-
-//   return {
-//     page,
-//     limit,
-//     total,
-//     totalPages: Math.max(1, Math.ceil(total / limit)),
-//     sortBy: field,
-//     sortOrder,
-//     brands,
-//   };
-// };
-
-// const getUnassignedBrands = async (req, options = {}) => {
-//   const { page, limit } = getPagination(req, "unassignedBrands");
-//   const search = getSearch(req, "unassignedBrands");
-
-//   const filter = {
-//     ...(options.extraFilter || {}),
-//   };
-
-//   const re = safeRegex(search);
-
-//   if (re) {
-//     filter.$or = [
-//       { name: re },
-//       { brandName: re },
-//       { email: re },
-//       { phone: re },
-//       { companySize: re },
-//       { industry: re },
-//       { planName: re },
-//       { status: re },
-//     ];
-//   }
-
-//   const rawBrands = await Brand.find(filter)
-//     .select("-password -__v")
-//     .sort({ createdAt: -1 })
-//     .lean();
-
-//   const filtered = rawBrands.filter(isUnassignedBrand);
-
-//   const total = filtered.length;
-//   const totalPages = Math.max(1, Math.ceil(total / limit));
-//   const brands = filtered.slice((page - 1) * limit, page * limit);
-
-//   return {
-//     page,
-//     limit,
-//     total,
-//     totalPages,
-//     brands,
-//   };
-// };
-
-// // ------------------------- influencers list -------------------------
-// const getModelCount = async (Model, filter = {}) => {
-//   if (Model && typeof Model.countDocuments === "function") {
-//     return Model.countDocuments(filter);
-//   }
-
-//   if (Model && typeof Model.find === "function") {
-//     const rows = await Model.find(filter).select("_id").lean();
-//     return rows.length;
-//   }
-
-//   return 0;
-// };
-
-// const getFirstValue = (...values) => {
-//   for (const value of values) {
-//     if (value !== undefined && value !== null && value !== "") {
-//       return value;
-//     }
-//   }
-
-//   return "";
-// };
-
-// const flattenPageData = (influencer = {}) => {
-//   return [
-//     ...(Array.isArray(influencer.page1) ? influencer.page1 : []),
-//     ...(Array.isArray(influencer.page2) ? influencer.page2 : []),
-//     ...(Array.isArray(influencer.page3) ? influencer.page3 : []),
-//   ];
-// };
-
-// const extractPrimaryPlatform = (influencer = {}) => {
-//   if (influencer.primaryPlatform) {
-//     return influencer.primaryPlatform;
-//   }
-
-//   const pages = flattenPageData(influencer);
-
-//   const found = pages.find((item) => {
-//     return item?.primaryPlatform || item?.platform || item?.provider;
-//   });
-
-//   return getFirstValue(
-//     found?.primaryPlatform,
-//     found?.platform,
-//     found?.provider
-//   );
-// };
-
-// const extractSocialProfiles = (influencer = {}) => {
-//   if (Array.isArray(influencer.socialProfiles)) {
-//     return influencer.socialProfiles.map((profile) => ({
-//       provider: profile.provider || "",
-//       handle: profile.handle || "",
-//       username: profile.username || "",
-//       followers: Number(profile.followers || 0),
-//       url: profile.url || "",
-//       picture: profile.picture || "",
-//     }));
-//   }
-
-//   const pages = flattenPageData(influencer);
-
-//   const profiles = [];
-
-//   for (const item of pages) {
-//     if (Array.isArray(item?.socialProfiles)) {
-//       profiles.push(...item.socialProfiles);
-//       continue;
-//     }
-
-//     if (
-//       item?.provider ||
-//       item?.platform ||
-//       item?.handle ||
-//       item?.username ||
-//       item?.followers ||
-//       item?.url
-//     ) {
-//       profiles.push(item);
-//     }
-//   }
-
-//   return profiles.map((profile) => ({
-//     provider: profile.provider || profile.platform || "",
-//     handle: profile.handle || "",
-//     username: profile.username || "",
-//     followers: Number(profile.followers || profile.followerCount || 0),
-//     url: profile.url || profile.profileUrl || "",
-//     picture: profile.picture || profile.profilePicture || profile.image || "",
-//   }));
-// };
-
-// const toInfluencerDashboardRow = (influencer = {}) => {
-//   return {
-//     _id: String(influencer._id || ""),
-//     influencerId: String(influencer._id || ""),
-
-//     email: influencer.email || "",
-//     name: influencer.name || "",
-
-//     country: {
-//       _id: influencer.countryId ? String(influencer.countryId) : "",
-//       name: influencer.countryName || "",
-//     },
-
-//     languages: Array.isArray(influencer.languages)
-//       ? influencer.languages.map((item) => ({
-//         _id: item?._id ? String(item._id) : "",
-//         name: item?.name || "",
-//       }))
-//       : [],
-
-//     categories: Array.isArray(influencer.categories)
-//       ? influencer.categories.map((item) => ({
-//         _id: item?._id ? String(item._id) : "",
-//         name: item?.name || "",
-//       }))
-//       : [],
-
-//     proxyEmail: influencer.proxyEmail || "",
-
-//     primaryPlatform: extractPrimaryPlatform(influencer),
-
-//     socialProfiles: extractSocialProfiles(influencer),
-
-//     pageCounts: {
-//       page1: Array.isArray(influencer.page1) ? influencer.page1.length : 0,
-//       page2: Array.isArray(influencer.page2) ? influencer.page2.length : 0,
-//       page3: Array.isArray(influencer.page3) ? influencer.page3.length : 0,
-//     },
-
-//     onboarding: {
-//       route: "campaign",
-//       page1Done: Array.isArray(influencer.page1) && influencer.page1.length > 0,
-//       page2Done:
-//         Boolean(influencer.ispage2Skip) ||
-//         (Array.isArray(influencer.page2) && influencer.page2.length > 0),
-//       page3Done:
-//         Boolean(influencer.ispage3Skip) ||
-//         (Array.isArray(influencer.page3) && influencer.page3.length > 0),
-//       ispage2Skip: Boolean(influencer.ispage2Skip),
-//       ispage3Skip: Boolean(influencer.ispage3Skip),
-//     },
-
-//     createdAt: influencer.createdAt || null,
-//     updatedAt: influencer.updatedAt || null,
-//   };
-// };
-
-// const getInfluencersList = async (req) => {
-//   const { page, limit } = getPagination(req, "influencers");
-//   const search = getSearch(req, "influencers");
-
-//   const sortBy = String(
-//     req.body?.influencersSortBy ||
-//     req.query?.influencersSortBy ||
-//     "name"
-//   ).trim();
-
-//   const sortOrder = normalizeSortOrder(
-//     req.body?.influencersSortOrder || req.query?.influencersSortOrder,
-//     "asc"
-//   );
-
-//   const allowedSortFields = new Set([
-//     "name",
-//     "email",
-//     "countryName",
-//     "createdAt",
-//   ]);
-
-//   const field = allowedSortFields.has(sortBy) ? sortBy : "name";
-//   const dir = sortOrder === "desc" ? -1 : 1;
-
-//   const filter = {};
-//   const re = safeRegex(search);
-
-//   if (re) {
-//     filter.$or = [
-//       { name: re },
-//       { email: re },
-//       { countryName: re },
-//       { proxyEmail: re },
-//     ];
-//   }
-
-//   const total = await Influencer.countDocuments(filter);
-
-//   const rows = await Influencer.find(filter)
-//     .select(
-//       `
-//         _id
-//         email
-//         name
-//         countryId
-//         countryName
-//         languages
-//         categories
-//         proxyEmail
-//         primaryPlatform
-//         socialProfiles
-//         page1
-//         page2
-//         page3
-//         ispage2Skip
-//         ispage3Skip
-//         createdAt
-//         updatedAt
-//       `
-//     )
-//     .sort({ [field]: dir, createdAt: -1 })
-//     .skip((page - 1) * limit)
-//     .limit(limit)
-//     .lean();
-
-//   const influencers = rows.map(toInfluencerDashboardRow);
-
-//   return {
-//     page,
-//     limit,
-//     total,
-//     totalPages: Math.max(1, Math.ceil(total / limit)),
-//     sortBy: field,
-//     sortOrder,
-//     influencers,
-//   };
-// };
-
-// // ------------------------- campaigns list -------------------------
-
-// const getCampaignSortField = (sortBy = "createdAt") => {
-//   const allowed = new Set([
-//     "createdAt",
-//     "updatedAt",
-//     "campaignTitle",
-//     "productOrServiceName",
-//     "brandName",
-//     "budget",
-//     "campaignBudget",
-//     "applicantCount",
-//     "isActive",
-//     "timeline.startDate",
-//     "timeline.endDate",
-//   ]);
-
-//   return allowed.has(sortBy) ? sortBy : "createdAt";
-// };
-
-// const toCampaignSummary = (doc = {}) => {
-//   const timeline = doc.timeline || {};
-
-//   const campaignId = String(
-//     doc.campaignsId ||
-//     doc.campaignId ||
-//     doc._id ||
-//     ""
-//   );
-
-//   return {
-//     _id: String(doc._id || ""),
-//     id: campaignId,
-//     campaignId,
-//     campaignsId: doc.campaignsId || "",
-
-//     brandId: String(doc.brandId || ""),
-//     brandName: doc.brandName || "",
-
-//     name: doc.campaignTitle || "",
-//     campaignName: doc.campaignTitle || "",
-//     campaignTitle: doc.campaignTitle || "",
-
-//     productOrServiceName: doc.productOrServiceName || "",
-//     goal: doc.goal || "",
-
-//     budget: Number(doc.budget || doc.campaignBudget || 0),
-//     campaignBudget: Number(doc.campaignBudget || doc.budget || 0),
-
-//     applicantCount: Number(doc.applicantCount || 0),
-//     isActive: Number(doc.isActive || 0),
-//     isDraft: Number(doc.isDraft || 0),
-//     byAi: doc.byAi || false,
-//     createdBy: doc.createdBy || null,
-
-//     campaignStatus: doc.campaignStatus || "",
-//     startDate: timeline.startDate || null,
-//     endDate: timeline.endDate || null,
-
-//     createdAt: doc.createdAt || null,
-//     updatedAt: doc.updatedAt || null,
-//   };
-// };
-
-// const getCampaignsList = async (req, options = {}) => {
-//   const { page, limit } = getPagination(req, "campaigns");
-//   const search = getSearch(req, "campaigns");
-
-//   const sortBy = String(
-//     req.body?.campaignsSortBy ||
-//     req.query?.campaignsSortBy ||
-//     "createdAt"
-//   ).trim();
-
-//   const sortOrder = normalizeSortOrder(
-//     req.body?.campaignsSortOrder || req.query?.campaignsSortOrder,
-//     "desc"
-//   );
-
-//   const status = String(
-//     req.body?.campaignStatus ||
-//     req.query?.campaignStatus ||
-//     req.body?.status ||
-//     req.query?.status ||
-//     "all"
-//   )
-//     .trim()
-//     .toLowerCase();
-
-//   const brandId = String(req.body?.brandId || req.query?.brandId || "").trim();
-
-//   const andFilters = [];
-
-//   if (Array.isArray(options.brandKeys)) {
-//     andFilters.push(makeBrandScopeFilter(options.brandKeys));
-//   }
-
-//   if (brandId) {
-//     const { stringValues, objectIds } = brandIdVariantsFromValues([brandId]);
-
-//     andFilters.push({
-//       $or: [
-//         { brandId: { $in: stringValues } },
-//         { brandId: { $in: objectIds } },
-//       ],
-//     });
-//   }
-
-//   const re = safeRegex(search);
-
-//   if (re) {
-//     andFilters.push({
-//       $or: [
-//         { campaignTitle: re },
-//         { productOrServiceName: re },
-//         { brandName: re },
-//         { description: re },
-//         { goal: re },
-//         { campaignStatus: re },
-//       ],
-//     });
-//   }
-
-//   if (status !== "all") {
-//     if (status === "active") {
-//       andFilters.push({
-//         $or: [
-//           { isActive: true },
-//           { isActive: 1 },
-//           { campaignStatus: { $regex: "active", $options: "i" } },
-//         ],
-//       });
-//     } else if (status === "completed" || status === "complete") {
-//       andFilters.push({
-//         $or: [
-//           { campaignStatus: { $regex: "completed", $options: "i" } },
-//           { campaignStatus: { $regex: "complete", $options: "i" } },
-//           { "timeline.endDate": { $lt: new Date() } },
-//         ],
-//       });
-//     } else if (status === "draft") {
-//       andFilters.push({
-//         $or: [
-//           { isDraft: true },
-//           { isDraft: 1 },
-//           { campaignStatus: { $regex: "draft", $options: "i" } },
-//         ],
-//       });
-//     } else {
-//       andFilters.push({
-//         campaignStatus: { $regex: status, $options: "i" },
-//       });
-//     }
-//   }
-
-//   const filter = andFilters.length ? { $and: andFilters } : {};
-
-//   const field = getCampaignSortField(sortBy);
-//   const dir = sortOrder === "asc" ? 1 : -1;
-
-//   const total = await Campaign.countDocuments(filter);
-
-//   const rows = await Campaign.find(filter)
-//     .select(
-//       `
-//         _id
-//         brandId
-//         brandName
-//         campaignsId
-//         campaignId
-//         campaignTitle
-//         productOrServiceName
-//         goal
-//         budget
-//         campaignBudget
-//         applicantCount
-//         isActive
-//         isDraft
-//         byAi
-//         createdBy
-//         campaignStatus
-//         timeline.startDate
-//         timeline.endDate
-//         createdAt
-//         updatedAt
-//       `
-//     )
-//     .sort({ [field]: dir, createdAt: -1 })
-//     .skip((page - 1) * limit)
-//     .limit(limit)
-//     .lean();
-
-//   const campaigns = rows.map(toCampaignSummary);
-
-//   return {
-//     page,
-//     limit,
-//     total,
-//     totalPages: Math.max(1, Math.ceil(total / limit)),
-//     status,
-//     sortBy: field,
-//     sortOrder,
-//     campaigns,
-//   };
-// };
-
-// // ------------------------- disputes list -------------------------
-
-// const normalizeStatusInput = (value) => {
-//   const clean = String(value || "").trim();
-
-//   if (!clean || clean === "0" || clean.toLowerCase() === "all") {
-//     return "__ALL__";
-//   }
-
-//   return clean;
-// };
-
-// const getDisputesList = async (req) => {
-//   const { page, limit } = getPagination(req, "disputes");
-
-//   const status = req.body?.disputeStatus || req.query?.disputeStatus || req.body?.status;
-//   const campaignId = req.body?.campaignId || req.query?.campaignId;
-//   const brandId = req.body?.brandId || req.query?.brandId;
-//   const influencerId = req.body?.influencerId || req.query?.influencerId;
-//   const appliedBy = req.body?.appliedBy || req.query?.appliedBy;
-//   const search = getSearch(req, "disputes");
-
-//   const filter = {};
-
-//   const normalizedStatus = normalizeStatusInput(status);
-
-//   if (normalizedStatus && normalizedStatus !== "__ALL__") {
-//     filter.status = normalizedStatus;
-//   }
-
-//   if (campaignId) filter.campaignId = String(campaignId);
-//   if (brandId) filter.brandId = String(brandId);
-//   if (influencerId) filter.influencerId = String(influencerId);
-
-//   const re = safeRegex(search);
-
-//   if (re) {
-//     filter.$or = [
-//       { subject: re },
-//       { description: re },
-//       { disputeId: re },
-//     ];
-//   }
-
-//   if (appliedBy && typeof appliedBy === "string") {
-//     const role = String(appliedBy).toLowerCase();
-
-//     if (role === "brand") filter["createdBy.role"] = "Brand";
-//     if (role === "influencer") filter["createdBy.role"] = "Influencer";
-//   }
-
-//   const total = await Dispute.countDocuments(filter);
-
-//   const rows = await Dispute.find(filter)
-//     .sort({ createdAt: -1 })
-//     .skip((page - 1) * limit)
-//     .limit(limit)
-//     .lean();
-
-//   const brandIds = [...new Set(rows.map((r) => String(r.brandId || "")).filter(Boolean))];
-//   const influencerIds = [...new Set(rows.map((r) => String(r.influencerId || "")).filter(Boolean))];
-//   const campaignIds = [...new Set(rows.map((r) => String(r.campaignId || "")).filter(Boolean))];
-
-//   const brandObjectIds = brandIds.filter(isObjectId).map(toObjectId);
-//   const influencerObjectIds = influencerIds.filter(isObjectId).map(toObjectId);
-//   const campaignObjectIds = campaignIds.filter(isObjectId).map(toObjectId);
-
-//   const [brands, influencers, campaigns] = await Promise.all([
-//     brandIds.length
-//       ? Brand.find({
-//         $or: [
-//           { _id: { $in: brandObjectIds } },
-//           { brandId: { $in: brandIds } },
-//         ],
-//       })
-//         .select("_id brandId name brandName")
-//         .lean()
-//       : [],
-
-//     influencerIds.length
-//       ? Influencer.find({
-//         $or: [
-//           { _id: { $in: influencerObjectIds } },
-//           { influencerId: { $in: influencerIds } },
-//         ],
-//       })
-//         .select("_id influencerId name")
-//         .lean()
-//       : [],
-
-//     campaignIds.length
-//       ? Campaign.find({
-//         $or: [
-//           { _id: { $in: campaignObjectIds } },
-//           { campaignsId: { $in: campaignIds } },
-//           { campaignId: { $in: campaignIds } },
-//         ],
-//       })
-//         .select("_id campaignsId campaignId campaignTitle")
-//         .lean()
-//       : [],
-//   ]);
-
-//   const brandMap = new Map();
-//   brands.forEach((brand) => {
-//     const name = brand.brandName || brand.name || null;
-//     brandMap.set(String(brand._id), name);
-//     if (brand.brandId) brandMap.set(String(brand.brandId), name);
-//   });
-
-//   const influencerMap = new Map();
-//   influencers.forEach((influencer) => {
-//     influencerMap.set(String(influencer._id), influencer.name || null);
-//     if (influencer.influencerId) {
-//       influencerMap.set(String(influencer.influencerId), influencer.name || null);
-//     }
-//   });
-
-//   const campaignMap = new Map();
-//   campaigns.forEach((campaign) => {
-//     campaignMap.set(String(campaign._id), campaign.campaignTitle || null);
-//     if (campaign.campaignsId) {
-//       campaignMap.set(String(campaign.campaignsId), campaign.campaignTitle || null);
-//     }
-//     if (campaign.campaignId) {
-//       campaignMap.set(String(campaign.campaignId), campaign.campaignTitle || null);
-//     }
-//   });
-
-//   const disputes = rows.map((row) => {
-//     return {
-//       ...row,
-//       brandName: brandMap.get(String(row.brandId || "")) || null,
-//       influencerName: influencerMap.get(String(row.influencerId || "")) || null,
-//       campaignName: campaignMap.get(String(row.campaignId || "")) || null,
-//       raisedByRole: row.createdBy?.role || null,
-//       raisedById: row.createdBy?.id || null,
-//     };
-//   });
-
-//   return {
-//     page,
-//     limit,
-//     total,
-//     totalPages: Math.max(1, Math.ceil(total / limit)),
-//     disputes,
-//   };
-// };
-
-// // ------------------------- influencer campaigns using ApplyCampaign -------------------------
-
-// const getApplicantStatus = (applicant = {}, fromApprovedArray = false) => {
-//   const statusBrand = String(applicant?.statusBrand || "").toLowerCase();
-//   const statusInfluencer = String(applicant?.statusInfluencer || "").toLowerCase();
-
-//   if (
-//     Number(applicant?.isRejected || 0) === 1 ||
-//     statusBrand.includes("rejected") ||
-//     statusInfluencer.includes("rejected")
-//   ) {
-//     return "rejected";
-//   }
-
-//   if (
-//     fromApprovedArray ||
-//     statusBrand.includes("contractaccept") ||
-//     statusInfluencer.includes("contractaccept")
-//   ) {
-//     return "approved";
-//   }
-
-//   if (Number(applicant?.isShortlisted || 0) === 1) {
-//     return "shortlisted";
-//   }
-
-//   if (Number(applicant?.isUndicided || 0) === 1) {
-//     return "undecided";
-//   }
-
-//   if (statusBrand) return statusBrand;
-//   if (statusInfluencer) return statusInfluencer;
-
-//   return "active";
-// };
-
-// const getCampaignsByInfluencerIdDashboard = async (req, options = {}) => {
-//   const influencerId = String(
-//     req.body?.influencerId ||
-//     req.query?.influencerId ||
-//     req.params?.influencerId ||
-//     req.body?.id ||
-//     ""
-//   ).trim();
-
-//   const { page, limit } = getPagination(req, "influencerCampaigns");
-//   const search = getSearch(req, "influencerCampaigns");
-
-//   const sortBy = String(
-//     req.body?.influencerCampaignsSortBy ||
-//     req.query?.influencerCampaignsSortBy ||
-//     "createdAt"
-//   ).trim();
-
-//   const sortOrder = normalizeSortOrder(
-//     req.body?.influencerCampaignsSortOrder ||
-//     req.query?.influencerCampaignsSortOrder,
-//     "desc"
-//   );
-
-//   const statusFilter = String(
-//     req.body?.influencerCampaignStatus ||
-//     req.query?.influencerCampaignStatus ||
-//     "all"
-//   )
-//     .trim()
-//     .toLowerCase();
-
-//   if (!influencerId) {
-//     return null;
-//   }
-
-//   const influencerFilter = isObjectId(influencerId)
-//     ? {
-//       $or: [
-//         { _id: toObjectId(influencerId) },
-//         { influencerId },
-//       ],
-//     }
-//     : { influencerId };
-
-//   const influencer = await Influencer.findOne(influencerFilter)
-//     .select("_id influencerId name email")
-//     .lean();
-
-//   if (!influencer) {
-//     return {
-//       success: false,
-//       message: "Influencer not found",
-//       page,
-//       limit,
-//       total: 0,
-//       totalPages: 1,
-//       count: 0,
-//       campaigns: [],
-//     };
-//   }
-
-//   const influencerLookupValues = [
-//     influencerId,
-//     String(influencer._id || ""),
-//     String(influencer.influencerId || ""),
-//   ].filter(Boolean);
-
-//   const applyRows = await ApplyCampaign.find({
-//     $or: [
-//       { "applicants.influencerId": { $in: influencerLookupValues } },
-//       { "approved.influencerId": { $in: influencerLookupValues } },
-//     ],
-//   })
-//     .select("campaignId applicants approved createdAt updatedAt")
-//     .lean();
-
-//   const applyMap = new Map();
-
-//   for (const row of applyRows) {
-//     const campaignId = String(row?.campaignId || "").trim();
-//     if (!campaignId) continue;
-
-//     const applicants = Array.isArray(row?.applicants) ? row.applicants : [];
-//     const approved = Array.isArray(row?.approved) ? row.approved : [];
-
-//     let applicant =
-//       approved.find((item) =>
-//         influencerLookupValues.includes(String(item?.influencerId || ""))
-//       ) || null;
-
-//     let fromApprovedArray = false;
-
-//     if (applicant) {
-//       fromApprovedArray = true;
-//     } else {
-//       applicant =
-//         applicants.find((item) =>
-//           influencerLookupValues.includes(String(item?.influencerId || ""))
-//         ) || null;
-//     }
-
-//     if (!applicant) continue;
-
-//     applyMap.set(campaignId, {
-//       campaignId,
-//       applicant,
-//       fromApprovedArray,
-//       status: getApplicantStatus(applicant, fromApprovedArray),
-//       appliedAt: applicant?.appliedAt || row?.createdAt || null,
-//     });
-//   }
-
-//   const appliedCampaignIds = [...applyMap.keys()];
-
-//   if (!appliedCampaignIds.length) {
-//     return {
-//       success: true,
-//       page,
-//       limit,
-//       total: 0,
-//       totalPages: 1,
-//       count: 0,
-//       campaigns: [],
-//       influencer: {
-//         _id: String(influencer._id || ""),
-//         influencerId: influencer.influencerId || influencerId,
-//         name: influencer.name || "",
-//         email: influencer.email || "",
-//       },
-//     };
-//   }
-
-//   const campaignObjectIds = appliedCampaignIds.filter(isObjectId).map(toObjectId);
-
-//   const andFilters = [
-//     {
-//       $or: [
-//         { _id: { $in: campaignObjectIds } },
-//         { campaignsId: { $in: appliedCampaignIds } },
-//         { campaignId: { $in: appliedCampaignIds } },
-//       ],
-//     },
-//   ];
-
-//   if (Array.isArray(options.brandKeys)) {
-//     andFilters.push(makeBrandScopeFilter(options.brandKeys));
-//   }
-
-//   const re = safeRegex(search);
-
-//   if (re) {
-//     andFilters.push({
-//       $or: [
-//         { campaignTitle: re },
-//         { productOrServiceName: re },
-//         { brandName: re },
-//         { description: re },
-//         { goal: re },
-//       ],
-//     });
-//   }
-
-//   const campaignDocs = await Campaign.find({ $and: andFilters })
-//     .select(
-//       `
-//         _id
-//         brandId
-//         brandName
-//         campaignsId
-//         campaignId
-//         campaignTitle
-//         productOrServiceName
-//         goal
-//         budget
-//         campaignBudget
-//         applicantCount
-//         isActive
-//         isDraft
-//         campaignStatus
-//         timeline.startDate
-//         timeline.endDate
-//         createdAt
-//         updatedAt
-//       `
-//     )
-//     .lean();
-
-//   const normalized = campaignDocs.map((doc) => {
-//     const summary = toCampaignSummary(doc);
-
-//     const possibleKeys = [
-//       String(doc._id || ""),
-//       String(doc.campaignsId || ""),
-//       String(doc.campaignId || ""),
-//     ].filter(Boolean);
-
-//     const applyInfo =
-//       possibleKeys.map((key) => applyMap.get(key)).find(Boolean) || null;
-
-//     const applicant = applyInfo?.applicant || {};
-
-//     return {
-//       ...summary,
-//       appliedDate: applyInfo?.appliedAt || doc.createdAt || null,
-//       status: applyInfo?.status || "active",
-//       statusBrand: applicant.statusBrand || "",
-//       statusInfluencer: applicant.statusInfluencer || "",
-//       isShortlisted: Number(applicant.isShortlisted || 0),
-//       isUndicided: Number(applicant.isUndicided || 0),
-//       isRejected: Number(applicant.isRejected || 0),
-//       contractId: applicant.contractId || "",
-//     };
-//   });
-
-//   const filteredByStatus =
-//     statusFilter === "all"
-//       ? normalized
-//       : normalized.filter((item) => {
-//         if (statusFilter === "active") {
-//           return item.status !== "rejected";
-//         }
-
-//         return (
-//           item.status === statusFilter ||
-//           String(item.statusBrand || "").toLowerCase() === statusFilter ||
-//           String(item.statusInfluencer || "").toLowerCase() === statusFilter
-//         );
-//       });
-
-//   const field = getCampaignSortField(sortBy);
-//   const dir = sortOrder === "asc" ? 1 : -1;
-
-//   const sorted = [...filteredByStatus].sort((a, b) => {
-//     let aValue;
-//     let bValue;
-
-//     switch (field) {
-//       case "campaignTitle":
-//         aValue = a.campaignTitle || "";
-//         bValue = b.campaignTitle || "";
-//         break;
-
-//       case "productOrServiceName":
-//         aValue = a.productOrServiceName || "";
-//         bValue = b.productOrServiceName || "";
-//         break;
-
-//       case "brandName":
-//         aValue = a.brandName || "";
-//         bValue = b.brandName || "";
-//         break;
-
-//       case "budget":
-//       case "campaignBudget":
-//         aValue = Number(a.budget || a.campaignBudget || 0);
-//         bValue = Number(b.budget || b.campaignBudget || 0);
-//         break;
-
-//       case "isActive":
-//         aValue = Number(a.isActive || 0);
-//         bValue = Number(b.isActive || 0);
-//         break;
-
-//       case "timeline.startDate":
-//         aValue = new Date(a.startDate || 0).getTime();
-//         bValue = new Date(b.startDate || 0).getTime();
-//         break;
-
-//       case "timeline.endDate":
-//         aValue = new Date(a.endDate || 0).getTime();
-//         bValue = new Date(b.endDate || 0).getTime();
-//         break;
-
-//       case "updatedAt":
-//         aValue = new Date(a.updatedAt || 0).getTime();
-//         bValue = new Date(b.updatedAt || 0).getTime();
-//         break;
-
-//       case "createdAt":
-//       default:
-//         aValue = new Date(a.appliedDate || a.createdAt || 0).getTime();
-//         bValue = new Date(b.appliedDate || b.createdAt || 0).getTime();
-//         break;
-//     }
-
-//     if (typeof aValue === "number" && typeof bValue === "number") {
-//       return (aValue - bValue) * dir;
-//     }
-
-//     return (
-//       String(aValue).localeCompare(String(bValue), undefined, {
-//         numeric: true,
-//         sensitivity: "base",
-//       }) * dir
-//     );
-//   });
-
-//   const total = sorted.length;
-//   const totalPages = Math.max(1, Math.ceil(total / limit));
-//   const campaigns = sorted.slice((page - 1) * limit, page * limit);
-
-//   return {
-//     success: true,
-//     page,
-//     limit,
-//     total,
-//     totalPages,
-//     count: campaigns.length,
-//     sortBy: field,
-//     sortOrder,
-//     status: statusFilter,
-//     campaigns,
-//     influencer: {
-//       _id: String(influencer._id || ""),
-//       influencerId: influencer.influencerId || influencerId,
-//       name: influencer.name || "",
-//       email: influencer.email || "",
-//     },
-//   };
-// };
-
-// // ------------------------- dashboard builders -------------------------
-
-// const getSuperAdminDashboard = async (req) => {
-//   const [
-//     revenueMetrics,
-//     brands,
-//     influencers,
-//     campaigns,
-//     disputes,
-//     totalBrands,
-//     totalInfluencers,
-//     totalCampaigns,
-//     totalDisputes,
-//   ] = await Promise.all([
-//     getRevenueMetrics(),
-//     getBrandsList(req),
-//     getInfluencersList(req),
-//     getCampaignsList(req),
-//     getDisputesList(req),
-//     getModelCount(Brand, {}),
-//     getModelCount(Influencer, {}),
-//     getModelCount(Campaign, {}),
-//     getModelCount(Dispute, {}),
-//   ]);
-
-//   const influencerCampaigns = await getCampaignsByInfluencerIdDashboard(req);
-
-//   return {
-//     summary: {
-//       totalBrands,
-//       totalInfluencers,
-//       totalCampaigns,
-//       totalDisputes,
-//       ...revenueMetrics,
-//     },
-//     brands,
-//     influencers,
-//     campaigns,
-//     disputes,
-//     ...(influencerCampaigns ? { influencerCampaigns } : {}),
-//   };
-// };
-
-// const getRevenueHeadDashboard = async (req) => {
-//   const [revenueMetrics, unassignedBrands] = await Promise.all([
-//     getRevenueMetrics(),
-//     getUnassignedBrands(req),
-//   ]);
-
-//   return {
-//     totalRevenueThisMonth: revenueMetrics.totalRevenueThisMonth,
-//     totalRevenueThisQuarter: revenueMetrics.totalRevenueThisQuarter,
-//     totalRevenueThisYear: revenueMetrics.totalRevenueThisYear,
-//     activeCampaigns: revenueMetrics.activeCampaigns,
-//     completedCampaigns: revenueMetrics.completedCampaigns,
-//     unassignedBrands,
-//   };
-// };
-
-// const getImeBmeDashboard = async (req, role) => {
-//   const actor = getActor(req);
-//   const brandScopeFilter = getRoleBrandScopeFilter(role, actor);
-//   const brandKeys = await getScopedBrandKeysForRole(role, actor);
-
-//   if (Array.isArray(brandKeys) && !brandKeys.length) {
-//     return {
-//       summary: {
-//         totalAssignedBrands: 0,
-//         assignedCampaigns: 0,
-//         activeCampaigns: 0,
-//         completedCampaigns: 0,
-//       },
-//       brands: {
-//         page: 1,
-//         limit: 10,
-//         total: 0,
-//         totalPages: 1,
-//         brands: [],
-//       },
-//       campaigns: {
-//         page: 1,
-//         limit: 10,
-//         total: 0,
-//         totalPages: 1,
-//         campaigns: [],
-//       },
-//     };
-//   }
-
-//   const [brands, campaigns, campaignCounts] = await Promise.all([
-//     getBrandsList(req, { extraFilter: brandScopeFilter }),
-//     getCampaignsList(req, { brandKeys }),
-//     getCampaignCounts({ brandKeys }),
-//   ]);
-
-//   return {
-//     summary: {
-//       totalAssignedBrands: brands.total,
-//       assignedCampaigns: campaigns.total,
-//       activeCampaigns: campaignCounts.activeCampaigns,
-//       completedCampaigns: campaignCounts.completedCampaigns,
-//     },
-//     brands,
-//     campaigns,
-//   };
-// };
-
-// // ------------------------- single combined admin dashboard API -------------------------
-
-// exports.getDashboard = async (req, res) => {
-//   try {
-//     const role = normalizeRole(req);
-
-//     if (!role) {
-//       return res.status(403).json({
-//         success: false,
-//         message: "Admin role not found",
-//       });
-//     }
-
-//     if (!Object.values(ROLES).includes(role)) {
-//       return res.status(403).json({
-//         success: false,
-//         message: "Unauthorized dashboard role",
-//         role,
-//       });
-//     }
-
-//     let dashboard;
-
-//     if (role === ROLES.SUPER_ADMIN) {
-//       dashboard = await getSuperAdminDashboard(req);
-//     }
-
-//     if (role === ROLES.REVENUE_HEAD) {
-//       dashboard = await getRevenueHeadDashboard(req);
-//     }
-
-//     if (role === ROLES.IME || role === ROLES.BME) {
-//       dashboard = await getImeBmeDashboard(req, role);
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       role,
-//       dashboard,
-//     });
-//   } catch (error) {
-//     console.error("Error in dashboard getDashboard:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//       error: error.message,
-//     });
-//   }
-// };
-
-
-// ------------------------- self-contained combined admin dashboard API -------------------------
-
-// ------------------------- self-contained combined admin dashboard API -------------------------
-
 const DASH_ROLES = {
   SUPER_ADMIN: "super_admin",
   REVENUE_HEAD: "revenue_head",
@@ -2096,13 +415,13 @@ const dashNormalizeRole = (req) => {
 
   const rawRole = String(
     actor.role ||
-      actor.adminRole ||
-      actor.roleName ||
-      actor.type ||
-      actor.userType ||
-      req.body?.role ||
-      req.query?.role ||
-      ""
+    actor.adminRole ||
+    actor.roleName ||
+    actor.type ||
+    actor.userType ||
+    req.body?.role ||
+    req.query?.role ||
+    ""
   )
     .trim()
     .toLowerCase();
@@ -2601,48 +920,158 @@ const dashComputeInfluencerRouteFallback = (doc = {}) => {
   };
 };
 
+const dashNormalizeSocialProfile = (profile = {}) => {
+  return {
+    provider: String(profile.provider || profile.platform || "").toLowerCase(),
+    handle: profile.handle || "",
+    username: profile.username || profile.userName || "",
+    followers: Number(profile.followers || profile.followerCount || 0),
+    url: profile.url || profile.profileUrl || "",
+    picture:
+      profile.picture ||
+      profile.profilePicture ||
+      profile.profileImage ||
+      profile.image ||
+      profile.avatar ||
+      "",
+  };
+};
+
+const dashExtractSocialProfilesFromInfluencer = (doc = {}) => {
+  if (Array.isArray(doc.socialProfiles) && doc.socialProfiles.length) {
+    return doc.socialProfiles.map(dashNormalizeSocialProfile);
+  }
+
+  const pages = [
+    ...(Array.isArray(doc.page1) ? doc.page1 : []),
+    ...(Array.isArray(doc.page2) ? doc.page2 : []),
+    ...(Array.isArray(doc.page3) ? doc.page3 : []),
+  ];
+
+  const profiles = [];
+
+  for (const item of pages) {
+    if (Array.isArray(item?.socialProfiles)) {
+      profiles.push(...item.socialProfiles);
+      continue;
+    }
+
+    if (
+      item?.provider ||
+      item?.platform ||
+      item?.handle ||
+      item?.username ||
+      item?.followers ||
+      item?.followerCount ||
+      item?.url ||
+      item?.profileUrl ||
+      item?.picture ||
+      item?.profilePicture ||
+      item?.profileImage ||
+      item?.image ||
+      item?.avatar
+    ) {
+      profiles.push(item);
+    }
+  }
+
+  return profiles.map(dashNormalizeSocialProfile);
+};
+
+const dashGetPrimaryPlatformFromProfiles = (doc = {}, profiles = []) => {
+  if (doc.primaryPlatform) {
+    return String(doc.primaryPlatform).toLowerCase();
+  }
+
+  const pages = [
+    ...(Array.isArray(doc.page1) ? doc.page1 : []),
+    ...(Array.isArray(doc.page2) ? doc.page2 : []),
+    ...(Array.isArray(doc.page3) ? doc.page3 : []),
+  ];
+
+  const primaryPageProfile =
+    pages.find((item) => item?.isPrimary) || pages[0] || null;
+
+  return String(
+    primaryPageProfile?.platform ||
+    primaryPageProfile?.provider ||
+    profiles?.[0]?.provider ||
+    ""
+  ).toLowerCase() || null;
+};
+
+const dashNormalizeHandle = (value, username = "") => {
+  const raw = value || username || "";
+  if (!raw) return null;
+
+  const clean = String(raw).trim();
+  return clean.startsWith("@") ? clean.toLowerCase() : `@${clean}`.toLowerCase();
+};
+
+const dashLoadSocialProfilesFromModashBulk = async (influencerIds = []) => {
+  const ids = influencerIds
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+
+  const objectIds = ids
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  if (!ids.length && !objectIds.length) {
+    return {};
+  }
+
+  const docs = await Modash.find(
+    {
+      $or: [
+        { influencerId: { $in: ids } },
+        { influencer: { $in: objectIds } },
+      ],
+    },
+    "influencer influencerId provider handle username followers url picture"
+  ).lean();
+
+  const grouped = {};
+
+  for (const d of docs) {
+    const profile = {
+      provider: d.provider || "",
+      handle: dashNormalizeHandle(d.handle, d.username),
+      username: d.username || null,
+      followers: Number(d.followers) || 0,
+      url: d.url || null,
+      picture: d.picture || null,
+    };
+
+    const keys = [
+      d.influencer ? String(d.influencer) : "",
+      d.influencerId ? String(d.influencerId) : "",
+    ].filter(Boolean);
+
+    for (const key of keys) {
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(profile);
+    }
+  }
+
+  return grouped;
+};
+
 const dashGetAdminInfluencerList = async (req) => {
-  const search = dashReadValue(
-    req,
-    ["influencersSearch", "influencerSearch", "search"],
-    ""
-  );
+  const source = {
+    ...(req.query || {}),
+    ...(req.body || {}),
+  };
 
-  const countryId = dashReadValue(
-    req,
-    ["influencersCountryId", "influencerCountryId", "countryId"],
-    ""
-  );
-
-  const languageId = dashReadValue(
-    req,
-    ["influencersLanguageId", "influencerLanguageId", "languageId"],
-    ""
-  );
-
-  const categoryId = dashReadValue(
-    req,
-    ["influencersCategoryId", "influencerCategoryId", "categoryId"],
-    ""
-  );
-
-  const hasProxyEmail = dashReadValue(
-    req,
-    ["influencersHasProxyEmail", "influencerHasProxyEmail", "hasProxyEmail"],
-    undefined
-  );
-
-  const sortBy = dashReadValue(
-    req,
-    ["influencersSortBy", "influencerSortBy", "sortBy"],
-    "createdAt"
-  );
-
-  const sortOrder = dashReadValue(
-    req,
-    ["influencersSortOrder", "influencerSortOrder", "sortOrder"],
-    "desc"
-  );
+  const {
+    search = "",
+    countryId = "",
+    languageId = "",
+    categoryId = "",
+    hasProxyEmail,
+    sortBy = "createdAt",
+    sortOrder = "desc",
+  } = source;
 
   const order = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
 
@@ -2720,10 +1149,18 @@ const dashGetAdminInfluencerList = async (req) => {
     .sort({ [finalSortBy]: order, _id: -1 })
     .lean();
 
-  const socialProfilesMap =
-    typeof loadSocialProfilesFromModashBulk === "function"
-      ? await loadSocialProfilesFromModashBulk(docs.map((doc) => doc._id))
-      : {};
+  const total = docs.length;
+
+  let socialProfilesMap = {};
+
+  try {
+    socialProfilesMap = await dashLoadSocialProfilesFromModashBulk(
+      docs.map((doc) => doc._id)
+    );
+  } catch (error) {
+    console.error("Error loading dashboard influencer social profiles:", error);
+    socialProfilesMap = {};
+  }
 
   const influencers = docs.map((doc) => {
     const routeInfo =
@@ -2738,43 +1175,53 @@ const dashGetAdminInfluencerList = async (req) => {
       page1Profiles[0] ||
       null;
 
+    const socialProfiles = socialProfilesMap[String(doc._id)] || [];
+
     const primaryPlatform = primaryPage1Profile
       ? String(
-          primaryPage1Profile.platform || primaryPage1Profile.provider || ""
-        ).toLowerCase() || null
-      : null;
-
-    const socialProfiles = socialProfilesMap[String(doc._id)] || [];
+        primaryPage1Profile.platform ||
+        primaryPage1Profile.provider ||
+        socialProfiles?.[0]?.provider ||
+        ""
+      ).toLowerCase() || null
+      : socialProfiles?.[0]?.provider || null;
 
     return {
       _id: doc._id,
       influencerId: String(doc._id),
       email: doc.email || "",
       name: doc.name || "",
+
       country: {
         _id: doc.countryId || null,
         name: doc.countryName || "",
       },
+
       languages: Array.isArray(doc.languages)
         ? doc.languages.map((item) => ({
-            _id: item?._id || null,
-            name: item?.name || "",
-          }))
+          _id: item?._id || null,
+          name: item?.name || "",
+        }))
         : [],
+
       categories: Array.isArray(doc.categories)
         ? doc.categories.map((item) => ({
-            _id: item?._id || null,
-            name: item?.name || "",
-          }))
+          _id: item?._id || null,
+          name: item?.name || "",
+        }))
         : [],
+
       proxyEmail: doc.proxyEmail || null,
+
       primaryPlatform,
       socialProfiles,
+
       pageCounts: {
         page1: Array.isArray(doc.page1) ? doc.page1.length : 0,
         page2: Array.isArray(doc.page2) ? doc.page2.length : 0,
         page3: Array.isArray(doc.page3) ? doc.page3.length : 0,
       },
+
       onboarding: {
         route: routeInfo.route,
         page1Done: routeInfo.page1Done,
@@ -2783,12 +1230,11 @@ const dashGetAdminInfluencerList = async (req) => {
         ispage2Skip: Boolean(doc.ispage2Skip),
         ispage3Skip: Boolean(doc.ispage3Skip),
       },
+
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
     };
   });
-
-  const total = influencers.length;
 
   return {
     success: true,
@@ -3105,36 +1551,36 @@ const dashGetAdminDisputesList = async (req) => {
     const [brands, influencers, campaigns] = await Promise.all([
       brandIds.length
         ? Brand.find({
-            $or: [
-              { _id: { $in: brandObjectIds } },
-              { brandId: { $in: brandIds } },
-            ],
-          })
-            .select("_id brandId name brandName")
-            .lean()
+          $or: [
+            { _id: { $in: brandObjectIds } },
+            { brandId: { $in: brandIds } },
+          ],
+        })
+          .select("_id brandId name brandName")
+          .lean()
         : [],
 
       influencerIds.length
         ? Influencer.find({
-            $or: [
-              { _id: { $in: influencerObjectIds } },
-              { influencerId: { $in: influencerIds } },
-            ],
-          })
-            .select("_id influencerId name")
-            .lean()
+          $or: [
+            { _id: { $in: influencerObjectIds } },
+            { influencerId: { $in: influencerIds } },
+          ],
+        })
+          .select("_id influencerId name")
+          .lean()
         : [],
 
       campaignIds.length
         ? Campaign.find({
-            $or: [
-              { _id: { $in: campaignObjectIds } },
-              { campaignsId: { $in: campaignIds } },
-              { campaignId: { $in: campaignIds } },
-            ],
-          })
-            .select("_id campaignsId campaignId campaignTitle")
-            .lean()
+          $or: [
+            { _id: { $in: campaignObjectIds } },
+            { campaignsId: { $in: campaignIds } },
+            { campaignId: { $in: campaignIds } },
+          ],
+        })
+          .select("_id campaignsId campaignId campaignTitle")
+          .lean()
         : [],
     ]);
 
@@ -3239,11 +1685,11 @@ const dashGetCampaignsByInfluencerId = async (req, options = {}) => {
   try {
     const influencerId = String(
       options.influencerId ||
-        dashReadValue(
-          req,
-          ["influencerCampaignInfluencerId", "campaignInfluencerId", "influencerId", "id"],
-          ""
-        )
+      dashReadValue(
+        req,
+        ["influencerCampaignInfluencerId", "campaignInfluencerId", "influencerId", "id"],
+        ""
+      )
     ).trim();
 
     const search = String(
@@ -3276,8 +1722,8 @@ const dashGetCampaignsByInfluencerId = async (req, options = {}) => {
 
     const sortOrder =
       rawSortOrder === 1 ||
-      rawSortOrder === "1" ||
-      String(rawSortOrder).toLowerCase() === "asc"
+        rawSortOrder === "1" ||
+        String(rawSortOrder).toLowerCase() === "asc"
         ? "asc"
         : "desc";
 
@@ -3428,12 +1874,12 @@ const dashGetCampaignsByInfluencerId = async (req, options = {}) => {
         },
         ...(debug
           ? {
-              debug: {
-                reason: "No ApplyCampaign rows found for this influencer",
-                influencerId,
-                applyRowsFound: applyRows.length,
-              },
-            }
+            debug: {
+              reason: "No ApplyCampaign rows found for this influencer",
+              influencerId,
+              applyRowsFound: applyRows.length,
+            },
+          }
           : {}),
       };
     }
@@ -3470,11 +1916,11 @@ const dashGetCampaignsByInfluencerId = async (req, options = {}) => {
           },
           ...(debug
             ? {
-                debug: {
-                  reason: "Admin has no visible brand keys",
-                  appliedCampaignIds,
-                },
-              }
+              debug: {
+                reason: "Admin has no visible brand keys",
+                appliedCampaignIds,
+              },
+            }
             : {}),
         };
       }
@@ -3560,16 +2006,16 @@ const dashGetCampaignsByInfluencerId = async (req, options = {}) => {
       statusFilter === "all"
         ? normalized
         : normalized.filter((item) => {
-            if (statusFilter === "active") {
-              return item.status !== "rejected";
-            }
+          if (statusFilter === "active") {
+            return item.status !== "rejected";
+          }
 
-            return (
-              item.status === statusFilter ||
-              String(item.statusBrand || "").toLowerCase() === statusFilter ||
-              String(item.statusInfluencer || "").toLowerCase() === statusFilter
-            );
-          });
+          return (
+            item.status === statusFilter ||
+            String(item.statusBrand || "").toLowerCase() === statusFilter ||
+            String(item.statusInfluencer || "").toLowerCase() === statusFilter
+          );
+        });
 
     const field = dashGetCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -3634,14 +2080,14 @@ const dashGetCampaignsByInfluencerId = async (req, options = {}) => {
       },
       ...(debug
         ? {
-            debug: {
-              influencerId,
-              visibleBrandKeys,
-              applyRowsFound: applyRows.length,
-              appliedCampaignIds,
-              campaignDocsFound: campaignDocs.length,
-            },
-          }
+          debug: {
+            influencerId,
+            visibleBrandKeys,
+            applyRowsFound: applyRows.length,
+            appliedCampaignIds,
+            campaignDocsFound: campaignDocs.length,
+          },
+        }
         : {}),
     };
   } catch (error) {
@@ -3808,6 +2254,546 @@ exports.getDashboard = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in dashboard getDashboard:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+
+// ------------------------- Revenue Head Details Dashboard -------------------------
+
+const rhDashIsObjectId = (id) => {
+  return mongoose.Types.ObjectId.isValid(String(id || ""));
+};
+
+const rhDashToObjectId = (id) => {
+  return new mongoose.Types.ObjectId(String(id));
+};
+
+const rhDashNormalizeRole = (role) => {
+  return String(role || "").trim().toLowerCase();
+};
+
+const rhDashSerializeAdmin = (admin) => {
+  if (!admin) return null;
+
+  return {
+    _id: String(admin._id || admin.adminId || ""),
+    adminId: String(admin._id || admin.adminId || ""),
+    name: admin.name || "",
+    email: admin.email || "",
+    role: rhDashNormalizeRole(admin.role),
+    status: admin.status || "",
+    proxyEmail: admin.proxyEmail || "",
+    teamType: admin.teamType || null,
+  };
+};
+
+const rhDashGetAdminId = (admin = {}) => {
+  return String(admin.adminId || admin._id || admin.id || "").trim();
+};
+
+const rhDashGetTargetRevenueHeadId = (req) => {
+  const admin = req.admin || {};
+  const role = rhDashNormalizeRole(admin.role);
+
+  if (role === MASTER_ROLES.REVENUE_HEAD) {
+    return rhDashGetAdminId(admin);
+  }
+
+  if (role === MASTER_ROLES.SUPER_ADMIN) {
+    return String(
+      req.body?.rhId ||
+      req.body?.RHId ||
+      req.body?.revenueHeadId ||
+      req.body?.adminId ||
+      req.query?.rhId ||
+      req.query?.RHId ||
+      req.query?.revenueHeadId ||
+      req.query?.adminId ||
+      ""
+    ).trim();
+  }
+
+  return "";
+};
+
+const rhDashBrandIdVariants = (brandIds = []) => {
+  const stringIds = brandIds
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+
+  const objectIds = stringIds
+    .filter((id) => rhDashIsObjectId(id))
+    .map((id) => rhDashToObjectId(id));
+
+  return {
+    stringIds,
+    objectIds,
+  };
+};
+
+const rhDashCampaignBrandFilter = (brandIds = []) => {
+  const { stringIds, objectIds } = rhDashBrandIdVariants(brandIds);
+
+  return {
+    $or: [
+      { brandId: { $in: objectIds } },
+      { brandId: { $in: stringIds } },
+    ],
+  };
+};
+
+const rhDashGetBrandDisplayName = (brand = {}) => {
+  return brand.brandName || brand.name || brand.companyName || "";
+};
+
+const rhDashGetBrandPlan = (brand = {}) => {
+  return {
+    planId: brand.subscription?.planId || brand.planId || null,
+    planName:
+      brand.subscription?.planName ||
+      brand.planName ||
+      brand.plan ||
+      "",
+    status:
+      brand.subscription?.status ||
+      brand.subscriptionStatus ||
+      brand.status ||
+      "",
+    billingCycle: brand.subscription?.billingCycle || null,
+    startedAt: brand.subscription?.startedAt || null,
+    expiresAt: brand.subscription?.expiresAt || brand.expiresAt || null,
+    subscription: brand.subscription || null,
+  };
+};
+
+const rhDashApplicantStatus = (applicant = {}, fromApprovedArray = false) => {
+  const statusBrand = String(applicant?.statusBrand || "").toLowerCase();
+  const statusInfluencer = String(applicant?.statusInfluencer || "").toLowerCase();
+
+  if (
+    Number(applicant?.isRejected || 0) === 1 ||
+    statusBrand.includes("rejected") ||
+    statusInfluencer.includes("rejected")
+  ) {
+    return "rejected";
+  }
+
+  if (
+    fromApprovedArray ||
+    statusBrand.includes("contractaccept") ||
+    statusInfluencer.includes("contractaccept") ||
+    statusBrand.includes("approved") ||
+    statusInfluencer.includes("approved") ||
+    statusBrand.includes("accepted") ||
+    statusInfluencer.includes("accepted")
+  ) {
+    return "approved";
+  }
+
+  if (Number(applicant?.isShortlisted || 0) === 1) {
+    return "shortlisted";
+  }
+
+  if (Number(applicant?.isUndicided || 0) === 1) {
+    return "undecided";
+  }
+
+  if (statusBrand) return statusBrand;
+  if (statusInfluencer) return statusInfluencer;
+
+  return "active";
+};
+
+const rhDashNormalizeApplicant = ({
+  applicant,
+  fromApprovedArray = false,
+  influencerMap = new Map(),
+}) => {
+  const influencerId = String(applicant?.influencerId || "").trim();
+  const influencer = influencerMap.get(influencerId) || null;
+
+  return {
+    ...applicant,
+    influencerId,
+    computedStatus: rhDashApplicantStatus(applicant, fromApprovedArray),
+    fromApprovedArray,
+    influencer: influencer
+      ? {
+        _id: String(influencer._id || ""),
+        influencerId: String(influencer._id || influencer.influencerId || ""),
+        name: influencer.name || "",
+        email: influencer.email || "",
+        proxyEmail: influencer.proxyEmail || "",
+        countryName: influencer.countryName || "",
+      }
+      : null,
+  };
+};
+
+const rhDashIsWorkingApplicant = (applicant = {}, fromApprovedArray = false) => {
+  const status = rhDashApplicantStatus(applicant, fromApprovedArray);
+
+  return ["approved", "contractaccept", "accepted"].some((item) =>
+    String(status || "").toLowerCase().includes(item)
+  );
+};
+
+exports.getRevenueHeadDetails = async (req, res) => {
+  try {
+    const loggedInAdmin = req.admin || {};
+    const loggedInRole = rhDashNormalizeRole(loggedInAdmin.role);
+
+    if (!loggedInAdmin?.adminId && !loggedInAdmin?._id) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin authentication required",
+      });
+    }
+
+    if (
+      loggedInRole !== MASTER_ROLES.REVENUE_HEAD &&
+      loggedInRole !== MASTER_ROLES.SUPER_ADMIN
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Revenue Head or Super Admin can access this dashboard",
+        role: loggedInRole,
+      });
+    }
+
+    const revenueHeadId = rhDashGetTargetRevenueHeadId(req);
+
+    if (!revenueHeadId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          loggedInRole === MASTER_ROLES.SUPER_ADMIN
+            ? "revenueHeadId / rhId is required for super admin"
+            : "Revenue Head id not found in token",
+      });
+    }
+
+    if (!rhDashIsObjectId(revenueHeadId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Revenue Head id",
+      });
+    }
+
+    const revenueHeadObjectId = rhDashToObjectId(revenueHeadId);
+
+    const revenueHead = await AdminModel.findById(revenueHeadObjectId)
+      .select("_id name email role status proxyEmail teamType createdAt updatedAt")
+      .lean();
+
+    if (!revenueHead) {
+      return res.status(404).json({
+        success: false,
+        message: "Revenue Head not found",
+      });
+    }
+
+    if (rhDashNormalizeRole(revenueHead.role) !== MASTER_ROLES.REVENUE_HEAD) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected admin is not a Revenue Head",
+        selectedRole: revenueHead.role,
+      });
+    }
+
+    const [brandAssignments, employees] = await Promise.all([
+      BrandAssigned.find({ RHId: revenueHeadObjectId })
+        .populate("RHId", "_id name email role status proxyEmail teamType")
+        .populate("bdmId", "_id name email role status proxyEmail teamType")
+        .populate("idmId", "_id name email role status proxyEmail teamType")
+        .sort({ createdAt: -1 })
+        .lean(),
+
+      AdminModel.find({
+        $or: [
+          { createdBy: revenueHeadObjectId },
+          { parentAdmin: revenueHeadObjectId },
+          { rootAdmin: revenueHeadObjectId },
+        ],
+        role: {
+          $in: [
+            MASTER_ROLES.BME,
+            MASTER_ROLES.IME,
+            MASTER_ROLES.SDR,
+          ],
+        },
+      })
+        .select("_id name email role status proxyEmail teamType createdAt updatedAt")
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    const assignedBrandObjectIds = [
+      ...new Set(
+        brandAssignments
+          .map((item) => String(item.brandId || ""))
+          .filter(Boolean)
+      ),
+    ];
+
+    const brandObjectIds = assignedBrandObjectIds
+      .filter((id) => rhDashIsObjectId(id))
+      .map((id) => rhDashToObjectId(id));
+
+    const brands = brandObjectIds.length
+      ? await Brand.find({ _id: { $in: brandObjectIds } })
+        .select("-password -__v")
+        .lean()
+      : [];
+
+    const brandMap = new Map(
+      brands.map((brand) => [String(brand._id), brand])
+    );
+
+    const assignedBrands = brandAssignments.map((assignment) => {
+      const brand = brandMap.get(String(assignment.brandId || "")) || null;
+
+      const assignedBME = rhDashSerializeAdmin(assignment.bdmId);
+      const assignedIDM = rhDashSerializeAdmin(assignment.idmId);
+      const assignedRH = rhDashSerializeAdmin(assignment.RHId);
+
+      return {
+        assignmentId: String(assignment._id || ""),
+        assignmentStatus: assignment.status || "",
+        assignedAt: assignment.createdAt || null,
+        updatedAt: assignment.updatedAt || null,
+
+        isFullyManaged: Boolean(assignedBME && assignedIDM),
+
+        assignedPersons: {
+          revenueHead: assignedRH,
+          bme: assignedBME,
+          idm: assignedIDM,
+        },
+
+        plan: brand ? rhDashGetBrandPlan(brand) : null,
+
+        brand: brand
+          ? {
+            ...brand,
+            _id: String(brand._id || ""),
+            brandName: rhDashGetBrandDisplayName(brand),
+          }
+          : {
+            _id: String(assignment.brandId || ""),
+            brandName: "",
+          },
+      };
+    });
+
+    const employeeRows = employees.map(rhDashSerializeAdmin);
+
+    const employeesByRole = {
+      bme: employeeRows.filter((item) => item.role === MASTER_ROLES.BME),
+      ime: employeeRows.filter((item) => item.role === MASTER_ROLES.IME),
+      sdr: employeeRows.filter((item) => item.role === MASTER_ROLES.SDR),
+    };
+
+    const campaignFilter = assignedBrandObjectIds.length
+      ? rhDashCampaignBrandFilter(assignedBrandObjectIds)
+      : { _id: null };
+
+    const campaignsRaw = await Campaign.find(campaignFilter)
+      .select("-__v")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const campaignKeys = [
+      ...new Set(
+        campaignsRaw
+          .flatMap((campaign) => [
+            String(campaign._id || ""),
+            String(campaign.campaignsId || ""),
+            String(campaign.campaignId || ""),
+          ])
+          .filter(Boolean)
+      ),
+    ];
+
+    const applyRows = campaignKeys.length
+      ? await ApplyCampaign.find({ campaignId: { $in: campaignKeys } })
+        .select("campaignId applicants approved createdAt updatedAt")
+        .lean()
+      : [];
+
+    const influencerIds = [
+      ...new Set(
+        applyRows
+          .flatMap((row) => [
+            ...(Array.isArray(row.applicants) ? row.applicants : []),
+            ...(Array.isArray(row.approved) ? row.approved : []),
+          ])
+          .map((item) => String(item?.influencerId || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const influencerObjectIds = influencerIds
+      .filter((id) => rhDashIsObjectId(id))
+      .map((id) => rhDashToObjectId(id));
+
+    const influencers = influencerObjectIds.length
+      ? await Influencer.find({
+        $or: [
+          { _id: { $in: influencerObjectIds } },
+          { influencerId: { $in: influencerIds } },
+        ],
+      })
+        .select("_id influencerId name email proxyEmail countryName")
+        .lean()
+      : [];
+
+    const influencerMap = new Map();
+
+    influencers.forEach((influencer) => {
+      influencerMap.set(String(influencer._id), influencer);
+
+      if (influencer.influencerId) {
+        influencerMap.set(String(influencer.influencerId), influencer);
+      }
+    });
+
+    const applyMap = new Map();
+
+    for (const row of applyRows) {
+      const key = String(row.campaignId || "").trim();
+      if (!key) continue;
+
+      if (!applyMap.has(key)) {
+        applyMap.set(key, []);
+      }
+
+      applyMap.get(key).push(row);
+    }
+
+    let totalApplicants = 0;
+    let totalApprovedApplicants = 0;
+    let totalWorkingApplicants = 0;
+
+    const campaigns = campaignsRaw.map((campaign) => {
+      const possibleKeys = [
+        String(campaign._id || ""),
+        String(campaign.campaignsId || ""),
+        String(campaign.campaignId || ""),
+      ].filter(Boolean);
+
+      const campaignApplyRows = possibleKeys
+        .flatMap((key) => applyMap.get(key) || []);
+
+      const applicants = campaignApplyRows.flatMap((row) =>
+        Array.isArray(row.applicants) ? row.applicants : []
+      );
+
+      const approved = campaignApplyRows.flatMap((row) =>
+        Array.isArray(row.approved) ? row.approved : []
+      );
+
+      const normalizedApplicants = applicants.map((applicant) =>
+        rhDashNormalizeApplicant({
+          applicant,
+          fromApprovedArray: false,
+          influencerMap,
+        })
+      );
+
+      const normalizedApproved = approved.map((applicant) =>
+        rhDashNormalizeApplicant({
+          applicant,
+          fromApprovedArray: true,
+          influencerMap,
+        })
+      );
+
+      const workingApplicants = [
+        ...normalizedApproved,
+        ...normalizedApplicants.filter((item) =>
+          rhDashIsWorkingApplicant(item, false)
+        ),
+      ];
+
+      totalApplicants += normalizedApplicants.length;
+      totalApprovedApplicants += normalizedApproved.length;
+      totalWorkingApplicants += workingApplicants.length;
+
+      const brandId = String(campaign.brandId || "");
+      const brand =
+        brandMap.get(brandId) ||
+        brandMap.get(String(campaign.brandId?._id || "")) ||
+        null;
+
+      return {
+        ...campaign,
+        _id: String(campaign._id || ""),
+
+        brand: brand
+          ? {
+            _id: String(brand._id || ""),
+            brandName: rhDashGetBrandDisplayName(brand),
+            email: brand.email || "",
+            plan: rhDashGetBrandPlan(brand),
+          }
+          : null,
+
+        applicationSummary: {
+          totalApplyRows: campaignApplyRows.length,
+          totalApplicants: normalizedApplicants.length,
+          totalApprovedApplicants: normalizedApproved.length,
+          totalWorkingApplicants: workingApplicants.length,
+        },
+
+        applicants: normalizedApplicants,
+        approvedApplicants: normalizedApproved,
+        workingApplicants,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      role: loggedInRole,
+
+      revenueHead: rhDashSerializeAdmin(revenueHead),
+
+      summary: {
+        totalAssignedBrands: assignedBrands.length,
+        fullyManagedBrands: assignedBrands.filter((item) => item.isFullyManaged)
+          .length,
+        partiallyManagedBrands: assignedBrands.filter(
+          (item) => !item.isFullyManaged
+        ).length,
+
+        totalEmployees: employeeRows.length,
+        totalBME: employeesByRole.bme.length,
+        totalIME: employeesByRole.ime.length,
+        totalSDR: employeesByRole.sdr.length,
+
+        totalCampaigns: campaigns.length,
+        totalApplicants,
+        totalApprovedApplicants,
+        totalWorkingApplicants,
+      },
+
+      assignedBrands,
+
+      employees: {
+        all: employeeRows,
+        ...employeesByRole,
+      },
+
+      campaigns,
+    });
+  } catch (error) {
+    console.error("Error in getRevenueHeadDetails:", error);
 
     return res.status(500).json({
       success: false,

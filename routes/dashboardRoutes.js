@@ -5,7 +5,8 @@ const {
   verifyToken,
   getDashboard,
   getDashboardInf,
-  getBrandDashboardHome
+  getBrandDashboardHome,
+  getRevenueHeadDetails
 } = require('../controllers/dashboardController');
 const { adminAuth } = require("../middlewares/adminAuth");
 
@@ -16,5 +17,10 @@ router.post(
 );
 
 router.post("/dashboard", adminAuth,getDashboard);
+router.post(
+  "/revenueheaddetails",
+  adminAuth,
+  getRevenueHeadDetails
+);
 
 module.exports = router;
