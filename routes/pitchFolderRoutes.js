@@ -26,6 +26,7 @@ router.post('/:id/duplicate', adminAuth, controller.duplicateFolder);
 router.post('/archive', adminAuth, controller.archiveFolder);
 
 router.post('/:id/item', adminAuth, controller.addFolderItem);
+router.post('/:id/item/:itemId/activate-campaign', adminAuth, controller.activateFolderItemOnAssignedCampaign);
 router.post('/item/update', adminAuth, controller.updateFolderItem);
 router.post('/item/delete', adminAuth, controller.deleteFolderItem);
 router.post('/items/move', adminAuth, controller.moveFolderItems);

@@ -76,6 +76,17 @@ const MediaKitLinkSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const FolderItemCampaignActivationSchema = new mongoose.Schema(
+  {
+    campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', default: null, index: true },
+    campaignsId: { type: String, trim: true, default: '' },
+    influencerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Influencer', default: null, index: true },
+    activeAt: { type: Date, default: null },
+    activatedByAdminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Master', default: null },
+  },
+  { _id: false }
+);
+
 const FolderItemSchema = new mongoose.Schema(
   {
     provider: {
@@ -114,6 +125,11 @@ const FolderItemSchema = new mongoose.Schema(
 
     mediaKitLink: {
       type: MediaKitLinkSchema,
+      default: () => ({}),
+    },
+
+    campaignActivation: {
+      type: FolderItemCampaignActivationSchema,
       default: () => ({}),
     },
 
@@ -230,6 +246,7 @@ PitchFolderSchema.index(
 );
 
 PitchFolderSchema.index({ 'assignedCampaign.campaignId': 1, archivedAt: 1, updatedAt: -1 });
+PitchFolderSchema.index({ 'items.campaignActivation.campaignId': 1, 'items.campaignActivation.influencerId': 1 });
 PitchFolderSchema.index({ createdByAdmin: 1, archivedAt: 1, updatedAt: -1 });
 
 module.exports = mongoose.model('PitchFolder', PitchFolderSchema);
