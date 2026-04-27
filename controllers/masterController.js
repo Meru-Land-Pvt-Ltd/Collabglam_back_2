@@ -17,6 +17,7 @@ const {
 const { sendEmail } = require("../services/emailService");
 const { adminInviteEmailTemplate } = require("../template/inviteRole");
 const brand = require("../models/brand");
+const subscription = require("../models/subscription");
 const BrandAssigned = require("../models/brandAssigned");
 const mongoose = require("mongoose");
 const INVITE_EXP_MINUTES = Number(process.env.INVITE_EXP_MINUTES || 60);
@@ -2474,7 +2475,7 @@ exports.BrandInformation = async (req, res) => {
 
 const generateRandomCode = (length = 9) => {
   const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
   let code = "";
 
@@ -2496,13 +2497,14 @@ exports.CreateBrandCoupon = async (req, res) => {
       brandId,
       subscriptionId,
       newPrice,
+      mode,
       expiredAt,
     } = req.body;
 
-    if (!brandId || !subscriptionId || newPrice === undefined || !expiredAt) {
+    if (!brandId || !subscriptionId || newPrice === undefined || !expiredAt || !mode) {
       return res.status(400).json({
         success: false,
-        message: "brandId, subscriptionId, newPrice and expiredAt are required",
+        message: "brandId, subscriptionId, newPrice, expiredAt and mode are required",
       });
     }
 
@@ -2546,6 +2548,7 @@ exports.CreateBrandCoupon = async (req, res) => {
       brandId,
       subscriptionId,
       newPrice,
+      mode,
       promocode,
       hasUsed: false,
       expiredAt,
@@ -2564,6 +2567,31 @@ exports.CreateBrandCoupon = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to create brand coupon",
+      error: error.message,
+    });
+  }
+};
+exports.subscriptionList = async (req, res) => {
+  try {
+    const list = await subscription
+      .find({
+        status: "active",
+        role: "Brand",
+      })
+      .select("name monthlyCost annualCost currency")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription list fetched successfully",
+      data: list,
+    });
+  } catch (error) {
+    console.error("subscriptionList error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch subscription list",
       error: error.message,
     });
   }

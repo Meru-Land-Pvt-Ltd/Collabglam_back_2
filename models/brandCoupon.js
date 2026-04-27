@@ -13,6 +13,9 @@ const brandCouponSchema = new mongoose.Schema(
       ref: "SubscriptionPlan",
       required: true,
     },
+    mode:{
+      type: String,
+    },
 
     newPrice: {
       type: Number,
@@ -24,6 +27,7 @@ const brandCouponSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
    promocode:{
         type: String,
         required: true,
@@ -34,6 +38,7 @@ const brandCouponSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+
   },
   {
     timestamps: true,
