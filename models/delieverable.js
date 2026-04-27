@@ -86,6 +86,23 @@ const delieverableSchema = new Schema(
       trim: true,
     },
 
+    submittedByRole: {
+      type: String,
+      enum: ["Influencer", "Admin"],
+      default: "Influencer",
+    },
+
+    submittedByAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Master",
+      default: null,
+    },
+
+    submittedOnBehalfOfInfluencer: {
+      type: Boolean,
+      default: false,
+    },
+
     url: {
       type: [deliverableUrlSchema],
       default: [],
