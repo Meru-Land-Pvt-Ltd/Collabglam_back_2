@@ -22,6 +22,7 @@ const {
     getBrandProfile,
     updateBrandProfile,
     uploadBrandProfilePic,
+    verifyBrandCoupon
 } = require("../controllers/brandController");
 
 const { brandAuth } = require("../auth/brandAuth");
@@ -43,5 +44,6 @@ router.get("/:id", getBrandById);
 router.get("/lite",brandAuth, getBrandLiteById);
 router.post("/profile", brandAuth, getBrandProfile);
 router.post("/profile/update", brandAuth, updateBrandProfile);
+router.post("/verify-coupon", brandAuth, verifyBrandCoupon);
 
 module.exports = router;

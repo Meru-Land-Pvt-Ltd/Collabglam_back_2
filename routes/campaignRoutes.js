@@ -74,7 +74,7 @@ router.post(
   influencerAuth, 
   campaignController.getAllActiveCampaignsForInfluencer
 );
-
+router.get('/brand-list',influencerAuth,campaignController.getBrandListByCampaignId)
 router.post("/upload-image",uploadImages.array("images", 10),campaignController.uploadImagesToS3)
 router.post("/get-by-brand", brandAuth,campaignController.getCampaignsByBrandId);
 

@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const Campaign = require("../models/campaign");
 const OpenAI = require("openai");
 const BrandInfo = require("../models/brandInfo")
+const BrandCoupon = require("../models/brandCoupon")
 const cheerio = require("cheerio");
 const { GoogleGenAI } = require("@google/genai");
 const { scrapeBrandWebsite } = require("../utils/brandScraper");
@@ -16,6 +17,7 @@ const {
 const { sendEmail } = require("../services/emailService");
 const { adminInviteEmailTemplate } = require("../template/inviteRole");
 const brand = require("../models/brand");
+const subscription = require("../models/subscription");
 const BrandAssigned = require("../models/brandAssigned");
 const mongoose = require("mongoose");
 const DEFAULT_INVITE_EXP_MINUTES = 24 * 60; // 24 hours
@@ -1772,6 +1774,57 @@ const brandProperties = {
   support_email: { type: "string" },
   public_phone: { type: "string" },
   public_address: { type: "string" },
+  core_offerings: { type: "string" },
+  flagship_products: { type: "string" },
+  key_products_or_services: { type: "string" },
+  value_proposition: { type: "string" },
+  unique_selling_proposition: { type: "string" },
+  target_audience: { type: "string" },
+  ideal_customer_profile: { type: "string" },
+  brand_positioning: { type: "string" },
+  key_differentiators: { type: "string" },
+  use_cases: { type: "string" },
+
+  blog_url: { type: "string" },
+  newsroom_url: { type: "string" },
+  press_page_url: { type: "string" },
+  resources_page_url: { type: "string" },
+  case_studies_url: { type: "string" },
+  webinars_url: { type: "string" },
+  podcast_url: { type: "string" },
+  content_strategy: { type: "string" },
+  content_pillars: { type: "string" },
+  content_tone: { type: "string" },
+  blog_summary: { type: "string" },
+  recent_blog_titles: { type: "string" },
+  recent_blog_topics: { type: "string" },
+  recent_news_or_launches: { type: "string" },
+
+  leadership_team: { type: "string" },
+  founder_name: { type: "string" },
+  ceo_name: { type: "string" },
+  key_executives: { type: "string" },
+  leadership_overview: { type: "string" },
+  notable_partnerships: { type: "string" },
+  notable_clients: { type: "string" },
+  notable_partnerships_or_clients: { type: "string" },
+  investors_or_backers: { type: "string" },
+
+  marketplaces_or_store_presence: { type: "string" },
+  retail_presence: { type: "string" },
+  distributor_network: { type: "string" },
+
+  customer_support_channels: { type: "string" },
+  faq_page_url: { type: "string" },
+  help_center_url: { type: "string" },
+  return_policy_summary: { type: "string" },
+  warranty_summary: { type: "string" },
+  shipping_regions: { type: "string" },
+  company_mission: { type: "string" },
+  company_vision: { type: "string" },
+  app_store_presence: { type: "string" },
+  play_store_url: { type: "string" },
+  app_store_url: { type: "string" },
 };
 
 const brandJsonSchema = {
@@ -2157,44 +2210,31 @@ Return only JSON.
 `;
 }
 
-function buildProfilePrompt(brandName, resolved, scraped, options = {}) {
-  const { withSearch = false } = options;
-
+function buildProfilePrompt(brandName, resolved, scraped) {
   return `
-You are a brand research assistant.
+You are an Elite Business Research Analyst and Data Forensics Expert conducting a comprehensive, deep-dive analysis into the brand: "${brandName}".
 
-Original input: "${brandName}"
+Resolved Context:
+- Name: ${resolved?.brand_name}
+- Domain: ${resolved?.domain}
+- Website: ${resolved?.website_url}
 
-Resolved identity:
-- matched: ${resolved?.matched === true ? "true" : "false"}
-- brand_name: ${resolved?.brand_name || "null"}
-- domain: ${resolved?.domain || "null"}
-- website_url: ${resolved?.website_url || "null"}
-- industry: ${resolved?.industry || "null"}
-- headquarters_country: ${resolved?.headquarters_country || "null"}
+Web Evidence Scraped:
+"""${scraped?.raw_website_text || "No direct text available; rely on your internal knowledge and live web search capabilities."}"""
 
-Public website evidence:
-- about_page_url: ${scraped?.about_page_url || "null"}
-- contact_page_url: ${scraped?.contact_page_url || "null"}
-- scraped_text:
-"""${scraped?.raw_website_text || ""}"""
+INSTRUCTIONS:
+1. NARRATIVE EXCELLENCE: Every field must be a highly detailed, professional, flowing narrative paragraph. Absolutely no bullet points, fragments, or empty strings.
+2. CONTENT FORENSICS (BLOGS & RESOURCES): You must forensically analyze their content marketing ecosystem. 
+   - Identify the specific URL patterns for their blog, newsroom, case studies, whitepapers, or webinars.
+   - Summarize their core content pillars and the primary topics they write about.
+   - Describe the brand's tone of voice, the target audience for these publications, and highlight any specific themes, recent initiatives, or flagship topics detected in the scraped data.
+3. PRODUCT & MARKET POSITIONING: Clearly delineate their core offerings, flagship products, or services. Detail their unique value proposition (UVP), their ideal customer profile (ICP), and how they differentiate themselves from competitors.
+4. FINANCIAL & METRICS DETAIL: Describe funding rounds, revenue ranges, and valuation in descriptive USD terms. If exact public data is sparse, you MUST provide a highly educated "Market Comparable" analysis based on their industry size, employee count, and maturity stage.
+5. DIGITAL FOOTPRINT & LEADERSHIP: If available in the data, identify key leadership (Founders/CEO/Executives) and describe their broader digital footprint, including their target social platforms, community engagement strategies, or notable industry partnerships.
+6. BRAND OVERVIEW: The 'brand_description' field must be a rich, authoritative overview of at least 400-500 words covering their history, core mission, product value proposition, and market positioning.
+7. EXHAUSTIVE DATA COMPLETENESS: Do not leave any fields blank or return "null". If a specific metric is completely unknown, explain *why* it might not be public (e.g., "As an early-stage private company operating in stealth...") and provide the closest industry estimate or standard practice.
 
-Instructions:
-1. ${withSearch ? "Use live web search plus scraped website text." : "Use provided identity, scraped website text, and model knowledge."}
-2. Every field in the output must be a STRING written as a natural-language sentence or short descriptive paragraph.
-3. Do not return raw numbers, raw arrays, booleans, or plain values without context.
-4. Do not return null, NA, unknown, or blank strings. If something is not clearly available, write a sentence explaining that it could not be clearly identified from public information.
-5. brand_description must be a strong descriptive overview of about 300 to 400 words.
-6. annual_revenue, last_year_revenue, funding_total, and valuation must be written as descriptive USD strings with a dollar symbol, such as: "Last year's revenue was approximately $500,000, reflecting an estimated 20% year-over-year increase."
-7. If public sources mention INR, EUR, CNY, or another currency, convert to USD first before writing the sentence.
-8. operating_regions must be one descriptive sentence, not an array.
-9. contact_email, support_email, sales_email, general_email, contact_phone, and public_phone must also be descriptive sentences, not bare emails or phone numbers.
-10. website_url, domain, social URLs, and page URLs must also be descriptive strings, such as "The official website of the company is https://example.com/."
-11. employee_count, app_downloads, website_traffic_monthly, followers, subscribers, growth_rate, and founded_year must be written as descriptive sentence-style strings.
-12. Prefer official sources first, but you may use reputable public business information for best-effort completion.
-13. Return only valid JSON matching the schema.
-
-Return only JSON.
+Return ONLY a valid JSON object matching the exact requested schema. Do not include any markdown formatting, conversational text, or code blocks outside of the JSON structure.
 `;
 }
 
@@ -2621,12 +2661,58 @@ function mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName) {
     public_address: wrapNarrative("public_address", prefer(aiData.public_address, scraped?.public_address)),
   };
 }
+async function generateBlogSummary(blogText, provider) {
+  if (!blogText) return null;
 
+  const prompt = `
+You are an expert brand analyst.
+
+Summarize the blog/content strategy of this company.
+
+Focus on:
+- What topics they write about
+- Target audience
+- Content tone
+- Marketing intent (education, SEO, storytelling, product-driven)
+- How they use content for growth
+
+Keep it under 120 words.
+
+CONTENT:
+${blogText.slice(0, 8000)}
+`;
+
+  try {
+    if (provider === "gemini") {
+      const result = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+      });
+
+      return result.text || null;
+    }
+
+    if (provider === "openai") {
+      const result = await openai.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      return result.choices?.[0]?.message?.content || null;
+    }
+  } catch (err) {
+    console.warn("Blog summary failed:", err.message);
+    return null;
+  }
+
+  return null;
+}
 exports.BrandInformation = async (req, res) => {
   try {
     const brandName = req.body.brandName || req.body.brand_name;
     const forceRefresh = req.body.forceRefresh === true;
-    const requestedProvider = req.body.provider || req.body.ai_provider || DEFAULT_PROVIDER;
+    // const requestedProvider = req.body.provider || req.body.ai_provider || DEFAULT_PROVIDER;
+    const requestedProvider = DEFAULT_PROVIDER
     const effectiveProvider = resolveEffectiveProvider(requestedProvider);
 
     if (!brandName || typeof brandName !== "string" || !brandName.trim()) {
@@ -2688,7 +2774,17 @@ exports.BrandInformation = async (req, res) => {
       scraped,
       effectiveProvider
     );
-
+    let blogSummary = null;
+    if (scraped?.blog_page_text) {
+      try {
+        blogSummary = await generateBlogSummary(
+          scraped.blog_page_text,
+          effectiveProvider
+        );
+      } catch (e) {
+        console.warn("blog summary error:", e.message);
+      }
+    }
     const finalData = {
       brand_id: existingBrand?.brand_id || crypto.randomUUID(),
       normalized_brand_name: normalizedBrandName,
@@ -2696,11 +2792,21 @@ exports.BrandInformation = async (req, res) => {
 
       ...profileResult.parsed,
 
+      blog_url:
+        profileResult.parsed?.blog_url ||
+        scraped?.blog_url ||
+        scraped?.website_pages_scraped?.find(
+          (url) => /\/blogs?(\/|$)/i.test(url)
+        ) ||
+        null,
+
+      blog_summary: blogSummary || null,   // ✅ ADD THIS
+      blog_page_text: scraped?.blog_page_text || null,
+
       website_pages_scraped: Array.isArray(scraped?.website_pages_scraped)
         ? scraped.website_pages_scraped
         : [],
       last_scraped_at: scraped?.last_scraped_at || null,
-
     };
 
     const savedBrand = await BrandInfo.findOneAndUpdate(
@@ -2725,6 +2831,387 @@ exports.BrandInformation = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to generate and save brand data",
+      error: error.message,
+    });
+  }
+};
+
+const generateRandomCode = (length = 9) => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+  let code = "";
+
+  for (let i = 0; i < length; i++) {
+    const randomIndex = crypto.randomInt(0, chars.length);
+    code += chars[randomIndex];
+  }
+
+  return code;
+};
+
+const createPromoCode = () => {
+  return `CG${generateRandomCode(9)}`;
+};
+
+const PLAN_RANK_BY_ID = {
+  "69a934e0e77ebbeb19aab640": 0, // free
+  "69a934e0e77ebbeb19aab641": 1, // lower
+  "69a934e0e77ebbeb19aab642": 2, // mid
+  "69a934e0e77ebbeb19aab643": 3, // top
+};
+
+const PLAN_LABEL_BY_ID = {
+  "69a934e0e77ebbeb19aab640": "free",
+  "69a934e0e77ebbeb19aab641": "lower",
+  "69a934e0e77ebbeb19aab642": "mid",
+  "69a934e0e77ebbeb19aab643": "top",
+};
+
+const TOP_PLAN_ID = "69a934e0e77ebbeb19aab643";
+const FREE_PLAN_ID = "69a934e0e77ebbeb19aab640";
+
+function getPlanRank(planId) {
+  const id = String(planId || "");
+  return PLAN_RANK_BY_ID[id] ?? 0;
+}
+
+function getPlanLabel(planId) {
+  const id = String(planId || "");
+  return PLAN_LABEL_BY_ID[id] || "free";
+}
+
+exports.CreateBrandCoupon = async (req, res) => {
+  try {
+    const {
+      brandId,
+      subscriptionId,
+      newPrice,
+      mode,
+      expiredAt,
+    } = req.body;
+
+    if (!brandId || !subscriptionId || newPrice === undefined || !expiredAt || !mode) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId, subscriptionId, newPrice, expiredAt and mode are required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(brandId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid brandId",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subscriptionId",
+      });
+    }
+
+    if (Number(newPrice) < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "newPrice cannot be negative",
+      });
+    }
+
+    const now = new Date();
+    const couponExpiryDate = new Date(expiredAt);
+
+    if (Number.isNaN(couponExpiryDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expiredAt date",
+      });
+    }
+
+    // Previous date / current time not allowed
+    if (couponExpiryDate <= now) {
+      return res.status(400).json({
+        success: false,
+        message: "Previous date is not allowed. Coupon expiry date must be in the future",
+      });
+    }
+
+    const targetPlanId = String(subscriptionId);
+
+    if (!(targetPlanId in PLAN_RANK_BY_ID)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subscription plan. Allowed plans are free, lower, mid and top",
+      });
+    }
+
+    const [brandDoc, targetPlan, activeCoupon] = await Promise.all([
+      brand.findById(brandId)
+        .select({
+          subscription: 1,
+          subscriptionExpired: 1,
+        })
+        .lean(),
+
+      subscription.findById(subscriptionId)
+        .select({
+          _id: 1,
+          planName: 1,
+          name: 1,
+          planId: 1,
+          monthlyCost: 1,
+          annualCost: 1,
+          status: 1,
+        })
+        .lean(),
+
+      BrandCoupon.findOne({
+        brandId,
+        hasUsed: false,
+        expiredAt: { $gt: now },
+      })
+        .select({
+          _id: 1,
+          promocode: 1,
+          subscriptionId: 1,
+          newPrice: 1,
+          mode: 1,
+          expiredAt: 1,
+        })
+        .lean(),
+    ]);
+
+    if (!brandDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Brand not found",
+      });
+    }
+
+    if (!targetPlan) {
+      return res.status(404).json({
+        success: false,
+        message: "Subscription plan not found",
+      });
+    }
+
+    if (targetPlan.status && targetPlan.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Selected subscription plan is not active",
+      });
+    }
+
+    // If brand already has unused + not expired coupon, block new coupon
+    if (activeCoupon) {
+      return res.status(409).json({
+        success: false,
+        message: "Brand already has an active coupon",
+        data: {
+          couponId: activeCoupon._id,
+          promocode: activeCoupon.promocode,
+          subscriptionId: activeCoupon.subscriptionId,
+          newPrice: activeCoupon.newPrice,
+          mode: activeCoupon.mode,
+          expiredAt: activeCoupon.expiredAt,
+        },
+      });
+    }
+
+    const currentSubscription = brandDoc.subscription || {};
+
+    const currentPlanId = currentSubscription.planRef
+      ? String(currentSubscription.planRef)
+      : FREE_PLAN_ID;
+
+    const subscriptionExpiresAt = currentSubscription.expiresAt
+      ? new Date(currentSubscription.expiresAt)
+      : null;
+
+    const isCurrentSubscriptionExpired =
+      Boolean(brandDoc.subscriptionExpired) ||
+      (
+        subscriptionExpiresAt &&
+        !Number.isNaN(subscriptionExpiresAt.getTime()) &&
+        subscriptionExpiresAt <= now
+      );
+
+    const currentRank = getPlanRank(currentPlanId);
+    const targetRank = getPlanRank(targetPlanId);
+
+    // If already top plan, do not create any coupon
+    if (currentPlanId === TOP_PLAN_ID) {
+      return res.status(400).json({
+        success: false,
+        message: "Brand is already on the highest package",
+        meta: {
+          currentPlanId,
+          currentPlan: getPlanLabel(currentPlanId),
+          targetPlanId,
+          targetPlan: getPlanLabel(targetPlanId),
+          subscriptionExpired: isCurrentSubscriptionExpired,
+          expiresAt: currentSubscription.expiresAt || null,
+        },
+      });
+    }
+
+    // Same or lower package coupon not allowed
+    if (targetRank <= currentRank) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot create coupon for ${getPlanLabel(targetPlanId)} plan because brand is already on ${getPlanLabel(currentPlanId)} plan or higher`,
+        meta: {
+          currentPlanId,
+          currentPlan: getPlanLabel(currentPlanId),
+          targetPlanId,
+          targetPlan: getPlanLabel(targetPlanId),
+          subscriptionExpired: isCurrentSubscriptionExpired,
+          expiresAt: currentSubscription.expiresAt || null,
+        },
+      });
+    }
+
+    let promocode;
+    let isUnique = false;
+
+    while (!isUnique) {
+      promocode = createPromoCode();
+
+      const existingPromoCode = await BrandCoupon.findOne({
+        promocode,
+      })
+        .select({ _id: 1 })
+        .lean();
+
+      if (!existingPromoCode) {
+        isUnique = true;
+      }
+    }
+
+    const brandCoupon = await BrandCoupon.create({
+      brandId,
+      subscriptionId,
+      newPrice,
+      mode,
+      promocode,
+      hasUsed: false,
+      expiredAt: couponExpiryDate,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Brand coupon created successfully",
+      promocode: brandCoupon.promocode,
+      data: brandCoupon,
+    });
+  } catch (error) {
+    console.error("CreateBrandCoupon error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create brand coupon",
+      error: error.message,
+    });
+  }
+};
+
+exports.subscriptionList = async (req, res) => {
+  try {
+    const list = await subscription
+      .find({
+        status: "active",
+        role: "Brand",
+      })
+      .select("name monthlyCost annualCost currency")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription list fetched successfully",
+      data: list,
+    });
+  } catch (error) {
+    console.error("subscriptionList error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch subscription list",
+      error: error.message,
+    });
+  }
+};
+exports.ListBrand = async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      sortBy = "createdAt",
+      order = "desc",
+    } = req.query;
+
+    page = parseInt(page, 10) || 1;
+    limit = parseInt(limit, 10) || 10;
+
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100;
+
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+
+    if (search && search.trim()) {
+      filter.$or = [
+        { brand_name: { $regex: search.trim(), $options: "i" } },
+        { input_brand_name: { $regex: search.trim(), $options: "i" } },
+        { normalized_brand_name: { $regex: search.trim(), $options: "i" } },
+        { brand_alias: { $regex: search.trim(), $options: "i" } },
+        { domain: { $regex: search.trim(), $options: "i" } },
+      ];
+    }
+
+    const allowedSortFields = [
+      "createdAt",
+      "updatedAt",
+      "brand_name",
+      "input_brand_name",
+      "normalized_brand_name",
+      "founded_year",
+    ];
+
+    const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortOrder = order === "asc" ? 1 : -1;
+
+    const [brands, totalBrands] = await Promise.all([
+      BrandInfo.find(filter)
+        .sort({ [finalSortBy]: sortOrder })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      BrandInfo.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.ceil(totalBrands / limit);
+
+    return res.status(200).json({
+      success: true,
+      message: "Brands fetched successfully",
+      data: brands,
+      pagination: {
+        totalBrands,
+        totalPages,
+        currentPage: page,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("ListBrand error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch brands",
       error: error.message,
     });
   }

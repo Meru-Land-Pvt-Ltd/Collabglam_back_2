@@ -58,6 +58,12 @@ const brandOuteachRoutes = require("./routes/brandOutreachRoutes");
 const brandNetworkRoutes = require("./routes/brandNetworkRoutes");
 const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
 const instantlytestRoutes = require("./routes/instantlyTestRoutes");
+const matchedCreatorRoutes = require("./routes/matchedCreatorRoutes");
+
+
+
+
+
 
 const app = express();
 const server = http.createServer(app);
@@ -400,6 +406,7 @@ app.use("/instantly/oauth", require("./routes/instantlyOAuthRoutes"));
 app.use("/instantly", require("./routes/instantlyRoutes"));
 app.use("/instantly/webhook", require("./routes/instantlyWebhookRoutes"));
 app.use("/outreach", require("./routes/outreachRoutes"));
+app.use("/matched-creators", matchedCreatorRoutes);
 
 /* =========================================================
    404 HANDLER

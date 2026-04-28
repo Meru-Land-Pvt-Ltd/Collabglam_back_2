@@ -4,6 +4,7 @@ const Stripe = require("stripe");
 
 const Payment = require("../models/payment");
 const Brand = require("../models/brand");
+const BrandCoupon = require("../models/brandCoupon");
 const Influencer = require("../models/influencer");
 const subscriptionHelper = require("../utils/subscriptionHelper");
 const MilestonePayment = require("../models/milestonePayment");
@@ -236,28 +237,50 @@ exports.createOrder = async (req, res) => {
  * route: /payment/verify
  * body: { sessionId }
  */
+
+
 exports.verifyPayment = async (req, res) => {
   try {
     const { sessionId } = req.body;
-    if (!sessionId) return res.status(400).json({ success: false, message: "sessionId is required" });
 
-    let existing = await Payment.findOne({ orderId: sessionId });
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: "sessionId is required",
+      });
+    }
+
+    const existing = await Payment.findOne({ orderId: sessionId });
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["customer", "customer.tax_ids"],
     });
 
     if (!session || session.payment_status !== "paid") {
-      await Payment.findOneAndUpdate({ orderId: sessionId }, { status: "failed" });
+      await Payment.findOneAndUpdate(
+        { orderId: sessionId },
+        { status: "failed" }
+      );
+
       return res.status(400).json({
         success: false,
-        message: `Payment not completed (status: ${session?.payment_status || "unknown"})`,
+        message: `Payment not completed (status: ${
+          session?.payment_status || "unknown"
+        })`,
       });
     }
 
-    const metaPlanName = (session.metadata?.planName || session.metadata?.name || "").trim();
+    const metaPlanName = (
+      session.metadata?.planName ||
+      session.metadata?.name ||
+      ""
+    ).trim();
+
     let finalPlanName = metaPlanName;
-    if (!finalPlanName && existing?.planName) finalPlanName = existing.planName;
+
+    if (!finalPlanName && existing?.planName) {
+      finalPlanName = existing.planName;
+    }
 
     if (!finalPlanName) {
       finalPlanName = await resolvePlanName({
@@ -271,7 +294,10 @@ exports.verifyPayment = async (req, res) => {
     const paidAt = existing?.paidAt || new Date();
 
     let invoiceNumber = existing?.invoiceNumber;
-    if (!invoiceNumber) invoiceNumber = await nextInvoiceNumber(paidAt);
+
+    if (!invoiceNumber) {
+      invoiceNumber = await nextInvoiceNumber(paidAt);
+    }
 
     const cd = session.customer_details || {};
     const addr = cd.address || {};
@@ -288,19 +314,27 @@ exports.verifyPayment = async (req, res) => {
     if (!customerLegalName || !customerEmail) {
       const r = session.metadata?.role;
       const uid = session.metadata?.userId;
+
       const u = await (r === "Brand"
         ? Brand.findOne({ _id: uid }).lean()
         : Influencer.findOne({ _id: uid }).lean());
 
-      customerLegalName = customerLegalName || (u?.name || u?.brandName || u?.influencerName || "Customer");
-      customerEmail = customerEmail || (u?.email || "");
+      customerLegalName =
+        customerLegalName ||
+        u?.name ||
+        u?.brandName ||
+        u?.influencerName ||
+        "Customer";
+
+      customerEmail = customerEmail || u?.email || "";
     }
 
-    const { start: servicePeriodStart, end: servicePeriodEnd } = await computeServicePeriod({
-      role: session.metadata?.role,
-      planId: session.metadata?.planId,
-      paidAt,
-    });
+    const { start: servicePeriodStart, end: servicePeriodEnd } =
+      await computeServicePeriod({
+        role: session.metadata?.role,
+        planId: session.metadata?.planId,
+        paidAt,
+      });
 
     const updated = await Payment.findOneAndUpdate(
       { orderId: sessionId },
@@ -341,9 +375,41 @@ exports.verifyPayment = async (req, res) => {
       { new: true, upsert: true }
     );
 
+    let usedCoupon = null;
+
+    // ✅ Use brand coupon only if payment is paid
+    // ✅ Match Payment.userId with BrandCoupon.brandId
+    // ✅ Only unused and non-expired coupon
+    // ✅ Only first time payment becomes paid, so duplicate verify calls do not use another coupon
+    if (
+      updated.status === "paid" &&
+      updated.role === "Brand" &&
+      updated.userId &&
+      existing?.status !== "paid"
+    ) {
+      usedCoupon = await BrandCoupon.findOneAndUpdate(
+        {
+          brandId: updated.userId,
+          hasUsed: false,
+          expiredAt: { $gt: new Date() },
+        },
+        {
+          $set: {
+            hasUsed: true,
+          },
+        },
+        {
+          new: true,
+          sort: { createdAt: -1 },
+        }
+      ).lean();
+    }
+
     if (!updated.invoiceEmailSentAt) {
       try {
-        const servicePeriodText = `${formatDateUS(updated.servicePeriodStart)} – ${formatDateUS(updated.servicePeriodEnd)}`;
+        const servicePeriodText = `${formatDateUS(
+          updated.servicePeriodStart
+        )} – ${formatDateUS(updated.servicePeriodEnd)}`;
 
         const r = await sendPaymentSuccessEmailWithInvoice({
           kind: "plan",
@@ -362,7 +428,9 @@ exports.verifyPayment = async (req, res) => {
               billingAddress: updated.billingAddress || {},
             },
             lineItem: {
-              name: `CollabGlam – ${updated.role} Subscription (${updated.planName || "Subscription"})`,
+              name: `CollabGlam – ${updated.role} Subscription (${
+                updated.planName || "Subscription"
+              })`,
               servicePeriodText,
               qty: 1,
               unitPriceCents: updated.subtotalCents,
@@ -398,10 +466,24 @@ exports.verifyPayment = async (req, res) => {
       role: updated.role,
       userId: updated.userId,
       invoiceNumber: updated.invoiceNumber,
+      couponUsed: !!usedCoupon,
+      coupon: usedCoupon
+        ? {
+            couponId: usedCoupon._id,
+            promocode: usedCoupon.promocode,
+            newPrice: usedCoupon.newPrice,
+            expiredAt: usedCoupon.expiredAt,
+            hasUsed: usedCoupon.hasUsed,
+          }
+        : null,
     });
   } catch (error) {
     console.error("Error in verifyPayment:", error);
-    return res.status(500).json({ success: false, message: error.message });
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -801,5 +883,148 @@ exports.getInvoicesByUserId = async (req, res) => {
   } catch (err) {
     console.error("getInvoicesByUserId error:", err);
     return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
+/**
+ * ✅ Get payment history by userId
+ * route: POST /payment/history
+ * body: { userId, role?, status? }
+ */
+exports.getPaymentHistoryByUserId = async (req, res) => {
+  try {
+    const { userId, role, status } = req.body || {};
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required",
+      });
+    }
+
+    if (role && !["Brand", "Influencer"].includes(String(role))) {
+      return res.status(400).json({
+        success: false,
+        message: 'role must be "Brand" or "Influencer"',
+      });
+    }
+
+    const statusFilter =
+      status && String(status).toLowerCase() !== "all"
+        ? { status: String(status) }
+        : {};
+
+    // ✅ Subscription / plan payments
+    const planQuery = {
+      userId: String(userId),
+      ...statusFilter,
+    };
+
+    if (role) {
+      planQuery.role = String(role);
+    }
+
+    const planPaymentsRaw = await Payment.find(planQuery)
+      .sort({ paidAt: -1, createdAt: -1 })
+      .select(
+        "orderId paymentId amount currency receipt userId role planId planName status createdAt paidAt invoiceNumber invoiceIssuedAt subtotalCents discountCents taxCents totalCents invoiceFilePath invoiceEmailTo invoiceEmailSentAt"
+      )
+      .lean();
+
+    // ✅ Milestone payments
+    let milestoneQuery = {
+      ...statusFilter,
+    };
+
+    if (String(role) === "Brand") {
+      milestoneQuery.brandId = String(userId);
+    } else if (String(role) === "Influencer") {
+      milestoneQuery.influencerId = String(userId);
+    } else {
+      milestoneQuery.$or = [
+        { brandId: String(userId) },
+        { influencerId: String(userId) },
+      ];
+    }
+
+    const milestonePaymentsRaw = await MilestonePayment.find(milestoneQuery)
+      .sort({ paidAt: -1, createdAt: -1 })
+      .select(
+        "orderId paymentId amount currency receipt brandId influencerId campaignId campaignName milestoneTitle status createdAt paidAt invoiceNumber invoiceIssuedAt subtotalCents discountCents taxCents totalCents invoiceFilePath invoiceEmailTo invoiceEmailSentAt"
+      )
+      .lean();
+
+    const planPayments = planPaymentsRaw.map((payment) => ({
+      paymentType: "plan",
+      orderId: payment.orderId,
+      paymentId: payment.paymentId,
+      userId: payment.userId,
+      role: payment.role,
+      planId: payment.planId,
+      planName: payment.planName,
+      amount: Number(payment.totalCents ?? payment.amount ?? payment.subtotalCents ?? 0),
+      currency: payment.currency || "USD",
+      status: payment.status,
+      receipt: payment.receipt,
+      invoiceNumber: payment.invoiceNumber || "",
+      invoiceIssuedAt: payment.invoiceIssuedAt || null,
+      invoiceFilePath: payment.invoiceFilePath || "",
+      paidAt: payment.paidAt || null,
+      createdAt: payment.createdAt || null,
+      subtotalCents: Number(payment.subtotalCents || payment.amount || 0),
+      discountCents: Number(payment.discountCents || 0),
+      taxCents: Number(payment.taxCents || 0),
+      totalCents: Number(payment.totalCents || payment.amount || 0),
+    }));
+
+    const milestonePayments = milestonePaymentsRaw.map((payment) => ({
+      paymentType: "milestone",
+      orderId: payment.orderId,
+      paymentId: payment.paymentId,
+      brandId: payment.brandId,
+      influencerId: payment.influencerId,
+      campaignId: payment.campaignId,
+      campaignName: payment.campaignName,
+      milestoneTitle: payment.milestoneTitle,
+      amount: Number(payment.totalCents ?? payment.amount ?? payment.subtotalCents ?? 0),
+      currency: payment.currency || "USD",
+      status: payment.status,
+      receipt: payment.receipt,
+      invoiceNumber: payment.invoiceNumber || "",
+      invoiceIssuedAt: payment.invoiceIssuedAt || null,
+      invoiceFilePath: payment.invoiceFilePath || "",
+      paidAt: payment.paidAt || null,
+      createdAt: payment.createdAt || null,
+      subtotalCents: Number(payment.subtotalCents || payment.amount || 0),
+      discountCents: Number(payment.discountCents || 0),
+      taxCents: Number(payment.taxCents || 0),
+      totalCents: Number(payment.totalCents || payment.amount || 0),
+    }));
+
+    const history = [...planPayments, ...milestonePayments].sort((a, b) => {
+      const dateA = new Date(a.paidAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.paidAt || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment history fetched successfully",
+      userId,
+      role: role || "All",
+      counts: {
+        plans: planPayments.length,
+        milestones: milestonePayments.length,
+        total: history.length,
+      },
+      history,
+    });
+  } catch (error) {
+    console.error("getPaymentHistoryByUserId error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };

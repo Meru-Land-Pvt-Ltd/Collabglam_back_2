@@ -13,76 +13,20 @@ router.post("/invite", adminAuth, superOrRevenueHead, adminController.inviteAdmi
 router.post("/accept-invite", adminController.acceptInviteSetPassword);
 
 router.get("/list", adminAuth, adminController.listAdmins);
-router.get("/me", adminAuth, adminController.adminMe);
-
-// Employees role/status/access update
 router.put("/update-status", adminAuth, adminController.updateStatus);
-
-router.get(
-  "/fully-managed-brand-list",
-  adminAuth,
-  adminController.fullyManagedBrandList
-);
-
-router.post(
-  "/assign-brand",
-  adminAuth,
-  superOrRevenueHead,
-  adminController.assignBrand
-);
-
-// Brand assignment status update
-router.put(
-  "/assignment/update-status",
-  adminAuth,
-  superOrRevenueHead,
-  adminController.updateBrandAssignment
-);
-
-// Brand assignment RH update
-router.put(
-  "/assignment/update-rh",
-  adminAuth,
-  superOrRevenueHead,
-  adminController.updateBrandAssignmentStatusAndRH
-);
-
-router.get(
-  "/get-executive-list",
-  adminAuth,
-  adminController.listExecutiveAdmin
-);
-
-router.get(
-  "/get-rm-list",
-  adminAuth,
-  adminController.rmlist
-);
-
-router.get(
-  "/get-brand-list",
-  adminAuth,
-  adminController.allocateBrand
-);
-
-router.get(
-  "/campaign/list",
-  adminAuth,
-  adminController.listCampaignsForAdmin
-);
-
-router.post(
-  "/brand-info",
-  adminAuth,
-  adminController.BrandInformation
-);
-
-router.post(
-  "/assign-campaign-ime",
-  adminAuth,
-  superOrRevenueHead,
-  adminController.assignCampaignIme
-);
+router.get("/me", adminAuth, adminController.adminMe);
+router.get("/fully-managed-brand-list", adminAuth, adminController.fullyManagedBrandList);
+router.post("/assign-brand", adminAuth, superOrRevenueHead, adminController.assignBrand);
+router.put("/update-status", adminAuth, superOrRevenueHead, adminController.updateBrandAssignment);
+router.put("/update-rhId", adminAuth, superOrRevenueHead, adminController.updateBrandAssignmentStatusAndRH);
+router.get("/get-executive-list", adminAuth, adminController.listExecutiveAdmin);
+router.get("/get-rm-list", adminAuth, adminController.rmlist);
+router.get("/get-brand-list", adminAuth, adminController.allocateBrand);
+router.get('/campaign/list', adminAuth, adminController.listCampaignsForAdmin);
+router.post('/brand-info', adminAuth, adminController.BrandInformation);
+router.post('/brand-coupon', adminAuth, adminController.CreateBrandCoupon);
+router.get('/subscription-list', adminController.subscriptionList);
+router.get('/brand-list', adminAuth, adminController.ListBrand);
 
 router.post(
   "/send-bulk-csv",

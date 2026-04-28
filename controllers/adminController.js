@@ -16,6 +16,7 @@ const { Category } = require("../models/categories");
 const subscriptionHelper = require("../utils/subscriptionHelper");
 const { sendSubscriptionLifecycleEmail } = require("../utils/subscriptionEmailHelper");
 const crypto = require("crypto");
+const BrandCoupon = require("../models/brandCoupon")
 
 const Campaign = require("../models/campaign");
 const Milestone = require("../models/milestone");
@@ -1509,11 +1510,15 @@ exports.getBrandById = async (req, res) => {
     const id = String(req.query?.id || "").trim();
 
     if (!id) {
-      return res.status(400).json({ message: "Query parameter id is required." });
+      return res.status(400).json({
+        message: "Query parameter id is required.",
+      });
     }
 
     if (!isObjectId(id)) {
-      return res.status(400).json({ message: "Invalid brand _id." });
+      return res.status(400).json({
+        message: "Invalid brand _id.",
+      });
     }
 
     const brandDoc = await Brand.findById(id)
@@ -1521,20 +1526,41 @@ exports.getBrandById = async (req, res) => {
       .lean();
 
     if (!brandDoc) {
-      return res.status(404).json({ message: "Brand not found." });
+      return res.status(404).json({
+        message: "Brand not found.",
+      });
     }
 
     const [enrichedBrand] = await enrichBrandsWithAssignments([brandDoc]);
-    const milestoneDoc = await Milestone.findOne({ brandId: brandDoc.brandId }).lean();
+
+    const milestoneDoc = await Milestone.findOne({
+      brandId: brandDoc.brandId,
+    }).lean();
+
     const walletBalance = milestoneDoc ? milestoneDoc.walletBalance : 0;
+
+    const brandCouponHistory = await BrandCoupon.find({
+      brandId: brandDoc._id,
+    })
+      .populate({
+        path: "subscriptionId",
+        select: "name title price duration description",
+      })
+      .select("-__v")
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       ...enrichedBrand,
       walletBalance,
+      brandCouponHistory,
     });
   } catch (error) {
     console.error("Error in getBrandById:", error);
-    return res.status(500).json({ message: "Internal server error while fetching brand." });
+
+    return res.status(500).json({
+      message: "Internal server error while fetching brand.",
+    });
   }
 };
 

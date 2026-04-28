@@ -5,6 +5,7 @@ const OpenAI = require("openai");
 
 const BrandInfo = require("../models/brandInfo");
 const BrandModelImport = require("../models/brand");
+const BrandCoupon = require("../models/brandCoupon");
 const VerifyOtpModelImport = require("../models/verifyOtp");
 const OtpTemplateImport = require("../template/otpTemplate");
 const ResetOtpTemplateImport = require("../template/resetOtp");
@@ -1530,6 +1531,124 @@ const uploadBrandProfilePic = async (req, res) => {
   }
 };
 
+
+
+
+
+
+async function verifyBrandCoupon(req, res) {
+  try {
+    const { brandId, subscriptionId, mode, promocode } = req.body;
+
+    if (!brandId) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Brand ID is required",
+      });
+    }
+
+    if (!subscriptionId) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Subscription ID is required",
+      });
+    }
+
+    if (!mode) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Mode is required",
+      });
+    }
+
+    if (!promocode) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Promocode is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(brandId)) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Invalid Brand ID",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Invalid Subscription ID",
+      });
+    }
+
+    const coupon = await BrandCoupon.findOne({
+      brandId,
+      subscriptionId,
+      mode: mode.trim(),
+      promocode: { $regex: `^${promocode.trim()}$`, $options: "i" },
+    })
+      .populate("subscriptionId", "name monthlyCost annualCost currency")
+      .lean();
+
+    if (!coupon) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        message: "Invalid promocode or this promocode is not valid for this subscription",
+      });
+    }
+
+    if (coupon.hasUsed) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Promocode has already been used",
+      });
+    }
+
+    if (new Date(coupon.expiredAt) < new Date()) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Promocode has expired",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      message: "Promocode verified successfully",
+      data: {
+        couponId: coupon._id,
+        brandId: coupon.brandId,
+        subscriptionId: coupon.subscriptionId,
+        mode: coupon.mode,
+        promocode: coupon.promocode,
+        newPrice: coupon.newPrice,
+        expiredAt: coupon.expiredAt,
+        hasUsed: coupon.hasUsed,
+      },
+    });
+  } catch (error) {
+    console.error("verifyBrandCoupon error:", error);
+
+    return res.status(500).json({
+      success: false,
+      verified: false,
+      message: "Failed to verify promocode",
+      error: error.message,
+    });
+  }
+}
+
+
 module.exports = {
   sendSignupOtp,
   verifyOtpSignUp,
@@ -1543,4 +1662,6 @@ module.exports = {
   getBrandLiteById,
   getBrandProfile,
   updateBrandProfile,
+  verifyBrandCoupon
+
 };
