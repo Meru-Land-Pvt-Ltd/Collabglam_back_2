@@ -13,6 +13,7 @@ router.post("/invite", adminAuth, superOrRevenueHead, adminController.inviteAdmi
 router.post("/accept-invite", adminController.acceptInviteSetPassword);
 
 router.get("/list", adminAuth, adminController.listAdmins);
+router.put("/update-status", adminAuth, adminController.updateStatus);
 router.get("/me", adminAuth, adminController.adminMe);
 router.get("/fully-managed-brand-list", adminAuth, adminController.fullyManagedBrandList);
 router.post("/assign-brand", adminAuth, superOrRevenueHead, adminController.assignBrand);
