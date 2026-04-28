@@ -2776,15 +2776,25 @@ exports.assignBrand = async (req, res) => {
 
 exports.getCampaignsByInfluencerId = async (req, res) => {
   try {
+    const params = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
+
     const influencerMongoId = String(
-      req.body?._id || req.body?.id || req.body?.influencerId || ""
+      params._id || params.id || params.influencerId || ""
     ).trim();
-    const page = parsePositiveInt(req.body?.page, 1);
-    const limit = parsePositiveInt(req.body?.limit, 10);
-    const search = String(req.body?.search || "").trim();
-    const sortBy = String(req.body?.sortBy || "createdAt").trim();
-    const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
-    const statusFilter = String(req.body?.status || "all").trim().toLowerCase();
+
+    const page = parsePositiveInt(params.page, 1);
+    const limit = parsePositiveInt(params.limit, 10);
+    const search = String(params.search || "").trim();
+    const sortBy = String(params.sortBy || "createdAt").trim();
+    const sortOrder = normalizeSortOrder(params.sortOrder, "desc");
+    const statusFilter = String(params.status || "all").trim().toLowerCase();
+
+    const debug =
+      params.debug === true ||
+      String(params.debug || "").toLowerCase() === "true";
 
     if (!influencerMongoId) {
       return res.status(400).json({ message: "influencer _id is required" });
@@ -2794,9 +2804,10 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       return res.status(400).json({ message: "Invalid influencer _id" });
     }
 
-    const influencerObjectId = toObjectId(influencerId);
+    const influencerId = String(influencerMongoId);
+    const influencerObjectId = toObjectId(influencerMongoId);
 
-    const influencer = await Influencer.findById(influencerMongoId)
+    const influencer = await Influencer.findById(influencerObjectId)
       .select("_id name email")
       .lean();
 
@@ -2804,20 +2815,38 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       return res.status(404).json({ message: "Influencer not found" });
     }
 
-    const invitationFilter = {
-      influencerId: String(influencerMongoId),
-    };
+    const rawActor = req.admin || req.user || {};
+    const actor = await resolveActorFromMaster(rawActor);
+    const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
 
-    const invitations = await Invitation.find(invitationFilter)
+    const visibleBrandKeys = scopedAccess.brandKeys;
+    const visibleCampaignIds = scopedAccess.campaignIds;
+
+    const applyRows = await ApplyCampaign.find({
+      $or: [
+        { "applicants.influencerId": influencerId },
+        { "approved.influencerId": influencerId },
+        { "applicants.influencerId": influencerObjectId },
+        { "approved.influencerId": influencerObjectId },
+      ],
+    })
+      .select("campaignId campaignsId applicants approved createdAt updatedAt")
+      .lean();
+
+    const invitations = await Invitation.find({
+      influencerId,
+    })
       .select("campaignId invitationId status createdAt updatedAt")
       .lean();
+
+    const isSameInfluencer = (value) => String(value || "") === influencerId;
 
     const getMatchedApplicant = (row) => {
       const applicants = Array.isArray(row?.applicants) ? row.applicants : [];
       const approved = Array.isArray(row?.approved) ? row.approved : [];
 
-      const approvedMatch = approved.find(
-        (item) => String(item?.influencerId || "") === influencerId
+      const approvedMatch = approved.find((item) =>
+        isSameInfluencer(item?.influencerId)
       );
 
       if (approvedMatch) {
@@ -2827,8 +2856,8 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         };
       }
 
-      const applicantMatch = applicants.find(
-        (item) => String(item?.influencerId || "") === influencerId
+      const applicantMatch = applicants.find((item) =>
+        isSameInfluencer(item?.influencerId)
       );
 
       return {
@@ -2865,13 +2894,8 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         return "undecided";
       }
 
-      if (statusBrand) {
-        return statusBrand;
-      }
-
-      if (statusInfluencer) {
-        return statusInfluencer;
-      }
+      if (statusBrand) return statusBrand;
+      if (statusInfluencer) return statusInfluencer;
 
       return "active";
     };
@@ -2879,7 +2903,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     const applyMap = new Map();
 
     for (const row of applyRows) {
-      const campaignId = String(row?.campaignId || "").trim();
+      const campaignId = String(row?.campaignId || row?.campaignsId || "").trim();
       if (!campaignId) continue;
 
       const { applicant, fromApprovedArray } = getMatchedApplicant(row);
@@ -2913,12 +2937,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         },
         ...(debug
           ? {
-            debug: {
-              reason: "No ApplyCampaign rows found for this influencer",
-              influencerId,
-              applyRowsFound: applyRows.length,
-            },
-          }
+              debug: {
+                reason: "No ApplyCampaign rows found for this influencer",
+                influencerId,
+                applyRowsFound: applyRows.length,
+                invitationsFound: invitations.length,
+              },
+            }
           : {}),
       });
     }
@@ -2930,7 +2955,9 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     const andFilters = [
       {
         $or: [
-          { _id: { $in: campaignObjectIds } },
+          ...(campaignObjectIds.length
+            ? [{ _id: { $in: campaignObjectIds } }]
+            : []),
           { campaignsId: { $in: appliedCampaignIds } },
           { campaignId: { $in: appliedCampaignIds } },
         ],
@@ -2955,13 +2982,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           },
           ...(debug
             ? {
-              debug: {
-                reason: "Admin has no visible brand keys",
-                rawActor,
-                resolvedActor: actor,
-                appliedCampaignIds,
-              },
-            }
+                debug: {
+                  reason: "Admin has no visible brand keys",
+                  rawActor,
+                  resolvedActor: actor,
+                  appliedCampaignIds,
+                },
+              }
             : {}),
         });
       }
@@ -2975,6 +3002,40 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           { brandId: { $in: visibleBrandKeys } },
           { brandId: { $in: visibleBrandObjectIds } },
         ],
+      });
+    }
+
+    if (Array.isArray(visibleCampaignIds)) {
+      if (!visibleCampaignIds.length) {
+        return res.status(200).json({
+          success: true,
+          page,
+          limit,
+          total: 0,
+          pages: 1,
+          totalPages: 1,
+          count: 0,
+          campaigns: [],
+          influencer: {
+            _id: String(influencer._id),
+            name: influencer.name || "",
+            email: influencer.email || "",
+          },
+          ...(debug
+            ? {
+                debug: {
+                  reason: "Admin has no visible campaign ids",
+                  rawActor,
+                  resolvedActor: actor,
+                  appliedCampaignIds,
+                },
+              }
+            : {}),
+        });
+      }
+
+      andFilters.push({
+        _id: { $in: visibleCampaignIds },
       });
     }
 
@@ -3049,16 +3110,16 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       statusFilter === "all"
         ? normalized
         : normalized.filter((item) => {
-          if (statusFilter === "active") {
-            return item.status !== "rejected";
-          }
+            if (statusFilter === "active") {
+              return item.status !== "rejected";
+            }
 
-          return (
-            item.status === statusFilter ||
-            String(item.statusBrand || "").toLowerCase() === statusFilter ||
-            String(item.statusInfluencer || "").toLowerCase() === statusFilter
-          );
-        });
+            return (
+              item.status === statusFilter ||
+              String(item.statusBrand || "").toLowerCase() === statusFilter ||
+              String(item.statusInfluencer || "").toLowerCase() === statusFilter
+            );
+          });
 
     const field = getCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -3125,16 +3186,18 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       },
       ...(debug
         ? {
-          debug: {
-            rawActor,
-            resolvedActor: actor,
-            visibleBrandKeys,
-            influencerId,
-            applyRowsFound: applyRows.length,
-            appliedCampaignIds,
-            campaignDocsFound: campaignDocs.length,
-          },
-        }
+            debug: {
+              rawActor,
+              resolvedActor: actor,
+              visibleBrandKeys,
+              visibleCampaignIds,
+              influencerId,
+              applyRowsFound: applyRows.length,
+              invitationsFound: invitations.length,
+              appliedCampaignIds,
+              campaignDocsFound: campaignDocs.length,
+            },
+          }
         : {}),
     });
   } catch (error) {
