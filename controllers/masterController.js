@@ -18,7 +18,14 @@ const { adminInviteEmailTemplate } = require("../template/inviteRole");
 const brand = require("../models/brand");
 const BrandAssigned = require("../models/brandAssigned");
 const mongoose = require("mongoose");
-const INVITE_EXP_MINUTES = Number(process.env.INVITE_EXP_MINUTES || 60);
+const DEFAULT_INVITE_EXP_MINUTES = 24 * 60; // 24 hours
+
+const parsedInviteExpiry = Number(process.env.INVITE_EXP_MINUTES);
+
+const INVITE_EXP_MINUTES =
+  Number.isFinite(parsedInviteExpiry) && parsedInviteExpiry > 0
+    ? parsedInviteExpiry
+    : DEFAULT_INVITE_EXP_MINUTES;
 const { buildCampaignVisibilityFilter } = require('../utils/campaignAccess');
 const EXECUTIVE_ROLES = [ROLES.IME, ROLES.BME, ROLES.SDR];
 const CampaignAssigned = require("../models/CampaignAssigned");
@@ -365,9 +372,13 @@ exports.inviteAdmin = async (req, res) => {
     const rawToken = generateInviteToken(32);
     const tokenHash = sha256(rawToken);
 
-    admin.invitedAt = new Date();
+    const invitedAt = new Date();
+
+    admin.invitedAt = invitedAt;
     admin.inviteTokenHash = tokenHash;
-    admin.inviteExpiresAt = new Date(Date.now() + INVITE_EXP_MINUTES * 60 * 1000);
+    admin.inviteExpiresAt = new Date(
+      invitedAt.getTime() + INVITE_EXP_MINUTES * 60 * 1000
+    );
 
     await admin.save();
 
@@ -430,14 +441,21 @@ exports.acceptInviteSetPassword = async (req, res) => {
 
     const admin = await AdminModel.findOne({
       inviteTokenHash: tokenHash,
-      inviteExpiresAt: { $gt: new Date() },
     }).select(
-      "+inviteTokenHash +passwordHash role status email name access proxyEmail parentAdmin rootAdmin"
+      "+inviteTokenHash +passwordHash role status email name access proxyEmail parentAdmin rootAdmin inviteExpiresAt"
     );
 
     if (!admin) {
       return res.status(400).json({
-        message: "Invite token invalid or expired",
+        message: "Invite token invalid. Please request a new invite.",
+      });
+    }
+
+    const now = new Date();
+
+    if (!admin.inviteExpiresAt || admin.inviteExpiresAt <= now) {
+      return res.status(400).json({
+        message: "Invite token expired. Please request a new invite.",
       });
     }
 
@@ -932,7 +950,6 @@ exports.assignCampaignIme = async (req, res) => {
       {
         $setOnInsert: {
           campaignId: campaign._id,
-          brandId: campaign.brandId,
         },
         $set: {
           brandId: campaign.brandId,
@@ -1443,6 +1460,14 @@ async function enrichCampaignsWithAssignments(campaignDocs = []) {
     ),
   ].map((id) => new mongoose.Types.ObjectId(id));
 
+  const campaignIds = [
+    ...new Set(
+      campaignDocs
+        .map((item) => String(item?._id || ""))
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    ),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
   if (!brandIds.length) {
     return campaignDocs.map((item) => ({
       ...item,
@@ -1457,41 +1482,55 @@ async function enrichCampaignsWithAssignments(campaignDocs = []) {
     }));
   }
 
-  const activeAssignments = await BrandAssigned.find({
+  // Brand-level assignment: RH + BME
+  const brandAssignments = await BrandAssigned.find({
     brandId: { $in: brandIds },
     status: "active",
   })
     .sort({ updatedAt: -1, createdAt: -1 })
     .lean();
 
-  const assignmentMap = new Map();
-  for (const assignment of activeAssignments) {
+  const brandAssignmentMap = new Map();
+
+  for (const assignment of brandAssignments) {
     const key = String(assignment.brandId);
-    if (!assignmentMap.has(key)) assignmentMap.set(key, assignment);
+    if (!brandAssignmentMap.has(key)) {
+      brandAssignmentMap.set(key, assignment);
+    }
   }
 
-  const missingIds = brandIds.filter((id) => !assignmentMap.has(String(id)));
-  if (missingIds.length) {
-    const fallbackAssignments = await BrandAssigned.find({
-      brandId: { $in: missingIds },
+  // Campaign-level assignment: IME
+  const campaignAssignments = campaignIds.length
+    ? await CampaignAssigned.find({
+      campaignId: { $in: campaignIds },
+      status: "active",
     })
       .sort({ updatedAt: -1, createdAt: -1 })
-      .lean();
+      .lean()
+    : [];
 
-    for (const assignment of fallbackAssignments) {
-      const key = String(assignment.brandId);
-      if (!assignmentMap.has(key)) assignmentMap.set(key, assignment);
+  const campaignAssignmentMap = new Map();
+
+  for (const assignment of campaignAssignments) {
+    const key = String(assignment.campaignId);
+    if (!campaignAssignmentMap.has(key)) {
+      campaignAssignmentMap.set(key, assignment);
     }
   }
 
   const assigneeIds = [
     ...new Set(
-      [...assignmentMap.values()]
-        .flatMap((assignment) => [
+      [
+        ...brandAssignments.flatMap((assignment) => [
+          assignment?.RHId,
+          assignment?.bdmId,
+        ]),
+        ...campaignAssignments.flatMap((assignment) => [
           assignment?.RHId,
           assignment?.bdmId,
           assignment?.idmId,
-        ])
+        ]),
+      ]
         .filter(Boolean)
         .map((id) => String(id))
         .filter((id) => mongoose.Types.ObjectId.isValid(id))
@@ -1505,39 +1544,76 @@ async function enrichCampaignsWithAssignments(campaignDocs = []) {
     : [];
 
   const assigneeMap = new Map();
+
   assignees.forEach((admin) => {
-    assigneeMap.set(
-      String(admin._id),
-      admin.name || admin.email || ""
-    );
+    assigneeMap.set(String(admin._id), admin.name || admin.email || "");
   });
 
   return campaignDocs.map((campaign) => {
-    const assignment = assignmentMap.get(String(campaign.brandId));
+    const brandAssignment = brandAssignmentMap.get(String(campaign.brandId));
+    const campaignAssignment = campaignAssignmentMap.get(String(campaign._id));
 
-    const assignedRh = assignment?.RHId
-      ? assigneeMap.get(String(assignment.RHId)) || ""
-      : "";
-    const assignedBme = assignment?.bdmId
-      ? assigneeMap.get(String(assignment.bdmId)) || ""
-      : "";
-    const assignedIme = assignment?.idmId
-      ? assigneeMap.get(String(assignment.idmId)) || ""
-      : "";
+    const RHId = campaignAssignment?.RHId || brandAssignment?.RHId || null;
+    const bdmId = campaignAssignment?.bdmId || brandAssignment?.bdmId || null;
+    const idmId = campaignAssignment?.idmId || null;
 
     return {
       ...campaign,
-      assignedRh,
-      assignedBme,
-      assignedIme,
 
-      RHId: assignment?.RHId || null,
-      bdmId: assignment?.bdmId || null,
-      idmId: assignment?.idmId || null,
-      assignmentId: assignment?._id || null,
-      assignmentStatus: assignment?.status || null,
+      assignedRh: RHId ? assigneeMap.get(String(RHId)) || "" : "",
+      assignedBme: bdmId ? assigneeMap.get(String(bdmId)) || "" : "",
+      assignedIme: idmId ? assigneeMap.get(String(idmId)) || "" : "",
+
+      RHId,
+      bdmId,
+      idmId,
+      assignmentId: campaignAssignment?._id || brandAssignment?._id || null,
+      assignmentStatus:
+        campaignAssignment?.status || brandAssignment?.status || null,
     };
   });
+}
+
+async function buildAssignedCampaignVisibilityFilter(actor = {}) {
+  const adminId = String(actor?.adminId || actor?._id || "").trim();
+  const role = String(actor?.role || "").trim().toLowerCase();
+
+  if (!adminId) {
+    return {
+      _id: { $in: [] },
+    };
+  }
+
+  if (role === ROLES.IME) {
+    const imeFilters = [{ idmId: adminId }];
+
+    if (mongoose.isValidObjectId(adminId)) {
+      imeFilters.push({
+        idmId: new mongoose.Types.ObjectId(adminId),
+      });
+    }
+
+    const assignedCampaigns = await CampaignAssigned.find({
+      status: "active",
+      $or: imeFilters,
+    })
+      .select("campaignId")
+      .lean();
+
+    const campaignIds = [
+      ...new Set(
+        assignedCampaigns
+          .map((item) => String(item?.campaignId || ""))
+          .filter((id) => mongoose.isValidObjectId(id))
+      ),
+    ].map((id) => new mongoose.Types.ObjectId(id));
+
+    return {
+      _id: { $in: campaignIds },
+    };
+  }
+
+  return buildCampaignVisibilityFilter(actor);
 }
 
 exports.listCampaignsForAdmin = async (req, res) => {
@@ -1551,7 +1627,7 @@ exports.listCampaignsForAdmin = async (req, res) => {
       });
     }
 
-    const visibilityFilter = await buildCampaignVisibilityFilter(actor);
+    const visibilityFilter = await buildAssignedCampaignVisibilityFilter(actor);
 
     const filter = {
       ...visibilityFilter,

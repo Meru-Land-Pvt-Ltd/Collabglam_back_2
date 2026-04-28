@@ -718,10 +718,15 @@ function normalizeContactRow(row = {}) {
   };
 }
 
+function fallbackNameFromEmail(email = "") {
+  const local = String(email || "").split("@")[0] || "";
+  return local.replace(/[._-]+/g, " ").trim();
+}
+
 async function upsertProspectsFromRows(rows = []) {
   const normalizedRows = rows
     .map(normalizeContactRow)
-    .filter((row) => row.companyName && row.contactEmail);
+    .filter((row) => row.contactEmail);
 
   if (!normalizedRows.length) {
     const error = new Error("No valid contacts found");
@@ -732,22 +737,48 @@ async function upsertProspectsFromRows(rows = []) {
   const docs = [];
 
   for (const row of normalizedRows) {
+    const nameParts = splitFullName(row.contactName || "");
+    const fallbackName = fallbackNameFromEmail(row.contactEmail);
+
+    const companyName =
+      row.companyName ||
+      row.contactName ||
+      fallbackName ||
+      "Lead";
+
+    const templateVariables = {
+      email: row.contactEmail,
+      firstName: nameParts.firstName || row.contactName || fallbackName,
+      lastName: nameParts.lastName,
+      fullName: row.contactName || fallbackName,
+      companyName,
+      website: row.website || "",
+    };
+
     const doc = await ProspectBrand.findOneAndUpdate(
       { "primaryContact.email": row.contactEmail },
       {
-        $setOnInsert: {
-          companyName: row.companyName,
+        $set: {
+          companyName,
           website: row.website || "",
           source: "csv",
           primaryContact: {
-            name: row.contactName || "",
+            name: row.contactName || fallbackName || companyName,
             email: row.contactEmail,
+          },
+          customFields: row,
+          templateVariables,
+          csvMeta: {
+            headers: Object.keys(row || {}),
+            mappedAt: new Date(),
+            sourceFileName: "google-sheet",
           },
         },
       },
       {
         new: true,
         upsert: true,
+        setDefaultsOnInsert: true,
       }
     );
 
@@ -850,12 +881,7 @@ async function attachProspectsToCampaign(campaign, prospectDocs = []) {
 
     addLeadsResult = await instantlyService.addLeads({
       campaign_id: campaign.instantly.campaignId,
-      leads: newDocs.map((item) => ({
-        email: item.primaryContact.email,
-        first_name: item.primaryContact.name || "",
-        company_name: item.companyName || "",
-        website: item.website || "",
-      })),
+      leads: newDocs.map(buildInstantlyLeadFromProspect),
     });
 
     instantlySynced = true;
@@ -1313,6 +1339,181 @@ exports.getOutreachCampaignConfiguration = async (req, res) => {
   }
 };
 
+function splitFullName(value = "") {
+  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+
+  return {
+    firstName: parts[0] || "",
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function cleanVariableValue(value) {
+  return String(value ?? "").trim();
+}
+
+function buildInstantlyLeadFromProspect(prospect = {}) {
+  const templateVariables = prospect.templateVariables || {};
+  const primaryContact = prospect.primaryContact || {};
+
+  const email = normalizeEmail(
+    primaryContact.email ||
+    templateVariables.email ||
+    ""
+  );
+
+  const fullName = cleanVariableValue(
+    templateVariables.fullName ||
+    primaryContact.name ||
+    ""
+  );
+
+  const nameParts = splitFullName(fullName);
+
+  const firstName = cleanVariableValue(
+    templateVariables.firstName ||
+    nameParts.firstName ||
+    fullName
+  );
+
+  const lastName = cleanVariableValue(
+    templateVariables.lastName ||
+    nameParts.lastName
+  );
+
+  const companyName = cleanVariableValue(
+    templateVariables.companyName ||
+    prospect.companyName ||
+    ""
+  );
+
+  const website = cleanVariableValue(
+    templateVariables.website ||
+    prospect.website ||
+    ""
+  );
+
+  const jobTitle = cleanVariableValue(
+    templateVariables.jobTitle ||
+    primaryContact.title ||
+    ""
+  );
+
+  const phone = cleanVariableValue(
+    templateVariables.phone ||
+    primaryContact.phone ||
+    ""
+  );
+
+  const linkedinUrl = cleanVariableValue(
+    templateVariables.linkedinUrl ||
+    primaryContact.linkedinUrl ||
+    ""
+  );
+
+  const customVariables = {};
+
+  Object.entries(templateVariables || {}).forEach(([key, value]) => {
+    const cleanKey = String(key || "").trim();
+    const cleanValue = cleanVariableValue(value);
+
+    if (!cleanKey || !cleanValue) return;
+
+    // Avoid duplicate alias conflicts in Instantly custom_variables.
+    // Keep camelCase only.
+    if (
+      [
+        "first_name",
+        "last_name",
+        "full_name",
+        "company_name",
+        "job_title",
+        "linkedin_url",
+      ].includes(cleanKey)
+    ) {
+      return;
+    }
+
+    customVariables[cleanKey] = cleanValue;
+  });
+
+  customVariables.email = email;
+  customVariables.firstName = firstName;
+  customVariables.lastName = lastName;
+  customVariables.fullName = fullName;
+  customVariables.companyName = companyName;
+  customVariables.website = website;
+  customVariables.jobTitle = jobTitle;
+  customVariables.phone = phone;
+  customVariables.linkedinUrl = linkedinUrl;
+
+  Object.keys(customVariables).forEach((key) => {
+    if (!cleanVariableValue(customVariables[key])) {
+      delete customVariables[key];
+    }
+  });
+
+  return {
+    email,
+
+    // Native Instantly lead fields.
+    first_name: firstName,
+    last_name: lastName,
+    company_name: companyName,
+
+    // Custom variables used in email templates like {{firstName}}, {{companyName}}, {{jobTitle}}.
+    custom_variables: customVariables,
+
+    // Instantly expects personalization to be string or null, not object.
+    personalization: null,
+  };
+}
+
+function htmlToPlainText(value = "") {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function assertCampaignSequencesAreSendable(configuration = {}) {
+  const sequences = Array.isArray(configuration.sequences)
+    ? configuration.sequences
+    : [];
+
+  if (!sequences.length) {
+    const error = new Error("At least one sequence step is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  sequences.forEach((step, stepIndex) => {
+    const variants = Array.isArray(step.variants) ? step.variants : [];
+
+    if (!variants.length) {
+      const error = new Error(`Step ${stepIndex + 1} must have at least one email variant`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    variants.forEach((variant, variantIndex) => {
+      const bodyText = htmlToPlainText(variant.body);
+
+      if (!bodyText) {
+        const error = new Error(
+          `Step ${stepIndex + 1}, Variant ${variantIndex + 1}: email body is required`
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+    });
+  });
+}
+
 exports.updateOutreachCampaignConfiguration = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
@@ -1323,102 +1524,80 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
       getCampaignConfigurationFromDocument(campaign)
     );
 
+    assertCampaignSequencesAreSendable(nextConfiguration);
+
     campaign.configuration = nextConfiguration;
 
     if (req.body?.instantlyRawCampaignPayload !== undefined) {
       campaign.instantly.rawCampaignPayload = req.body.instantlyRawCampaignPayload || null;
     }
 
-    await campaign.save();
+    let senderAssignments = [];
+    let senderEmails = [];
+    let primarySenderEmail = normalizeEmail(
+      req.body?.senderAccountEmail || campaign.instantly?.senderAccountEmail || ""
+    );
 
-    if (req.body?.syncNow && campaign.instantly?.campaignId) {
-      let senderAssignments = [];
-      let senderEmails = [];
-      let primarySenderEmail = normalizeEmail(
-        req.body?.senderAccountEmail || campaign.instantly?.senderAccountEmail || ""
-      );
+    if (isImeFlow(campaign)) {
+      senderAssignments = await getActiveImeSenders(campaign.IMEId);
 
-      if (isImeFlow(campaign)) {
-        senderAssignments = await getActiveImeSenders(campaign.IMEId);
+      if (senderAssignments.length) {
+        senderEmails = resolveSelectedAccountEmails(
+          senderAssignments,
+          req.body?.accountEmails,
+          campaign.instantly?.accountEmails
+        );
 
-        if (!senderAssignments.length) {
-          return res.status(400).json({
-            success: false,
-            message: "No mailbox is assigned to this IME",
-          });
-        }
-
-        const availableEmails = senderAssignments
-          .map((item) => normalizeEmail(item.email))
-          .filter(Boolean);
-
-        const requestedEmails = Array.isArray(req.body?.accountEmails)
-          ? req.body.accountEmails.map((item) => normalizeEmail(item)).filter(Boolean)
-          : [];
-
-        senderEmails = requestedEmails.length
-          ? requestedEmails.filter((email) => availableEmails.includes(email))
-          : (campaign.instantly?.accountEmails || [])
-            .map((item) => normalizeEmail(item))
-            .filter((email) => availableEmails.includes(email));
-
-        if (!senderEmails.length) {
-          senderEmails = availableEmails;
-        }
-
-        if (!senderEmails.includes(primarySenderEmail)) {
-          primarySenderEmail = senderEmails[0] || "";
-        }
+        primarySenderEmail = resolveSelectedSenderEmail(
+          senderAssignments,
+          req.body?.senderAccountEmail,
+          campaign.instantly?.senderAccountEmail,
+          senderEmails
+        );
 
         campaign.teamMailboxes.IMEEmail = primarySenderEmail;
-      } else {
-        senderAssignments = await getActiveSdrSenders(campaign.sdrId);
+      }
+    } else {
+      senderAssignments = await getActiveSdrSenders(campaign.sdrId);
 
-        if (!senderAssignments.length) {
-          return res.status(400).json({
-            success: false,
-            message: "No sender mailboxes are assigned to this SDR",
-          });
-        }
-
+      if (senderAssignments.length) {
         const rhMailbox = await getActiveRhMailbox(campaign.RHId);
-        const availableEmails = senderAssignments
-          .map((item) => normalizeEmail(item.email))
-          .filter(Boolean);
 
-        const requestedEmails = Array.isArray(req.body?.accountEmails)
-          ? req.body.accountEmails.map((item) => normalizeEmail(item)).filter(Boolean)
-          : [];
+        senderEmails = resolveSelectedAccountEmails(
+          senderAssignments,
+          req.body?.accountEmails,
+          campaign.instantly?.accountEmails
+        );
 
-        senderEmails = requestedEmails.length
-          ? requestedEmails.filter((email) => availableEmails.includes(email))
-          : (campaign.instantly?.accountEmails || [])
-            .map((item) => normalizeEmail(item))
-            .filter((email) => availableEmails.includes(email));
-
-        if (!senderEmails.length) {
-          senderEmails = availableEmails;
-        }
-
-        if (!senderEmails.includes(primarySenderEmail)) {
-          primarySenderEmail = senderEmails[0] || "";
-        }
+        primarySenderEmail = resolveSelectedSenderEmail(
+          senderAssignments,
+          req.body?.senderAccountEmail,
+          campaign.instantly?.senderAccountEmail,
+          senderEmails
+        );
 
         campaign.teamMailboxes.RHEmail =
           rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
       }
+    }
 
+    if (senderEmails.length) {
+      campaign.instantly.accountEmails = senderEmails;
+      campaign.instantly.senderAccountEmail = primarySenderEmail;
+    }
+
+    await campaign.save();
+
+    if (req.body?.syncNow && campaign.instantly?.campaignId) {
       const updatePayload = buildCampaignCreatePayload({
         campaignName: campaign.name,
-        senderEmails,
+        senderEmails: campaign.instantly.accountEmails || [],
         configuration: campaign.configuration,
         rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
       });
 
       await instantlyService.updateCampaign(campaign.instantly.campaignId, updatePayload);
 
-      campaign.instantly.accountEmails = senderEmails;
-      campaign.instantly.senderAccountEmail = primarySenderEmail;
       campaign.configuration.lastSyncedAt = new Date();
       campaign.configuration.lastSyncedBy = req.admin.adminId;
       campaign.sync.providerStatus = "synced";
@@ -1576,6 +1755,35 @@ function textToHtml(value = "") {
   return escapeHtml(value).replace(/\n/g, "<br/>");
 }
 
+function buildPreviewVariablesFromProspect(prospect = {}, extra = {}) {
+  const vars = {
+    ...(prospect?.templateVariables || {}),
+    ...(extra || {}),
+  };
+
+  if (!vars.firstName) {
+    vars.firstName = prospect?.primaryContact?.name || "";
+  }
+
+  if (!vars.fullName) {
+    vars.fullName = prospect?.primaryContact?.name || "";
+  }
+
+  if (!vars.email) {
+    vars.email = prospect?.primaryContact?.email || "";
+  }
+
+  if (!vars.companyName) {
+    vars.companyName = prospect?.companyName || "";
+  }
+
+  if (!vars.website) {
+    vars.website = prospect?.website || "";
+  }
+
+  return vars;
+}
+
 exports.sendCampaignTestEmail = async (req, res) => {
   try {
     const campaign = await getManagedCampaign(req, req.params.id);
@@ -1586,6 +1794,7 @@ exports.sendCampaignTestEmail = async (req, res) => {
       String(campaign?.instantly?.senderAccountEmail || "").trim();
 
     const stepOrder = Number(req.body?.stepOrder || 1);
+    const variantIndex = Math.max(0, Number(req.body?.variantIndex || 0));
 
     if (!toEmail) {
       return res.status(400).json({
@@ -1615,30 +1824,59 @@ exports.sendCampaignTestEmail = async (req, res) => {
       });
     }
 
-    const variant = step?.variants?.[0] || {
-      subject: "",
-      body: "",
-      preheaderText: "",
-      signatureHtml: "",
-    };
+    const variant =
+      step?.variants?.[variantIndex] ||
+      step?.variants?.[0] || {
+        subject: "",
+        body: "",
+        preheaderText: "",
+        signatureHtml: "",
+      };
 
-    const preheaderHtml = variant.preheaderText
+    let previewProspect = null;
+
+    if (req.body?.prospectId) {
+      previewProspect = await ProspectBrand.findById(req.body.prospectId).lean();
+    }
+
+    if (!previewProspect && Array.isArray(campaign?.prospectIds) && campaign.prospectIds.length) {
+      previewProspect = await ProspectBrand.findById(campaign.prospectIds[0]).lean();
+    }
+
+    const previewVars = buildPreviewVariablesFromProspect(
+      previewProspect || {},
+      req.body?.previewVars || {}
+    );
+
+    const renderedSubject = renderTemplate(String(variant.subject || ""), previewVars);
+    const renderedBodyText = renderTemplate(String(variant.body || ""), previewVars);
+    const renderedPreheader = renderTemplate(
+      String(variant.preheaderText || ""),
+      previewVars
+    );
+    const renderedSignatureHtml = renderTemplate(
+      String(variant.signatureHtml || ""),
+      previewVars
+    );
+
+    const preheaderHtml = renderedPreheader
       ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(
-        variant.preheaderText
+        renderedPreheader
       )}</div>`
       : "";
 
-    const signatureHtml = variant.signatureHtml
-      ? `<div style="margin-top:16px;">${variant.signatureHtml}</div>`
+    const signatureHtml = renderedSignatureHtml
+      ? `<div style="margin-top:16px;">${renderedSignatureHtml}</div>`
       : "";
 
-    const html = `${preheaderHtml}${textToHtml(String(variant.body || ""))}${signatureHtml}`;
+    const html = `${preheaderHtml}${textToHtml(renderedBodyText)}${signatureHtml}`;
 
     const result = await instantlyService.sendTestEmail({
       eaccount: accountEmail,
       to_address_email_list: toEmail,
-      subject: String(variant.subject || ""),
+      subject: renderedSubject,
       body: {
+        text: renderedBodyText,
         html,
       },
     });
@@ -1670,6 +1908,10 @@ exports.listCampaignContacts = async (req, res) => {
       success: true,
       count: rows.length,
       data: rows,
+      meta: {
+        columns: Array.isArray(campaign.csvSchema?.columns) ? campaign.csvSchema.columns : [],
+        templateVariables: Array.isArray(campaign.templateVariables) ? campaign.templateVariables : [],
+      },
     });
   } catch (error) {
     const payload = getAxiosErrorPayload(error, "Internal error");
@@ -2093,18 +2335,14 @@ exports.launchOutreachCampaign = async (req, res) => {
     const campaign = await getManagedCampaign(req, req.params.id);
     const configuration = getCampaignConfigurationFromDocument(campaign);
 
-    if (campaign.status === OUTREACH_CAMPAIGN_STATUS.LAUNCHED) {
-      return res.status(400).json({
-        success: false,
-        message: "Campaign is already launched",
-      });
-    }
+    assertCampaignSequencesAreSendable(configuration);
 
     const imeFlow = isImeFlow(campaign);
 
     let senderAssignments = [];
     let senderEmails = [];
     let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
+    let createCampaignPayload = null;
 
     if (isImeFlow(campaign)) {
       senderAssignments = await getActiveImeSenders(campaign.IMEId);
@@ -2273,12 +2511,7 @@ exports.launchOutreachCampaign = async (req, res) => {
     try {
       addLeadsResult = await instantlyService.addLeads({
         campaign_id: instantlyCampaignId,
-        leads: prospects.map((item) => ({
-          email: item.primaryContact.email,
-          first_name: item.primaryContact.name || "",
-          company_name: item.companyName || "",
-          website: item.website || "",
-        })),
+        leads: prospects.map(buildInstantlyLeadFromProspect),
       });
     } catch (error) {
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
@@ -3070,6 +3303,7 @@ async function upsertProspectsFromMappedRows(rows = [], columns = [], sourceFile
 
     const firstName = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.FIRST_NAME);
     const lastName = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.LAST_NAME);
+
     const fullName =
       getMappedCellValue(row, columns, CSV_COLUMN_TYPE.FULL_NAME) ||
       [firstName, lastName].filter(Boolean).join(" ").trim();
@@ -3080,23 +3314,53 @@ async function upsertProspectsFromMappedRows(rows = [], columns = [], sourceFile
     const phone = getMappedCellValue(row, columns, CSV_COLUMN_TYPE.PHONE);
 
     const templateVariables = buildTemplateVariableMapFromRow(row, columns);
+    const emailFallbackName = fallbackNameFromEmail(email);
+
+    const resolvedCompanyName =
+      companyName ||
+      templateVariables.companyName ||
+      fullName ||
+      firstName ||
+      emailFallbackName ||
+      "Lead";
+
+    const resolvedContactName =
+      fullName ||
+      firstName ||
+      templateVariables.fullName ||
+      templateVariables.firstName ||
+      emailFallbackName ||
+      resolvedCompanyName;
+
+    const nextTemplateVariables = {
+      ...templateVariables,
+      email,
+      firstName: templateVariables.firstName || firstName || emailFallbackName,
+      lastName: templateVariables.lastName || lastName || "",
+      fullName: templateVariables.fullName || fullName || resolvedContactName,
+      companyName: templateVariables.companyName || resolvedCompanyName,
+      website: templateVariables.website || website || "",
+      jobTitle: templateVariables.jobTitle || title || "",
+      phone: templateVariables.phone || phone || "",
+      linkedinUrl: templateVariables.linkedinUrl || linkedinUrl || "",
+    };
 
     const doc = await ProspectBrand.findOneAndUpdate(
       { "primaryContact.email": email },
       {
         $set: {
-          companyName: companyName || templateVariables.companyName || "Unknown",
-          website: website || templateVariables.website || "",
+          companyName: resolvedCompanyName,
+          website: website || nextTemplateVariables.website || "",
           source: "csv",
           primaryContact: {
-            name: fullName || firstName || "",
+            name: resolvedContactName,
             email,
             title: title || "",
             linkedinUrl: linkedinUrl || "",
             phone: phone || "",
           },
           customFields: row,
-          templateVariables,
+          templateVariables: nextTemplateVariables,
           csvMeta: {
             headers: Object.keys(row || {}),
             mappedAt: new Date(),
@@ -3151,6 +3415,16 @@ function buildDefaultSequence() {
   ];
 }
 
+function buildPreviewRows(rows = [], limit = 10) {
+  return rows.slice(0, limit).map((row) => {
+    const normalized = {};
+    Object.keys(row || {}).forEach((key) => {
+      normalized[key] = String(row[key] ?? "").trim();
+    });
+    return normalized;
+  });
+}
+
 exports.previewCampaignContactsCsv = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
@@ -3177,6 +3451,7 @@ exports.previewCampaignContactsCsv = async (req, res) => {
 
     const columns = buildCsvPreviewColumns(rows);
     const templateVariables = buildTemplateVariableList(columns);
+    const previewRows = buildPreviewRows(rows, 10);
 
     return res.status(200).json({
       success: true,
@@ -3184,6 +3459,7 @@ exports.previewCampaignContactsCsv = async (req, res) => {
         fileName: req.file.originalname || "contacts.csv",
         totalRows: rows.length,
         columns,
+        previewRows,
         templateVariables,
       },
     });
