@@ -1,8 +1,9 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
-const  OpenAI = require("openai");
-const BrandInfo = require("../models/brandInfo")
+const OpenAI = require("openai");
+
+const BrandInfo = require("../models/brandInfo");
 const BrandModelImport = require("../models/brand");
 const BrandCoupon = require("../models/brandCoupon");
 const VerifyOtpModelImport = require("../models/verifyOtp");
@@ -14,6 +15,10 @@ const HttpStatusImport = require("../core/http/HttpStatus");
 const ApiErrorImport = require("../core/http/ApiError");
 const SubscriptionPlan = require("../models/subscription");
 const { uploadBrandProfilePicToS3 } = require("../utils/uploadBase64ImagesToS3");
+
+void OpenAI;
+void BrandInfo;
+
 const BrandModel =
   BrandModelImport.BrandModel || BrandModelImport.default || BrandModelImport;
 
@@ -104,6 +109,18 @@ const isPasswordLenOk = (password) => {
 
 const genOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
+function isPendingAdminCreatedBrand(doc = {}) {
+  return doc?.isAdminCreated === true && doc?.signupCompleted === false;
+}
+
+function assertNotPendingAdminCreatedBrand(brand) {
+  if (isPendingAdminCreatedBrand(brand)) {
+    throw new ValidationError(
+      "This brand was added by admin. Please complete signup first using the same email."
+    );
+  }
+}
+
 function assertCallable(fn, name) {
   if (typeof fn !== "function") {
     throw new Error(`${name} export is invalid`);
@@ -116,6 +133,7 @@ assertCallable(sendEmail, "sendEmail");
 
 const hashOtp = (email, otp) => {
   const secret = process.env.OTP_SECRET || "dev-secret";
+
   return crypto
     .createHash("sha256")
     .update(`${normalizeEmail(email)}:${String(otp)}:${secret}`)
@@ -185,7 +203,6 @@ function buildSafeSignupPayload(body) {
   };
 }
 
-
 function featureValueToLimit(value) {
   if (typeof value === "number") return value;
   if (value && typeof value === "object" && value.unlimited === true) return -1;
@@ -231,11 +248,14 @@ function validateSignupRequest(body) {
   const password = String(body.password || "");
 
   if (!brandName) throw new ValidationError("Brand name is required");
+
   if (!email || !isValidEmail(email)) {
     throw new ValidationError("Valid email is required");
   }
+
   if (!industry) throw new ValidationError("Industry is required");
   if (!password.trim()) throw new ValidationError("Password is required");
+
   if (!isPasswordLenOk(password)) {
     throw new ValidationError("Password must be 8 to 16 characters.");
   }
@@ -420,7 +440,12 @@ async function enforceOtpLimitByKey(email, key) {
   const nowMs = Date.now();
 
   const limitDoc = await VerifyOtpModel.findOneAndUpdate(
-    { email: normalizedEmail, role: "brand", docType: "limit", key },
+    {
+      email: normalizedEmail,
+      role: "brand",
+      docType: "limit",
+      key,
+    },
     {
       $setOnInsert: {
         email: normalizedEmail,
@@ -574,7 +599,9 @@ async function recordFailedSignin(email) {
     throw new RateLimitError(
       (doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL
         ? "Too many failed login attempts. Try again after 24 hours."
-        : `Too many failed login attempts. Try again in ${msToWaitString(waitMs)}.`,
+        : `Too many failed login attempts. Try again in ${msToWaitString(
+            waitMs
+          )}.`,
       {
         code:
           (doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL
@@ -613,7 +640,7 @@ async function sendSignupOtp(req, res, next) {
     const email = normalizeEmail(req.body.email);
     const existingBrand = await findBrandByEmail(email);
 
-    if (existingBrand) {
+    if (existingBrand && !isPendingAdminCreatedBrand(existingBrand)) {
       throw new ConflictError("Email already registered. Please login.");
     }
 
@@ -683,9 +710,11 @@ async function verifyOtpSignUp(req, res, next) {
 
     if (!otpDoc) {
       const existingBrand = await findBrandByEmail(email);
-      if (existingBrand) {
+
+      if (existingBrand && !isPendingAdminCreatedBrand(existingBrand)) {
         throw new ConflictError("Email already registered. Please login.");
       }
+
       throw new ValidationError(
         "OTP not requested or expired. Please request a new OTP."
       );
@@ -694,6 +723,7 @@ async function verifyOtpSignUp(req, res, next) {
     assertValidOtpDoc(otpDoc, email, otp);
 
     const payload = otpDoc.signupPayload || {};
+
     if (!payload.brandName || !payload.industry || !payload.passwordHash) {
       throw new ValidationError(
         "Signup details missing. Please request OTP again."
@@ -701,7 +731,8 @@ async function verifyOtpSignUp(req, res, next) {
     }
 
     const existingBrand = await findBrandByEmail(email);
-    if (existingBrand) {
+
+    if (existingBrand && !isPendingAdminCreatedBrand(existingBrand)) {
       await clearAllOtpDocs(email, "signup");
       throw new ConflictError("Email already registered. Please login.");
     }
@@ -712,22 +743,48 @@ async function verifyOtpSignUp(req, res, next) {
       status: "active",
     });
 
-    if (!freePlan) {
+    if (!freePlan && !existingBrand?.subscription?.planId) {
       throw new InternalError("Free brand plan not found");
     }
 
-    const brand = await BrandModel.create({
-      email,
-      brandName: safeTrim(payload.brandName),
-      name: safeTrim(payload.name) || safeTrim(payload.brandName),
-      companySize: safeTrim(payload.companySize),
-      industry: safeTrim(payload.industry),
-      password: payload.passwordHash,
-      subscription: buildSubscriptionFromPlan(freePlan),
-    });
+    let brand;
+
+    if (existingBrand && isPendingAdminCreatedBrand(existingBrand)) {
+      existingBrand.brandName = safeTrim(payload.brandName);
+      existingBrand.name = safeTrim(payload.name) || safeTrim(payload.brandName);
+      existingBrand.companySize = safeTrim(payload.companySize);
+      existingBrand.industry = safeTrim(payload.industry);
+      existingBrand.password = payload.passwordHash;
+
+      existingBrand.signupCompleted = true;
+      existingBrand.signupCompletedAt = new Date();
+
+      // Keep this true for audit history. signupCompleted=true means it is no longer a placeholder.
+      existingBrand.isAdminCreated = true;
+
+      if (!existingBrand.subscription?.planId && freePlan) {
+        existingBrand.subscription = buildSubscriptionFromPlan(freePlan);
+      }
+
+      brand = await existingBrand.save();
+    } else {
+      brand = await BrandModel.create({
+        email,
+        brandName: safeTrim(payload.brandName),
+        name: safeTrim(payload.name) || safeTrim(payload.brandName),
+        companySize: safeTrim(payload.companySize),
+        industry: safeTrim(payload.industry),
+        password: payload.passwordHash,
+        isAdminCreated: false,
+        signupCompleted: true,
+        signupCompletedAt: new Date(),
+        subscription: buildSubscriptionFromPlan(freePlan),
+      });
+    }
 
     await markOtpUsed(otpDoc, { userId: brand._id });
     await clearAllOtpDocs(email, "signup");
+    await clearAllOtpDocs(email, "reset_password");
 
     const token = signJwt({
       brandId: String(brand._id),
@@ -800,11 +857,13 @@ async function saveBrandOnboarding(req, res, next) {
             "page1 is required when ispage1Skip is false"
           );
         }
+
         if (!isQAArray(page1)) {
           throw new ValidationError(
             "page1 must be an array of { question, answers[] }"
           );
         }
+
         update.page1 = page1;
         update.ispage1Skip = false;
       }
@@ -824,11 +883,13 @@ async function saveBrandOnboarding(req, res, next) {
             "page2 is required when ispage2Skip is false"
           );
         }
+
         if (!isQAArray(page2)) {
           throw new ValidationError(
             "page2 must be an array of { question, answers[] }"
           );
         }
+
         update.page2 = page2;
         update.ispage2Skip = false;
       }
@@ -848,11 +909,13 @@ async function saveBrandOnboarding(req, res, next) {
             "page3 is required when ispage3Skip is false"
           );
         }
+
         if (!isQAArray(page3)) {
           throw new ValidationError(
             "page3 must be an array of { question, answers[] }"
           );
         }
+
         update.page3 = page3;
         update.ispage3Skip = false;
       }
@@ -913,12 +976,14 @@ async function saveBrandOnboarding(req, res, next) {
     return handleControllerError(next, err, "saveBrandOnboarding");
   }
 }
+
 function hasCompletedOnboardingStep(step) {
   if (Array.isArray(step)) {
     return step.some((item) => {
       if (item && typeof item === "object" && !Array.isArray(item)) {
         return Object.keys(item).length > 0;
       }
+
       return Boolean(item);
     });
   }
@@ -929,18 +994,16 @@ function hasCompletedOnboardingStep(step) {
 
   return Boolean(step);
 }
+
 function computeBrandNextRoute(brand) {
   const page1Done =
-    hasCompletedOnboardingStep(brand?.page1) ||
-    brand?.ispage1Skip === true;
+    hasCompletedOnboardingStep(brand?.page1) || brand?.ispage1Skip === true;
 
   const page2Done =
-    hasCompletedOnboardingStep(brand?.page2) ||
-    brand?.ispage2Skip === true;
+    hasCompletedOnboardingStep(brand?.page2) || brand?.ispage2Skip === true;
 
   const page3Done =
-    hasCompletedOnboardingStep(brand?.page3) ||
-    brand?.ispage3Skip === true;
+    hasCompletedOnboardingStep(brand?.page3) || brand?.ispage3Skip === true;
 
   let route = "campaign";
 
@@ -973,6 +1036,8 @@ async function signInBrand(req, res, next) {
     if (!brand) {
       throw new NotFoundError("Email does not exist. Please sign up.");
     }
+
+    assertNotPendingAdminCreatedBrand(brand);
 
     if (!brand.password) {
       throw new ValidationError("Password not set. Please use forgot password.");
@@ -1040,6 +1105,8 @@ async function sendOtpForgotBrand(req, res, next) {
       throw new NotFoundError("Brand account not found");
     }
 
+    assertNotPendingAdminCreatedBrand(brand);
+
     await enforceOtpLimitByKey(email, "forgot_limit");
     await clearPendingOtpDocs(email, "reset_password");
 
@@ -1102,9 +1169,12 @@ async function verifyOtpForgotBrand(req, res, next) {
     }
 
     const brand = await findBrandByEmail(email);
+
     if (!brand) {
       throw new NotFoundError("Brand account not found");
     }
+
+    assertNotPendingAdminCreatedBrand(brand);
 
     const otpDoc = await getLatestPendingOtp(email, "reset_password");
     assertValidOtpDoc(otpDoc, email, otp);
@@ -1193,7 +1263,10 @@ async function updatePasswordBrand(req, res, next) {
       throw new NotFoundError("Brand not found");
     }
 
+    assertNotPendingAdminCreatedBrand(brand);
+
     const samePassword = await brand.comparePassword(newPassword);
+
     if (samePassword) {
       throw new ValidationError(
         "New password cannot be the same as your last password"
@@ -1337,12 +1410,18 @@ async function getBrandProfile(req, res, next) {
   }
 }
 
-
 async function updateBrandProfile(req, res, next) {
   const requestId = req.requestId || "";
 
   try {
-    const { brandId, brandName, companySize, brandType, platform, profilePic } = req.body || {};
+    const {
+      brandId,
+      brandName,
+      companySize,
+      brandType,
+      platform,
+      profilePic,
+    } = req.body || {};
 
     if (!brandId) {
       throw new ValidationError("brandId is required.");
@@ -1353,6 +1432,7 @@ async function updateBrandProfile(req, res, next) {
     }
 
     const brand = await BrandModel.findById(brandId).lean().exec();
+
     if (!brand) {
       throw new NotFoundError("Brand not found.");
     }
@@ -1376,7 +1456,9 @@ async function updateBrandProfile(req, res, next) {
     if (brandType !== undefined) {
       const page1 = Array.isArray(brand.page1) ? [...brand.page1] : [];
       const idx = page1.findIndex((x) =>
-        String(x?.question || "").toLowerCase().includes("what type of brand")
+        String(x?.question || "")
+          .toLowerCase()
+          .includes("what type of brand")
       );
 
       const row = {
@@ -1392,14 +1474,12 @@ async function updateBrandProfile(req, res, next) {
     }
 
     if (platform !== undefined) {
-      const page3 = [
+      update.page3 = [
         {
           question: "Preferred platforms",
           answers: [safeTrim(platform)],
         },
       ];
-
-      update.page3 = page3;
       update.ispage3Skip = false;
     }
 
@@ -1421,6 +1501,7 @@ async function updateBrandProfile(req, res, next) {
     return handleControllerError(next, err, "updateBrandProfile");
   }
 }
+
 const uploadBrandProfilePic = async (req, res) => {
   try {
     if (!req.file) {
@@ -1584,4 +1665,3 @@ module.exports = {
   verifyBrandCoupon
 
 };
-

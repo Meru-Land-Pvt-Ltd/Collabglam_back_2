@@ -22,6 +22,14 @@ const {
   adminAddComment,
   adminUpdateStatus,
   adminAssign,
+  adminCreateDisputeEvidence,
+  brandRevokeDispute,
+  brandEditDispute,
+  publicGetDisputeById,
+  brandEditComment,
+  brandDeleteComment,
+  influencerRevokeDispute,
+  influencerEditDispute
 } = require('../controllers/disputeController');
 
 // ---- Multer config for dispute attachments ----
@@ -86,12 +94,27 @@ router.post(
 );
 router.post('/brand/list', verifyToken, brandList);
 router.get('/brand/:id', verifyToken, brandGetById);
+router.get('/public/:id', publicGetDisputeById);
 router.post(
   '/brand/:id/comment',
   verifyToken,
   uploadAttachments,
   brandAddComment
 );
+router.patch(
+  '/brand/comment/:id',
+  verifyToken,
+  uploadAttachments,
+  brandEditComment
+);
+
+router.delete(
+  '/brand/comment/:id',
+  verifyToken,
+  brandDeleteComment
+);
+router.patch('/brand/disputes/:id/revoke', verifyToken, brandRevokeDispute);
+router.patch('/brand/disputes/:id/edit', verifyToken, uploadAttachments, brandEditDispute); // reuse create handler for edits (with disputeId in params)
 
 // -------- Influencer endpoints (require influencer auth) --------
 router.post(
@@ -102,6 +125,18 @@ router.post(
 );
 router.post('/influencer/list', verifyToken, influencerList);
 router.get('/influencer/:id', verifyToken, influencerGetById);
+router.patch(
+  "/influencer/disputes/:id/revoke",
+  verifyToken,
+  influencerRevokeDispute
+);
+
+router.patch(
+  "/influencer/disputes/:id/edit",
+  verifyToken,
+  uploadAttachments,
+  influencerEditDispute
+);
 router.post(
   '/influencer/:id/comment',
   verifyToken,
@@ -109,6 +144,7 @@ router.post(
   influencerAddComment
 );
 router.post('/influencer/applied', verifyToken, influencerCampaignsForDispute);
+// router.patch('/influencer/disputes/:id/revoke', disputeController.influencerRevokeDispute);
 
 // -------- Admin endpoints (relaxed auth, but comments can also have files) --------
 router.post('/admin/list', adminList);
@@ -120,5 +156,5 @@ router.post(
 );
 router.post('/admin/update-status', adminUpdateStatus);
 router.post('/admin/assign', adminAssign);
-
+router.post('/admin/:id/evidence', uploadAttachments, adminCreateDisputeEvidence); // reuse create handler for adding evidence (with disputeId in params)
 module.exports = router;

@@ -64,6 +64,8 @@ const CampaignSendingOptionsSchema = new Schema(
     insertUnsubscribeHeader: { type: Boolean, default: false },
     allowRiskyContacts: { type: Boolean, default: false },
     disableBounceProtect: { type: Boolean, default: false },
+    ccList: { type: [String], default: [] },
+    bccList: { type: [String], default: [] },
   },
   { _id: false }
 );

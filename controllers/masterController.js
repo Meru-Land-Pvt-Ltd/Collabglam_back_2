@@ -2,7 +2,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const Campaign = require("../models/campaign");
-const  OpenAI = require("openai");
+const OpenAI = require("openai");
 const BrandInfo = require("../models/brandInfo")
 const BrandCoupon = require("../models/brandCoupon")
 const cheerio = require("cheerio");
@@ -23,6 +23,7 @@ const mongoose = require("mongoose");
 const INVITE_EXP_MINUTES = Number(process.env.INVITE_EXP_MINUTES || 60);
 const { buildCampaignVisibilityFilter } = require('../utils/campaignAccess');
 const EXECUTIVE_ROLES = [ROLES.IME, ROLES.BME, ROLES.SDR];
+const CampaignAssigned = require("../models/CampaignAssigned");
 
 // ======================
 // Local Helpers
@@ -817,9 +818,171 @@ async function validateExecutivesUnderRH({ RHId, bdmId, idmId, sdrId }) {
   }
 }
 
+async function validateBrandTeamUnderRH({ RHId, bdmId }) {
+  const rhId = String(RHId || "").trim();
+
+  if (!rhId || !mongoose.isValidObjectId(rhId)) {
+    throw new Error("Valid RHId is required before assigning BME");
+  }
+
+  const rh = await AdminModel.findOne({
+    _id: rhId,
+    role: ROLES.REVENUE_HEAD,
+    status: "active",
+  }).select("_id");
+
+  if (!rh) {
+    throw new Error("Assigned RH not found or inactive");
+  }
+
+  if (bdmId !== undefined && bdmId !== null && String(bdmId).trim() !== "") {
+    if (!mongoose.isValidObjectId(String(bdmId))) {
+      throw new Error("Invalid bdmId");
+    }
+
+    const bme = await AdminModel.findOne({
+      _id: bdmId,
+      role: ROLES.BME,
+      status: "active",
+      parentAdmin: rhId,
+    }).select("_id");
+
+    if (!bme) {
+      throw new Error("Selected BME does not belong to the assigned RH");
+    }
+  }
+}
+
+exports.assignCampaignIme = async (req, res) => {
+  try {
+    const campaignId = String(req.body?.campaignId || "").trim();
+    const idmId = String(req.body?.idmId || "").trim();
+
+    if (!campaignId) {
+      return res.status(400).json({
+        success: false,
+        message: "campaignId is required",
+      });
+    }
+
+    if (!idmId) {
+      return res.status(400).json({
+        success: false,
+        message: "idmId is required",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid campaignId",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(idmId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid idmId",
+      });
+    }
+
+    const campaign = await Campaign.findById(campaignId)
+      .select("_id brandId brandName campaignTitle")
+      .lean();
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found",
+      });
+    }
+
+    const brandAssignment = await BrandAssigned.findOne({
+      brandId: campaign.brandId,
+      status: "active",
+      RHId: { $exists: true, $ne: null },
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    if (!brandAssignment?.RHId) {
+      return res.status(400).json({
+        success: false,
+        message: "Assign RH to this brand before assigning IME to campaign.",
+      });
+    }
+
+    const ime = await AdminModel.findOne({
+      _id: idmId,
+      role: ROLES.IME,
+      status: "active",
+      parentAdmin: brandAssignment.RHId,
+    }).select("_id");
+
+    if (!ime) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected IME does not belong to the assigned RH.",
+      });
+    }
+
+    const doc = await CampaignAssigned.findOneAndUpdate(
+      {
+        campaignId: campaign._id,
+        status: "active",
+      },
+      {
+        $setOnInsert: {
+          campaignId: campaign._id,
+          brandId: campaign.brandId,
+        },
+        $set: {
+          brandId: campaign.brandId,
+          RHId: brandAssignment.RHId || null,
+          bdmId: brandAssignment.bdmId || null,
+          idmId,
+          status: "active",
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+      }
+    ).exec();
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaign IME assignment saved successfully",
+      data: doc,
+    });
+  } catch (error) {
+    console.error("assignCampaignIme error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal error",
+    });
+  }
+};
+
 exports.assignBrand = async (req, res) => {
   try {
-    const { brandId, RHId, bdmId, idmId } = req.body;
+    const brandId = String(req.body?.brandId || "").trim();
+    const RHId = req.body?.RHId;
+    const bdmId = req.body?.bdmId;
+
+    if (req.body?.idmId !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "IME assignment is campaign-based now. Use /admins/assign-campaign-ime instead.",
+      });
+    }
+
+    if (req.body?.sdrId !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "SDR assignment is not supported on brand assignment in this flow.",
+      });
+    }
 
     if (!brandId) {
       return res.status(400).json({
@@ -828,7 +991,7 @@ exports.assignBrand = async (req, res) => {
       });
     }
 
-    if (!mongoose.isValidObjectId(String(brandId))) {
+    if (!mongoose.isValidObjectId(brandId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid brandId",
@@ -837,53 +1000,52 @@ exports.assignBrand = async (req, res) => {
 
     const wantsRH =
       RHId !== undefined && RHId !== null && String(RHId).trim() !== "";
-    const wantsBDMorIDM = bdmId !== undefined || idmId !== undefined;
 
-    if (!wantsRH && !wantsBDMorIDM) {
+    const wantsBME = bdmId !== undefined;
+
+    if (!wantsRH && !wantsBME) {
       return res.status(400).json({
         success: false,
-        message: "Send RHId to assign RH OR send bdmId/idmId to assign BDM/IDM",
+        message: "Send RHId to assign RH or send bdmId to assign BME",
       });
     }
 
     const normalizedBrandId = new mongoose.Types.ObjectId(String(brandId));
 
-    // CASE A: RH assignment
     if (wantsRH) {
-      await validateExecutivesUnderRH({ RHId, bdmId, idmId });
+      await validateBrandTeamUnderRH({ RHId, bdmId });
 
-      // IMPORTANT:
-      // when RH changes, reset old BME/IME unless explicitly sent
       const set = {
-        RHId,
-        bdmId: bdmId !== undefined ? (bdmId || null) : null,
-        idmId: idmId !== undefined ? (idmId || null) : null,
+        RHId: RHId || null,
         status: "active",
       };
 
-      let doc = await BrandAssigned.findOneAndUpdate(
-        { brandId: normalizedBrandId, status: "active" },
-        { $set: set },
-        { new: true }
-      ).exec();
-
-      if (!doc) {
-        doc = await BrandAssigned.findOneAndUpdate(
-          { brandId: normalizedBrandId },
-          { $set: set },
-          { new: true, sort: { updatedAt: -1, createdAt: -1 } }
-        ).exec();
+      if (bdmId !== undefined) {
+        set.bdmId = bdmId || null;
+      } else {
+        set.bdmId = null;
       }
 
-      if (!doc) {
-        doc = await BrandAssigned.create({
+      const doc = await BrandAssigned.findOneAndUpdate(
+        {
           brandId: normalizedBrandId,
-          RHId,
-          bdmId: bdmId || null,
-          idmId: idmId || null,
           status: "active",
-        });
-      }
+        },
+        {
+          $setOnInsert: {
+            brandId: normalizedBrandId,
+          },
+          $set: set,
+          $unset: {
+            idmId: "",
+            sdrId: "",
+          },
+        },
+        {
+          new: true,
+          upsert: true,
+        }
+      ).exec();
 
       return res.status(200).json({
         success: true,
@@ -892,7 +1054,6 @@ exports.assignBrand = async (req, res) => {
       });
     }
 
-    // CASE B: only BME / IME assignment, RH must already exist
     let activeAssignment = await BrandAssigned.findOne({
       brandId: normalizedBrandId,
       status: "active",
@@ -913,36 +1074,44 @@ exports.assignBrand = async (req, res) => {
     if (!activeAssignment?.RHId) {
       return res.status(400).json({
         success: false,
-        message: "RH is not assigned for this brand. Assign RH first, then add BDM/IDM.",
+        message: "RH is not assigned for this brand. Assign RH first, then add BME.",
       });
     }
 
-    await validateExecutivesUnderRH({
+    await validateBrandTeamUnderRH({
       RHId: activeAssignment.RHId,
       bdmId,
-      idmId,
     });
 
-    const set = { status: "active" };
-    if (bdmId !== undefined) set.bdmId = bdmId || null;
-    if (idmId !== undefined) set.idmId = idmId || null;
-
     const updated = await BrandAssigned.findOneAndUpdate(
-      { _id: activeAssignment._id },
-      { $set: set },
-      { new: true }
+      {
+        _id: activeAssignment._id,
+      },
+      {
+        $set: {
+          bdmId: bdmId || null,
+          status: "active",
+        },
+        $unset: {
+          idmId: "",
+          sdrId: "",
+        },
+      },
+      {
+        new: true,
+      }
     ).exec();
 
     return res.status(200).json({
       success: true,
-      message: "Brand assignment updated successfully",
+      message: "Brand BME assignment updated successfully",
       data: updated,
     });
-  } catch (e) {
-    console.error("assignBrand error:", e);
+  } catch (error) {
+    console.error("assignBrand error:", error);
     return res.status(500).json({
       success: false,
-      message: e?.message || "Internal error",
+      message: error?.message || "Internal error",
     });
   }
 };
@@ -1032,9 +1201,7 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
     if (!actor?.adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    if (adminId == "64b8c8f1c9d898001d9e7c3e") {
 
-    }
     if (!assignmentId) {
       return res.status(400).json({
         success: false,
@@ -1166,12 +1333,29 @@ exports.listExecutiveAdmin = async (req, res) => {
 
     const executives = await AdminModel.find(filter)
       .select("-passwordHash -inviteTokenHash")
-      .sort({ createdAt: -1 });
+      .populate("parentAdmin", "name email role")
+      .populate("createdBy", "name email role")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const data = executives.map((item) => {
+      const revenueHead =
+        item?.parentAdmin?.role === ROLES.REVENUE_HEAD
+          ? item.parentAdmin
+          : item?.createdBy?.role === ROLES.REVENUE_HEAD
+            ? item.createdBy
+            : null;
+
+      return {
+        ...item,
+        revenueHeadName: revenueHead?.name || "",
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      count: executives.length,
-      data: executives,
+      count: data.length,
+      data,
     });
   } catch (e) {
     return res.status(500).json({
@@ -1185,7 +1369,8 @@ exports.rmlist = async (req, res) => {
   try {
     const rms = await AdminModel.find({ role: "revenue_head", status: "active" })
       .select("-passwordHash -inviteTokenHash")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -1218,12 +1403,10 @@ exports.allocateBrand = async (req, res) => {
     const isObjId = mongoose.Types.ObjectId.isValid(adminIdStr);
     const adminObjId = isObjId ? new mongoose.Types.ObjectId(adminIdStr) : null;
 
-    const orConditions = [
-      { bdmId: adminIdStr },
-      { idmId: adminIdStr },
-    ];
+    const orConditions = [{ bdmId: adminIdStr }];
+
     if (adminObjId) {
-      orConditions.push({ bdmId: adminObjId }, { idmId: adminObjId });
+      orConditions.push({ bdmId: adminObjId });
     }
 
     const allocations = await BrandAssigned.find({
@@ -1515,6 +1698,57 @@ const brandProperties = {
   support_email: { type: "string" },
   public_phone: { type: "string" },
   public_address: { type: "string" },
+  core_offerings: { type: "string" },
+  flagship_products: { type: "string" },
+  key_products_or_services: { type: "string" },
+  value_proposition: { type: "string" },
+  unique_selling_proposition: { type: "string" },
+  target_audience: { type: "string" },
+  ideal_customer_profile: { type: "string" },
+  brand_positioning: { type: "string" },
+  key_differentiators: { type: "string" },
+  use_cases: { type: "string" },
+
+  blog_url: { type: "string" },
+  newsroom_url: { type: "string" },
+  press_page_url: { type: "string" },
+  resources_page_url: { type: "string" },
+  case_studies_url: { type: "string" },
+  webinars_url: { type: "string" },
+  podcast_url: { type: "string" },
+  content_strategy: { type: "string" },
+  content_pillars: { type: "string" },
+  content_tone: { type: "string" },
+  blog_summary: { type: "string" },
+  recent_blog_titles: { type: "string" },
+  recent_blog_topics: { type: "string" },
+  recent_news_or_launches: { type: "string" },
+
+  leadership_team: { type: "string" },
+  founder_name: { type: "string" },
+  ceo_name: { type: "string" },
+  key_executives: { type: "string" },
+  leadership_overview: { type: "string" },
+  notable_partnerships: { type: "string" },
+  notable_clients: { type: "string" },
+  notable_partnerships_or_clients: { type: "string" },
+  investors_or_backers: { type: "string" },
+
+  marketplaces_or_store_presence: { type: "string" },
+  retail_presence: { type: "string" },
+  distributor_network: { type: "string" },
+
+  customer_support_channels: { type: "string" },
+  faq_page_url: { type: "string" },
+  help_center_url: { type: "string" },
+  return_policy_summary: { type: "string" },
+  warranty_summary: { type: "string" },
+  shipping_regions: { type: "string" },
+  company_mission: { type: "string" },
+  company_vision: { type: "string" },
+  app_store_presence: { type: "string" },
+  play_store_url: { type: "string" },
+  app_store_url: { type: "string" },
 };
 
 const brandJsonSchema = {
@@ -1629,8 +1863,8 @@ function mergeStructuredObjects(primary = {}, fallback = {}, keys = []) {
     output[key] = hasValue(primary[key])
       ? primary[key]
       : hasValue(fallback[key])
-      ? fallback[key]
-      : "";
+        ? fallback[key]
+        : "";
   }
   return output;
 }
@@ -1900,44 +2134,31 @@ Return only JSON.
 `;
 }
 
-function buildProfilePrompt(brandName, resolved, scraped, options = {}) {
-  const { withSearch = false } = options;
-
+function buildProfilePrompt(brandName, resolved, scraped) {
   return `
-You are a brand research assistant.
+You are an Elite Business Research Analyst and Data Forensics Expert conducting a comprehensive, deep-dive analysis into the brand: "${brandName}".
 
-Original input: "${brandName}"
+Resolved Context:
+- Name: ${resolved?.brand_name}
+- Domain: ${resolved?.domain}
+- Website: ${resolved?.website_url}
 
-Resolved identity:
-- matched: ${resolved?.matched === true ? "true" : "false"}
-- brand_name: ${resolved?.brand_name || "null"}
-- domain: ${resolved?.domain || "null"}
-- website_url: ${resolved?.website_url || "null"}
-- industry: ${resolved?.industry || "null"}
-- headquarters_country: ${resolved?.headquarters_country || "null"}
+Web Evidence Scraped:
+"""${scraped?.raw_website_text || "No direct text available; rely on your internal knowledge and live web search capabilities."}"""
 
-Public website evidence:
-- about_page_url: ${scraped?.about_page_url || "null"}
-- contact_page_url: ${scraped?.contact_page_url || "null"}
-- scraped_text:
-"""${scraped?.raw_website_text || ""}"""
+INSTRUCTIONS:
+1. NARRATIVE EXCELLENCE: Every field must be a highly detailed, professional, flowing narrative paragraph. Absolutely no bullet points, fragments, or empty strings.
+2. CONTENT FORENSICS (BLOGS & RESOURCES): You must forensically analyze their content marketing ecosystem. 
+   - Identify the specific URL patterns for their blog, newsroom, case studies, whitepapers, or webinars.
+   - Summarize their core content pillars and the primary topics they write about.
+   - Describe the brand's tone of voice, the target audience for these publications, and highlight any specific themes, recent initiatives, or flagship topics detected in the scraped data.
+3. PRODUCT & MARKET POSITIONING: Clearly delineate their core offerings, flagship products, or services. Detail their unique value proposition (UVP), their ideal customer profile (ICP), and how they differentiate themselves from competitors.
+4. FINANCIAL & METRICS DETAIL: Describe funding rounds, revenue ranges, and valuation in descriptive USD terms. If exact public data is sparse, you MUST provide a highly educated "Market Comparable" analysis based on their industry size, employee count, and maturity stage.
+5. DIGITAL FOOTPRINT & LEADERSHIP: If available in the data, identify key leadership (Founders/CEO/Executives) and describe their broader digital footprint, including their target social platforms, community engagement strategies, or notable industry partnerships.
+6. BRAND OVERVIEW: The 'brand_description' field must be a rich, authoritative overview of at least 400-500 words covering their history, core mission, product value proposition, and market positioning.
+7. EXHAUSTIVE DATA COMPLETENESS: Do not leave any fields blank or return "null". If a specific metric is completely unknown, explain *why* it might not be public (e.g., "As an early-stage private company operating in stealth...") and provide the closest industry estimate or standard practice.
 
-Instructions:
-1. ${withSearch ? "Use live web search plus scraped website text." : "Use provided identity, scraped website text, and model knowledge."}
-2. Every field in the output must be a STRING written as a natural-language sentence or short descriptive paragraph.
-3. Do not return raw numbers, raw arrays, booleans, or plain values without context.
-4. Do not return null, NA, unknown, or blank strings. If something is not clearly available, write a sentence explaining that it could not be clearly identified from public information.
-5. brand_description must be a strong descriptive overview of about 300 to 400 words.
-6. annual_revenue, last_year_revenue, funding_total, and valuation must be written as descriptive USD strings with a dollar symbol, such as: "Last year's revenue was approximately $500,000, reflecting an estimated 20% year-over-year increase."
-7. If public sources mention INR, EUR, CNY, or another currency, convert to USD first before writing the sentence.
-8. operating_regions must be one descriptive sentence, not an array.
-9. contact_email, support_email, sales_email, general_email, contact_phone, and public_phone must also be descriptive sentences, not bare emails or phone numbers.
-10. website_url, domain, social URLs, and page URLs must also be descriptive strings, such as "The official website of the company is https://example.com/."
-11. employee_count, app_downloads, website_traffic_monthly, followers, subscribers, growth_rate, and founded_year must be written as descriptive sentence-style strings.
-12. Prefer official sources first, but you may use reputable public business information for best-effort completion.
-13. Return only valid JSON matching the schema.
-
-Return only JSON.
+Return ONLY a valid JSON object matching the exact requested schema. Do not include any markdown formatting, conversational text, or code blocks outside of the JSON structure.
 `;
 }
 
@@ -2289,7 +2510,7 @@ function mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName) {
     domain: wrapNarrative(
       "domain",
       prefer(aiData.domain, resolved.domain) ||
-        extractDomain(scraped?.website_url || resolved?.website_url || "")
+      extractDomain(scraped?.website_url || resolved?.website_url || "")
     ),
     website_url: wrapNarrative(
       "website_url",
@@ -2364,12 +2585,58 @@ function mergeAiAndScraped(aiData, scraped, resolved, cleanBrandName) {
     public_address: wrapNarrative("public_address", prefer(aiData.public_address, scraped?.public_address)),
   };
 }
+async function generateBlogSummary(blogText, provider) {
+  if (!blogText) return null;
 
+  const prompt = `
+You are an expert brand analyst.
+
+Summarize the blog/content strategy of this company.
+
+Focus on:
+- What topics they write about
+- Target audience
+- Content tone
+- Marketing intent (education, SEO, storytelling, product-driven)
+- How they use content for growth
+
+Keep it under 120 words.
+
+CONTENT:
+${blogText.slice(0, 8000)}
+`;
+
+  try {
+    if (provider === "gemini") {
+      const result = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+      });
+
+      return result.text || null;
+    }
+
+    if (provider === "openai") {
+      const result = await openai.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      return result.choices?.[0]?.message?.content || null;
+    }
+  } catch (err) {
+    console.warn("Blog summary failed:", err.message);
+    return null;
+  }
+
+  return null;
+}
 exports.BrandInformation = async (req, res) => {
   try {
     const brandName = req.body.brandName || req.body.brand_name;
     const forceRefresh = req.body.forceRefresh === true;
-    const requestedProvider = req.body.provider || req.body.ai_provider || DEFAULT_PROVIDER;
+    // const requestedProvider = req.body.provider || req.body.ai_provider || DEFAULT_PROVIDER;
+    const requestedProvider = DEFAULT_PROVIDER
     const effectiveProvider = resolveEffectiveProvider(requestedProvider);
 
     if (!brandName || typeof brandName !== "string" || !brandName.trim()) {
@@ -2431,7 +2698,17 @@ exports.BrandInformation = async (req, res) => {
       scraped,
       effectiveProvider
     );
-
+    let blogSummary = null;
+    if (scraped?.blog_page_text) {
+      try {
+        blogSummary = await generateBlogSummary(
+          scraped.blog_page_text,
+          effectiveProvider
+        );
+      } catch (e) {
+        console.warn("blog summary error:", e.message);
+      }
+    }
     const finalData = {
       brand_id: existingBrand?.brand_id || crypto.randomUUID(),
       normalized_brand_name: normalizedBrandName,
@@ -2439,11 +2716,21 @@ exports.BrandInformation = async (req, res) => {
 
       ...profileResult.parsed,
 
+      blog_url:
+        profileResult.parsed?.blog_url ||
+        scraped?.blog_url ||
+        scraped?.website_pages_scraped?.find(
+          (url) => /\/blogs?(\/|$)/i.test(url)
+        ) ||
+        null,
+
+      blog_summary: blogSummary || null,   // ✅ ADD THIS
+      blog_page_text: scraped?.blog_page_text || null,
+
       website_pages_scraped: Array.isArray(scraped?.website_pages_scraped)
         ? scraped.website_pages_scraped
         : [],
       last_scraped_at: scraped?.last_scraped_at || null,
-
     };
 
     const savedBrand = await BrandInfo.findOneAndUpdate(

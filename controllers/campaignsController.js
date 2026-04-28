@@ -6088,9 +6088,71 @@ exports.getPublicCampaignByToken = async (req, res) => {
   }
 };
 
+exports.getBrandListByCampaignId = async (req, res) => {
+  try {
+    const campaignId = String(
+      req.query.campaignId || req.body?.campaignId || req.params?.campaignId || ""
+    ).trim();
+
+    if (!campaignId) {
+      return res.status(400).json({ message: "campaignId is required" });
+    }
+
+    const isValidObjectId = mongoose.Types.ObjectId.isValid(campaignId);
+
+    const campaignFilter = isValidObjectId
+      ? { _id: new mongoose.Types.ObjectId(campaignId) }
+      : { campaignsId: campaignId }; // optional fallback if you also use campaignsId
+
+    const campaign = await Campaign.findOne(campaignFilter)
+      .select("brandId")
+      .populate({
+        path: "brandId",
+        select: "brandName name email industry companySize profilePic proxyEmail createdAt updatedAt",
+      })
+      .lean();
+
+    if (!campaign) {
+      return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    if (!campaign.brandId) {
+      return res.status(404).json({ message: "Brand not found for this campaign" });
+    }
+
+    const brand = campaign.brandId;
+
+    return res.status(200).json({
+      message: "Brand fetched successfully",
+      brand: {
+        _id: brand._id,
+        brandId: String(brand._id),
+        brandName: brand.brandName || "",
+        name: brand.name || "",
+        email: brand.email || "",
+        proxyEmail: brand.proxyEmail || "",
+        industry: brand.industry || "",
+        companySize: brand.companySize || "",
+        profilePic: brand.profilePic || "",
+        createdAt: brand.createdAt || null,
+        updatedAt: brand.updatedAt || null,
+      },
+    });
+  } catch (error) {
+    console.error("getBrandListByCampaignId error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 exports.uploadImagesToS3 = async (req, res) => {
   try {
-    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+    const imageFiles = Array.isArray(req.files)
+      ? req.files
+      : Array.isArray(req.files?.image)
+        ? req.files.image
+        : [];
+
+    if (!imageFiles.length) {
       return res.status(400).json({
         success: false,
         message: "At least one image is required",
@@ -6098,7 +6160,7 @@ exports.uploadImagesToS3 = async (req, res) => {
     }
 
     const uploadedImages = await uploadMultipleFilesToS3(
-      req.files,
+      imageFiles,
       "campaign-images"
     );
 
@@ -6106,7 +6168,8 @@ exports.uploadImagesToS3 = async (req, res) => {
       success: true,
       message: "Images uploaded successfully",
       count: uploadedImages.length,
-      urls: uploadedImages.map((item) => item.url),
+      urls: uploadedImages.map((item) => item.url || item.dataUrl),
+      images: uploadedImages,
     });
   } catch (error) {
     console.error("uploadImagesToS3 error:", error);

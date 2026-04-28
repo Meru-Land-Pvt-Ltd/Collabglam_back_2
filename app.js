@@ -58,6 +58,12 @@ const brandOuteachRoutes = require("./routes/brandOutreachRoutes");
 const brandNetworkRoutes = require("./routes/brandNetworkRoutes");
 const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
 const instantlytestRoutes = require("./routes/instantlyTestRoutes");
+const matchedCreatorRoutes = require("./routes/matchedCreatorRoutes");
+
+
+
+
+
 
 const app = express();
 const server = http.createServer(app);
@@ -75,8 +81,7 @@ const defaultCorsOrigins = [
   "https://collabglam.com",
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://192.168.1.16:3000",
-  "http://192.168.1.4:3000",
+  "http://192.168.1.49:3000",
   "https://mhd.sharemitra.com",
 ];
 
@@ -401,6 +406,7 @@ app.use("/instantly/oauth", require("./routes/instantlyOAuthRoutes"));
 app.use("/instantly", require("./routes/instantlyRoutes"));
 app.use("/instantly/webhook", require("./routes/instantlyWebhookRoutes"));
 app.use("/outreach", require("./routes/outreachRoutes"));
+app.use("/matched-creators", matchedCreatorRoutes);
 
 /* =========================================================
    404 HANDLER

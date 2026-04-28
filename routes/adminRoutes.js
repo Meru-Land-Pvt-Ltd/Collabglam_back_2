@@ -25,6 +25,8 @@ const {
   disableCampaignShare,
   getPublicCampaignByToken,
   adminAddCampaignFunds,
+  adminCreateBrand,
+  adminCreateInfluencer,
 } = require("../controllers/adminController");
 
 const { adminAuth } = require("../middlewares/adminAuth");
@@ -48,7 +50,9 @@ router.post("/campaign/lite", adminAuth, getAllCampaignsLite);
 router.get("/brand/getById", adminAuth, getBrandById);
 router.get("/influencer/getById", adminAuth, getByInfluencerId);
 router.get("/campaign/getById", adminAuth, getCampaignById);
+
 router.post("/campaign/getByBrandId", adminAuth, getCampaignsByBrandId);
+router.post("/campaign/getByInfluencerId", adminAuth, getCampaignsByInfluencerId);
 
 router.get("/influencer/byId", adminAuth, adminGetInfluencerById);
 router.post("/influencer/list", adminAuth, adminGetInfluencerList);
@@ -60,7 +64,7 @@ router.post("/addYouTubeEmail", adminAuth, adminAddYouTubeEmail);
 router.post("/listMissingEmail", adminAuth, listMissingEmail);
 router.post("/updateMissingEmail", adminAuth, updateMissingEmail);
 router.post("/checkstatus", checkMissingEmailByHandle);
-router.post("/campaign/getByInfluencerId", adminAuth, getCampaignsByInfluencerId);
+
 router.post("/getpayments", adminAuth, getAllPayments);
 
 router.post("/assignBrandPlan", adminAuth, adminAssignBrandPlan);
@@ -71,5 +75,9 @@ router.post("/campaign/share/disable", adminAuth, disableCampaignShare);
 router.get("/campaign/share/:token", getPublicCampaignByToken);
 
 router.post("/campaign/add-funds", adminAuth, adminAddCampaignFunds);
+
+// Admin-created placeholder users
+router.post("/brand/create", adminAuth, adminCreateBrand);
+router.post("/influencer/create", adminAuth, adminCreateInfluencer);
 
 module.exports = router;

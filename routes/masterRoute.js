@@ -11,6 +11,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.post("/login", adminController.adminLogin);
 router.post("/invite", adminAuth, superOrRevenueHead, adminController.inviteAdmin);
 router.post("/accept-invite", adminController.acceptInviteSetPassword);
+
 router.get("/list", adminAuth, adminController.listAdmins);
 router.put("/update-status", adminAuth, adminController.updateStatus);
 router.get("/me", adminAuth, adminController.adminMe);
@@ -25,6 +26,7 @@ router.get('/campaign/list', adminAuth, adminController.listCampaignsForAdmin);
 router.post('/brand-info', adminAuth, adminController.BrandInformation);
 router.post('/brand-coupon', adminAuth, adminController.CreateBrandCoupon);
 router.get('/subscription-list', adminController.subscriptionList);
+router.get('/brand-list', adminAuth, adminController.ListBrand);
 
 router.post(
   "/send-bulk-csv",

@@ -90,13 +90,24 @@ const brandSchema = new Schema(
 
     industry: {
       type: String,
-      required: [true, "Industry is required"],
+      required: [
+        function requiredIndustry() {
+          return !(this.isAdminCreated === true && this.signupCompleted === false);
+        },
+        "Industry is required",
+      ],
+      default: "",
       trim: true,
     },
 
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: [
+        function requiredPassword() {
+          return !(this.isAdminCreated === true && this.signupCompleted === false);
+        },
+        "Password is required",
+      ],
       minlength: 8,
       select: false,
     },
@@ -116,6 +127,38 @@ const brandSchema = new Schema(
         },
         message: "Invalid proxy email",
       },
+    },
+
+    isAdminCreated: {
+      type: Boolean,
+      default: false,
+    },
+
+    signupCompleted: {
+      type: Boolean,
+      default: true,
+    },
+
+    createdByAdmin: {
+      type: Schema.Types.ObjectId,
+      ref: "Master",
+      default: null,
+    },
+
+    adminCreatedRole: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    adminCreatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    signupCompletedAt: {
+      type: Date,
+      default: null,
     },
 
     profilePic: { type: String, default: "", trim: true },
@@ -156,6 +199,8 @@ const brandSchema = new Schema(
 );
 
 brandSchema.index({ email: 1 }, { unique: true });
+brandSchema.index({ isAdminCreated: 1, signupCompleted: 1, createdAt: -1 });
+brandSchema.index({ createdByAdmin: 1, adminCreatedAt: -1 });
 
 brandSchema.pre("save", async function preSave(next) {
   try {
