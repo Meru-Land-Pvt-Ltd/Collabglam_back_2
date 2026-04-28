@@ -139,6 +139,7 @@ async function normalizeAndUploadProductImages(productImages) {
 
   return output;
 }
+
 async function uploadSingleFileToS3(file, prefix = "campaign-images") {
   if (!file) {
     throw new Error("No file provided");
@@ -171,8 +172,6 @@ async function uploadSingleFileToS3(file, prefix = "campaign-images") {
 
   return {
     name: file.originalname || fileName,
-    key,
-    url,
     dataUrl: url,
     contentType,
     size: file.size || file.buffer.length,
@@ -193,8 +192,14 @@ async function uploadMultipleFilesToS3(files = [], prefix = "campaign-images") {
 
   return uploadedFiles;
 }
+
+async function uploadBrandProfilePicToS3(file, prefix = "brand-profile-pic") {
+  return await uploadSingleFileToS3(file, prefix);
+}
+
 module.exports = {
   normalizeAndUploadProductImages,
   uploadSingleFileToS3,
-  uploadMultipleFilesToS3
+  uploadMultipleFilesToS3,
+  uploadBrandProfilePicToS3,
 };

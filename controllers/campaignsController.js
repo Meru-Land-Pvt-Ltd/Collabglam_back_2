@@ -2161,13 +2161,13 @@ exports.getAllCampaigns = async (req, res) => {
 // GET SINGLE
 // ===============================
 exports.getCampaignById = async (req, res) => {
-  try {
-    const brandId = clean(req.body.brandId);
-    const campaignId = clean(req.body.campaignId);
 
-    if (!brandId || !isOid(brandId)) {
-      return res.status(400).json({ message: "Valid brandId is required." });
-    }
+  
+  try {
+    
+    const campaignId = clean(req.params.campaignId);
+
+   
 
     if (!campaignId || !isOid(campaignId)) {
       return res.status(400).json({ message: "Valid campaignId is required." });
@@ -2175,7 +2175,7 @@ exports.getCampaignById = async (req, res) => {
 
     const campaign = await Campaign.findOne({
       _id: campaignId,
-      brandId: brandId,
+
     }).lean();
 
     if (!campaign) {
@@ -6146,7 +6146,13 @@ exports.getBrandListByCampaignId = async (req, res) => {
 
 exports.uploadImagesToS3 = async (req, res) => {
   try {
-    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+    const imageFiles = Array.isArray(req.files)
+      ? req.files
+      : Array.isArray(req.files?.image)
+        ? req.files.image
+        : [];
+
+    if (!imageFiles.length) {
       return res.status(400).json({
         success: false,
         message: "At least one image is required",
@@ -6154,7 +6160,7 @@ exports.uploadImagesToS3 = async (req, res) => {
     }
 
     const uploadedImages = await uploadMultipleFilesToS3(
-      req.files,
+      imageFiles,
       "campaign-images"
     );
 
@@ -6162,7 +6168,8 @@ exports.uploadImagesToS3 = async (req, res) => {
       success: true,
       message: "Images uploaded successfully",
       count: uploadedImages.length,
-      urls: uploadedImages.map((item) => item.url),
+      urls: uploadedImages.map((item) => item.url || item.dataUrl),
+      images: uploadedImages,
     });
   } catch (error) {
     console.error("uploadImagesToS3 error:", error);

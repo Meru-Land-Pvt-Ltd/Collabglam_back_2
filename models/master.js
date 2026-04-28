@@ -5,6 +5,7 @@ const ROLES = {
   REVENUE_HEAD: "revenue_head",
   IME: "ime",
   BME: "bme",
+  SDR: "sdr",
 };
 
 const PROXY_EMAIL_DOMAIN = "team.collabglam.com";
@@ -66,9 +67,9 @@ const AdminSchema = new Schema(
     inviteTokenHash: { type: String, select: false },
     inviteExpiresAt: { type: Date },
 
-    createdBy: { type: Schema.Types.ObjectId, ref: "Admin", default: null },
-    parentAdmin: { type: Schema.Types.ObjectId, ref: "Admin", default: null },
-    rootAdmin: { type: Schema.Types.ObjectId, ref: "Admin", default: null },
+createdBy: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+parentAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+rootAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
 
     teamType: {
       type: String,

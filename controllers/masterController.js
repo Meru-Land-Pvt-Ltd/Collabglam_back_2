@@ -20,6 +20,8 @@ const BrandAssigned = require("../models/brandAssigned");
 const mongoose = require("mongoose");
 const INVITE_EXP_MINUTES = Number(process.env.INVITE_EXP_MINUTES || 60);
 const { buildCampaignVisibilityFilter } = require('../utils/campaignAccess');
+const EXECUTIVE_ROLES = [ROLES.IME, ROLES.BME, ROLES.SDR];
+const CampaignAssigned = require("../models/CampaignAssigned");
 
 // ======================
 // Local Helpers
@@ -139,7 +141,7 @@ function resolveHierarchyFields(inviter, targetRole, explicitParentAdmin) {
     };
   }
 
-  if (inviter.role === ROLES.SUPER_ADMIN && [ROLES.IME, ROLES.BME].includes(role)) {
+  if (inviter.role === ROLES.SUPER_ADMIN && EXECUTIVE_ROLES.includes(role)) {
     return {
       parentAdmin: explicitParentAdmin || null,
       rootAdmin: inviterId,
@@ -147,7 +149,7 @@ function resolveHierarchyFields(inviter, targetRole, explicitParentAdmin) {
     };
   }
 
-  if (inviter.role === ROLES.REVENUE_HEAD && [ROLES.IME, ROLES.BME].includes(role)) {
+  if (inviter.role === ROLES.REVENUE_HEAD && EXECUTIVE_ROLES.includes(role)) {
     return {
       parentAdmin: inviterId,
       rootAdmin: inviterRootAdmin,
@@ -295,10 +297,10 @@ exports.inviteAdmin = async (req, res) => {
 
     let parentAdminDoc = null;
 
-    if (actor.role === ROLES.SUPER_ADMIN && [ROLES.IME, ROLES.BME].includes(role)) {
+    if (actor.role === ROLES.SUPER_ADMIN && EXECUTIVE_ROLES.includes(role)) {
       if (!explicitParentAdmin) {
         return res.status(400).json({
-          message: "parentAdmin is required when Super Admin invites IME/BME directly",
+          message: "parentAdmin is required when Super Admin invites IME/BME/SDR directly",
         });
       }
 
@@ -745,11 +747,11 @@ exports.fullyManagedBrandList = async (req, res) => {
   }
 };
 
-async function validateExecutivesUnderRH({ RHId, bdmId, idmId }) {
+async function validateExecutivesUnderRH({ RHId, bdmId, idmId, sdrId }) {
   const rhId = String(RHId || "").trim();
 
   if (!rhId || !mongoose.isValidObjectId(rhId)) {
-    throw new Error("Valid RHId is required before assigning BME/IME");
+    throw new Error("Valid RHId is required before assigning BME/IME/SDR");
   }
 
   const rh = await AdminModel.findOne({
@@ -795,11 +797,190 @@ async function validateExecutivesUnderRH({ RHId, bdmId, idmId }) {
       throw new Error("Selected IME does not belong to the assigned RH");
     }
   }
+
+  if (sdrId !== undefined && sdrId !== null && String(sdrId).trim() !== "") {
+    if (!mongoose.isValidObjectId(String(sdrId))) {
+      throw new Error("Invalid sdrId");
+    }
+
+    const sdr = await AdminModel.findOne({
+      _id: sdrId,
+      role: ROLES.SDR,
+      status: "active",
+      parentAdmin: rhId,
+    }).select("_id");
+
+    if (!sdr) {
+      throw new Error("Selected SDR does not belong to the assigned RH");
+    }
+  }
 }
+
+async function validateBrandTeamUnderRH({ RHId, bdmId }) {
+  const rhId = String(RHId || "").trim();
+
+  if (!rhId || !mongoose.isValidObjectId(rhId)) {
+    throw new Error("Valid RHId is required before assigning BME");
+  }
+
+  const rh = await AdminModel.findOne({
+    _id: rhId,
+    role: ROLES.REVENUE_HEAD,
+    status: "active",
+  }).select("_id");
+
+  if (!rh) {
+    throw new Error("Assigned RH not found or inactive");
+  }
+
+  if (bdmId !== undefined && bdmId !== null && String(bdmId).trim() !== "") {
+    if (!mongoose.isValidObjectId(String(bdmId))) {
+      throw new Error("Invalid bdmId");
+    }
+
+    const bme = await AdminModel.findOne({
+      _id: bdmId,
+      role: ROLES.BME,
+      status: "active",
+      parentAdmin: rhId,
+    }).select("_id");
+
+    if (!bme) {
+      throw new Error("Selected BME does not belong to the assigned RH");
+    }
+  }
+}
+
+exports.assignCampaignIme = async (req, res) => {
+  try {
+    const campaignId = String(req.body?.campaignId || "").trim();
+    const idmId = String(req.body?.idmId || "").trim();
+
+    if (!campaignId) {
+      return res.status(400).json({
+        success: false,
+        message: "campaignId is required",
+      });
+    }
+
+    if (!idmId) {
+      return res.status(400).json({
+        success: false,
+        message: "idmId is required",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(campaignId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid campaignId",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(idmId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid idmId",
+      });
+    }
+
+    const campaign = await Campaign.findById(campaignId)
+      .select("_id brandId brandName campaignTitle")
+      .lean();
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found",
+      });
+    }
+
+    const brandAssignment = await BrandAssigned.findOne({
+      brandId: campaign.brandId,
+      status: "active",
+      RHId: { $exists: true, $ne: null },
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    if (!brandAssignment?.RHId) {
+      return res.status(400).json({
+        success: false,
+        message: "Assign RH to this brand before assigning IME to campaign.",
+      });
+    }
+
+    const ime = await AdminModel.findOne({
+      _id: idmId,
+      role: ROLES.IME,
+      status: "active",
+      parentAdmin: brandAssignment.RHId,
+    }).select("_id");
+
+    if (!ime) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected IME does not belong to the assigned RH.",
+      });
+    }
+
+    const doc = await CampaignAssigned.findOneAndUpdate(
+      {
+        campaignId: campaign._id,
+        status: "active",
+      },
+      {
+        $setOnInsert: {
+          campaignId: campaign._id,
+          brandId: campaign.brandId,
+        },
+        $set: {
+          brandId: campaign.brandId,
+          RHId: brandAssignment.RHId || null,
+          bdmId: brandAssignment.bdmId || null,
+          idmId,
+          status: "active",
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+      }
+    ).exec();
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaign IME assignment saved successfully",
+      data: doc,
+    });
+  } catch (error) {
+    console.error("assignCampaignIme error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal error",
+    });
+  }
+};
 
 exports.assignBrand = async (req, res) => {
   try {
-    const { brandId, RHId, bdmId, idmId } = req.body;
+    const brandId = String(req.body?.brandId || "").trim();
+    const RHId = req.body?.RHId;
+    const bdmId = req.body?.bdmId;
+
+    if (req.body?.idmId !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "IME assignment is campaign-based now. Use /admins/assign-campaign-ime instead.",
+      });
+    }
+
+    if (req.body?.sdrId !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "SDR assignment is not supported on brand assignment in this flow.",
+      });
+    }
 
     if (!brandId) {
       return res.status(400).json({
@@ -808,7 +989,7 @@ exports.assignBrand = async (req, res) => {
       });
     }
 
-    if (!mongoose.isValidObjectId(String(brandId))) {
+    if (!mongoose.isValidObjectId(brandId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid brandId",
@@ -817,53 +998,52 @@ exports.assignBrand = async (req, res) => {
 
     const wantsRH =
       RHId !== undefined && RHId !== null && String(RHId).trim() !== "";
-    const wantsBDMorIDM = bdmId !== undefined || idmId !== undefined;
 
-    if (!wantsRH && !wantsBDMorIDM) {
+    const wantsBME = bdmId !== undefined;
+
+    if (!wantsRH && !wantsBME) {
       return res.status(400).json({
         success: false,
-        message: "Send RHId to assign RH OR send bdmId/idmId to assign BDM/IDM",
+        message: "Send RHId to assign RH or send bdmId to assign BME",
       });
     }
 
     const normalizedBrandId = new mongoose.Types.ObjectId(String(brandId));
 
-    // CASE A: RH assignment
     if (wantsRH) {
-      await validateExecutivesUnderRH({ RHId, bdmId, idmId });
+      await validateBrandTeamUnderRH({ RHId, bdmId });
 
-      // IMPORTANT:
-      // when RH changes, reset old BME/IME unless explicitly sent
       const set = {
-        RHId,
-        bdmId: bdmId !== undefined ? (bdmId || null) : null,
-        idmId: idmId !== undefined ? (idmId || null) : null,
+        RHId: RHId || null,
         status: "active",
       };
 
-      let doc = await BrandAssigned.findOneAndUpdate(
-        { brandId: normalizedBrandId, status: "active" },
-        { $set: set },
-        { new: true }
-      ).exec();
-
-      if (!doc) {
-        doc = await BrandAssigned.findOneAndUpdate(
-          { brandId: normalizedBrandId },
-          { $set: set },
-          { new: true, sort: { updatedAt: -1, createdAt: -1 } }
-        ).exec();
+      if (bdmId !== undefined) {
+        set.bdmId = bdmId || null;
+      } else {
+        set.bdmId = null;
       }
 
-      if (!doc) {
-        doc = await BrandAssigned.create({
+      const doc = await BrandAssigned.findOneAndUpdate(
+        {
           brandId: normalizedBrandId,
-          RHId,
-          bdmId: bdmId || null,
-          idmId: idmId || null,
           status: "active",
-        });
-      }
+        },
+        {
+          $setOnInsert: {
+            brandId: normalizedBrandId,
+          },
+          $set: set,
+          $unset: {
+            idmId: "",
+            sdrId: "",
+          },
+        },
+        {
+          new: true,
+          upsert: true,
+        }
+      ).exec();
 
       return res.status(200).json({
         success: true,
@@ -872,7 +1052,6 @@ exports.assignBrand = async (req, res) => {
       });
     }
 
-    // CASE B: only BME / IME assignment, RH must already exist
     let activeAssignment = await BrandAssigned.findOne({
       brandId: normalizedBrandId,
       status: "active",
@@ -893,36 +1072,44 @@ exports.assignBrand = async (req, res) => {
     if (!activeAssignment?.RHId) {
       return res.status(400).json({
         success: false,
-        message: "RH is not assigned for this brand. Assign RH first, then add BDM/IDM.",
+        message: "RH is not assigned for this brand. Assign RH first, then add BME.",
       });
     }
 
-    await validateExecutivesUnderRH({
+    await validateBrandTeamUnderRH({
       RHId: activeAssignment.RHId,
       bdmId,
-      idmId,
     });
 
-    const set = { status: "active" };
-    if (bdmId !== undefined) set.bdmId = bdmId || null;
-    if (idmId !== undefined) set.idmId = idmId || null;
-
     const updated = await BrandAssigned.findOneAndUpdate(
-      { _id: activeAssignment._id },
-      { $set: set },
-      { new: true }
+      {
+        _id: activeAssignment._id,
+      },
+      {
+        $set: {
+          bdmId: bdmId || null,
+          status: "active",
+        },
+        $unset: {
+          idmId: "",
+          sdrId: "",
+        },
+      },
+      {
+        new: true,
+      }
     ).exec();
 
     return res.status(200).json({
       success: true,
-      message: "Brand assignment updated successfully",
+      message: "Brand BME assignment updated successfully",
       data: updated,
     });
-  } catch (e) {
-    console.error("assignBrand error:", e);
+  } catch (error) {
+    console.error("assignBrand error:", error);
     return res.status(500).json({
       success: false,
-      message: e?.message || "Internal error",
+      message: error?.message || "Internal error",
     });
   }
 };
@@ -1012,9 +1199,7 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
     if (!actor?.adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    if (adminId == "64b8c8f1c9d898001d9e7c3e") {
 
-    }
     if (!assignmentId) {
       return res.status(400).json({
         success: false,
@@ -1095,6 +1280,8 @@ exports.listExecutiveAdmin = async (req, res) => {
     const requestedRole = String(req.query?.role || req.body?.role || "")
       .trim()
       .toLowerCase();
+    const requestedRHId = String(req.query?.RHId || req.body?.RHId || "")
+      .trim();
 
     if (!adminId) {
       return res.status(401).json({
@@ -1113,30 +1300,60 @@ exports.listExecutiveAdmin = async (req, res) => {
     const filter = { status: "active" };
 
     if (requestedRole) {
-      if (![ROLES.BME, ROLES.IME].includes(requestedRole)) {
+      if (![ROLES.BME, ROLES.IME, ROLES.SDR].includes(requestedRole)) {
         return res.status(400).json({
           success: false,
-          message: "role must be either bme or ime",
+          message: "role must be either bme, ime, or sdr",
         });
       }
       filter.role = requestedRole;
     } else {
-      filter.role = { $in: [ROLES.BME, ROLES.IME] };
+      filter.role = { $in: [ROLES.BME, ROLES.IME, ROLES.SDR] };
     }
 
-    // RH should only see their own team
+    // Revenue Head: always only own team
     if (actorRole === ROLES.REVENUE_HEAD) {
       filter.parentAdmin = adminId;
     }
 
+    // Super Admin: all by default
+    // Other roles / future usage: allow optional RHId filter
+    if (actorRole !== ROLES.REVENUE_HEAD && requestedRHId) {
+      if (!mongoose.isValidObjectId(requestedRHId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid RHId",
+        });
+      }
+
+      filter.parentAdmin = requestedRHId;
+    }
+
     const executives = await AdminModel.find(filter)
       .select("-passwordHash -inviteTokenHash")
-      .sort({ createdAt: -1 });
+      .populate("parentAdmin", "name email role")
+      .populate("createdBy", "name email role")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const data = executives.map((item) => {
+      const revenueHead =
+        item?.parentAdmin?.role === ROLES.REVENUE_HEAD
+          ? item.parentAdmin
+          : item?.createdBy?.role === ROLES.REVENUE_HEAD
+            ? item.createdBy
+            : null;
+
+      return {
+        ...item,
+        revenueHeadName: revenueHead?.name || "",
+      };
+    });
 
     return res.status(200).json({
       success: true,
-      count: executives.length,
-      data: executives,
+      count: data.length,
+      data,
     });
   } catch (e) {
     return res.status(500).json({
@@ -1150,7 +1367,8 @@ exports.rmlist = async (req, res) => {
   try {
     const rms = await AdminModel.find({ role: "revenue_head", status: "active" })
       .select("-passwordHash -inviteTokenHash")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -1183,12 +1401,10 @@ exports.allocateBrand = async (req, res) => {
     const isObjId = mongoose.Types.ObjectId.isValid(adminIdStr);
     const adminObjId = isObjId ? new mongoose.Types.ObjectId(adminIdStr) : null;
 
-    const orConditions = [
-      { bdmId: adminIdStr },
-      { idmId: adminIdStr },
-    ];
+    const orConditions = [{ bdmId: adminIdStr }];
+
     if (adminObjId) {
-      orConditions.push({ bdmId: adminObjId }, { idmId: adminObjId });
+      orConditions.push({ bdmId: adminObjId });
     }
 
     const allocations = await BrandAssigned.find({

@@ -26,7 +26,7 @@ const emailThreadSchema = new mongoose.Schema(
       ref: "Influencer",
       index: true,
     },
-
+    createrEmail:{ type: String, lowercase: true},
     campaign: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Campaign",
