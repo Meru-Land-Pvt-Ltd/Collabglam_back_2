@@ -150,6 +150,90 @@ function buildSearchOr(term) {
   return or;
 }
 
+function parseRemovedAttachmentUrlsPayload(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return [
+      ...new Set(value.map((v) => String(v || "").trim()).filter(Boolean)),
+    ];
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return [
+          ...new Set(parsed.map((v) => String(v || "").trim()).filter(Boolean)),
+        ];
+      }
+    } catch (_) {
+      // fall back to comma separated string
+    }
+
+    return [
+      ...new Set(trimmed.split(",").map((v) => v.trim()).filter(Boolean)),
+    ];
+  }
+
+  return [];
+}
+
+function getAttachmentUrls(attachment) {
+  if (!attachment) return [];
+
+  if (typeof attachment === "string") {
+    return [attachment.trim()].filter(Boolean);
+  }
+
+  return [
+    attachment.url,
+    attachment.uri,
+    attachment.fileUrl,
+    attachment.attachmentUrl,
+    attachment.location,
+    attachment.path,
+    attachment.secure_url,
+  ]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+}
+
+function getInfluencerIdFromReq(req) {
+  return String(
+    req.body?.influencerId ||
+      req.query?.influencerId ||
+      req.user?.influencerId ||
+      req.user?.id ||
+      req.user?._id ||
+      req.user?.userId ||
+      ""
+  ).trim();
+}
+
+function buildInfluencerLookup(influencerId) {
+  const id = String(influencerId || "").trim();
+  const or = [{ influencerId: id }];
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    or.push({ _id: new mongoose.Types.ObjectId(id) });
+  }
+
+  return { $or: or };
+}
+
+function getInfluencerPossibleIds(influencer) {
+  return [
+    influencer?._id,
+    influencer?.influencerId,
+    influencer?.userId,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
 /**
  * Helper: parse attachments from body (can be array or JSON string).
  */
@@ -2045,6 +2129,288 @@ exports.influencerAddComment = async (req, res) => {
   }
 };
 
+exports.influencerRevokeDispute = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = "" } = req.body || {};
+    const influencerId = getInfluencerIdFromReq(req);
+
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
+    if (!influencerId) {
+      return res.status(400).json({ message: "influencerId is required" });
+    }
+
+    const influencer = await Influencer.findOne(
+      buildInfluencerLookup(influencerId)
+    ).lean();
+
+    if (!influencer) {
+      return res.status(404).json({ message: "Influencer not found" });
+    }
+
+    const possibleInfluencerIds = getInfluencerPossibleIds(influencer);
+
+    const dispute = await Dispute.findOne({ disputeId: id });
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    if (!possibleInfluencerIds.includes(String(dispute.influencerId))) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (
+      dispute.createdBy?.role !== "Influencer" ||
+      !possibleInfluencerIds.includes(String(dispute.createdBy?.id))
+    ) {
+      return res.status(403).json({
+        message: "Only the user who raised this dispute can revoke it",
+      });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot revoke a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const trimmedReason = String(reason || "").trim();
+
+    dispute.status = "revoked";
+
+    dispute.comments = Array.isArray(dispute.comments) ? dispute.comments : [];
+    dispute.comments.push({
+      authorRole: "Influencer",
+      authorId: String(dispute.influencerId),
+      text: trimmedReason
+        ? `Dispute revoked by Influencer. Reason: ${trimmedReason}`
+        : "Dispute revoked by Influencer.",
+      attachments: [],
+    });
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        brandId: dispute.brandId,
+        type: "dispute.revoked",
+        title: `Dispute #${dispute.disputeId} revoked`,
+        message: `${influencer?.name || "Influencer"} revoked the dispute "${dispute.subject}".`,
+        entityType: "dispute",
+        entityId: dispute.disputeId,
+        actionPath: {
+          brand: `/brand/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (notifyErr) {
+      console.warn(
+        "In-app notify failed (influencerRevokeDispute):",
+        notifyErr?.message || notifyErr
+      );
+    }
+
+    return res.status(200).json({
+      message: "Dispute revoked successfully",
+      disputeId: dispute.disputeId,
+      status: dispute.status,
+    });
+  } catch (err) {
+    console.error("Error in influencerRevokeDispute:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.influencerEditDispute = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      subject,
+      description = "",
+      issueType,
+      attachments = [],
+      removedAttachmentUrls = [],
+    } = req.body || {};
+
+    const influencerId = getInfluencerIdFromReq(req);
+
+    const trimmedInfluencerId = String(influencerId || "").trim();
+    const trimmedSubject = String(subject || "").trim();
+    const trimmedDescription = String(description || "").trim();
+
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
+    if (!trimmedInfluencerId) {
+      return res.status(400).json({ message: "influencerId is required" });
+    }
+
+    if (!trimmedSubject) {
+      return res.status(400).json({ message: "Subject is required" });
+    }
+
+    const influencer = await Influencer.findOne(
+      buildInfluencerLookup(trimmedInfluencerId)
+    ).lean();
+
+    if (!influencer) {
+      return res.status(404).json({ message: "Influencer not found" });
+    }
+
+    const possibleInfluencerIds = getInfluencerPossibleIds(influencer);
+
+    const dispute = await Dispute.findOne({ disputeId: id });
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    if (!possibleInfluencerIds.includes(String(dispute.influencerId))) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (
+      dispute.createdBy?.role !== "Influencer" ||
+      !possibleInfluencerIds.includes(String(dispute.createdBy?.id))
+    ) {
+      return res.status(403).json({
+        message: "Only the user who raised this dispute can edit it",
+      });
+    }
+
+    if (FINALIZED_STATUSES.has(dispute.status)) {
+      return res.status(400).json({
+        message: `Cannot edit a dispute that is already ${dispute.status}`,
+      });
+    }
+
+    const parsedIssueType = parseIssueTypePayload(issueType);
+    const invalidIssueTypes = parsedIssueType.filter(
+      (value) => !EDITABLE_ISSUE_TYPES.has(value)
+    );
+
+    if (invalidIssueTypes.length > 0) {
+      return res.status(400).json({
+        message: `Invalid issueType value(s): ${invalidIssueTypes.join(", ")}`,
+      });
+    }
+
+    const parsedRemovedAttachmentUrls =
+      parseRemovedAttachmentUrlsPayload(removedAttachmentUrls);
+
+    const uploadedAttachments = await buildAttachmentsFromReq(
+      req,
+      attachments
+    );
+
+    const changeSummary = [];
+
+    if (dispute.subject !== trimmedSubject) {
+      dispute.subject = trimmedSubject;
+      changeSummary.push("title");
+    }
+
+    if ((dispute.description || "") !== trimmedDescription) {
+      dispute.description = trimmedDescription;
+      changeSummary.push("description");
+    }
+
+    const currentIssueType = Array.isArray(dispute.issueType)
+      ? dispute.issueType.map((value) => String(value))
+      : [];
+
+    if (!areStringArraysEqual(currentIssueType, parsedIssueType)) {
+      dispute.issueType = parsedIssueType;
+      changeSummary.push("issue type");
+    }
+
+    const existingAttachments = Array.isArray(dispute.attachments)
+      ? dispute.attachments
+      : [];
+
+    if (parsedRemovedAttachmentUrls.length > 0) {
+      const removedSet = new Set(parsedRemovedAttachmentUrls);
+
+      const nextAttachments = existingAttachments.filter((attachment) => {
+        const urls = getAttachmentUrls(attachment);
+        return !urls.some((url) => removedSet.has(url));
+      });
+
+      const removedCount = existingAttachments.length - nextAttachments.length;
+
+      if (removedCount > 0) {
+        dispute.attachments = nextAttachments;
+        changeSummary.push(
+          `${removedCount} attachment${removedCount > 1 ? "s" : ""} removed`
+        );
+      }
+    }
+
+    if (uploadedAttachments.length > 0) {
+      dispute.attachments = [
+        ...(Array.isArray(dispute.attachments) ? dispute.attachments : []),
+        ...uploadedAttachments,
+      ];
+
+      changeSummary.push(
+        `${uploadedAttachments.length} attachment${
+          uploadedAttachments.length > 1 ? "s" : ""
+        } added`
+      );
+    }
+
+    if (changeSummary.length === 0) {
+      return res.status(200).json({
+        message: "No changes detected",
+        disputeId: dispute.disputeId,
+        status: dispute.status,
+        dispute,
+      });
+    }
+
+    dispute.comments = Array.isArray(dispute.comments) ? dispute.comments : [];
+    dispute.comments.push({
+      authorRole: "Influencer",
+      authorId: String(dispute.influencerId),
+      text: `Dispute updated by Influencer. Updated: ${changeSummary.join(", ")}.`,
+      attachments: uploadedAttachments,
+    });
+
+    await dispute.save();
+
+    try {
+      await createAndEmit({
+        brandId: dispute.brandId,
+        type: "dispute.updated",
+        title: `Dispute #${dispute.disputeId} updated`,
+        message: `${influencer?.name || "Influencer"} updated the dispute "${dispute.subject}".`,
+        entityType: "dispute",
+        entityId: dispute.disputeId,
+        actionPath: {
+          brand: `/brand/disputes/${dispute.disputeId}`,
+        },
+      });
+    } catch (notifyErr) {
+      console.warn(
+        "In-app notify failed (influencerEditDispute):",
+        notifyErr?.message || notifyErr
+      );
+    }
+
+    return res.status(200).json({
+      message: "Dispute updated successfully",
+      disputeId: dispute.disputeId,
+      status: dispute.status,
+      dispute,
+    });
+  } catch (err) {
+    console.error("Error in influencerEditDispute:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
 // ----------------- ADMIN ENDPOINTS -----------------
 
 // Admin-friendly detail view (relaxed auth, no token required)

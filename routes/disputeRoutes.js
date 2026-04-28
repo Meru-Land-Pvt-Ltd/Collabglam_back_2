@@ -27,7 +27,9 @@ const {
   brandEditDispute,
   publicGetDisputeById,
   brandEditComment,
-  brandDeleteComment
+  brandDeleteComment,
+  influencerRevokeDispute,
+  influencerEditDispute
 } = require('../controllers/disputeController');
 
 // ---- Multer config for dispute attachments ----
@@ -123,6 +125,18 @@ router.post(
 );
 router.post('/influencer/list', verifyToken, influencerList);
 router.get('/influencer/:id', verifyToken, influencerGetById);
+router.patch(
+  "/influencer/disputes/:id/revoke",
+  verifyToken,
+  influencerRevokeDispute
+);
+
+router.patch(
+  "/influencer/disputes/:id/edit",
+  verifyToken,
+  uploadAttachments,
+  influencerEditDispute
+);
 router.post(
   '/influencer/:id/comment',
   verifyToken,
@@ -142,5 +156,5 @@ router.post(
 );
 router.post('/admin/update-status', adminUpdateStatus);
 router.post('/admin/assign', adminAssign);
-router.post('/admin/:id/evidence',uploadAttachments, adminCreateDisputeEvidence); // reuse create handler for adding evidence (with disputeId in params)
+router.post('/admin/:id/evidence', uploadAttachments, adminCreateDisputeEvidence); // reuse create handler for adding evidence (with disputeId in params)
 module.exports = router;
