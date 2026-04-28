@@ -322,8 +322,8 @@ function buildInstantlySequences(sequences = []) {
         pre_delay: step.preDelay,
         pre_delay_unit: step.preDelayUnit,
         variants: step.variants.map((variant) => ({
-          subject: variant.subject,
-          body: variant.body,
+          subject: String(variant.subject || "").trim(),
+          body: htmlToPlainText(variant.body),
         })),
       })),
     },
@@ -1471,12 +1471,20 @@ function buildInstantlyLeadFromProspect(prospect = {}) {
 
 function htmlToPlainText(value = "") {
   return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(div|p|li)>/gi, "\n")
+    .replace(/<\/(div|p|li|tr|h1|h2|h3|h4|h5|h6)>/gi, "\n")
     .replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
-    .replace(/\s+/g, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
