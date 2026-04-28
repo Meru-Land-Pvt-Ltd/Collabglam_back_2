@@ -3064,3 +3064,79 @@ exports.subscriptionList = async (req, res) => {
     });
   }
 };
+exports.ListBrand = async (req, res) => {
+  try {
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+      sortBy = "createdAt",
+      order = "desc",
+    } = req.query;
+
+    page = parseInt(page, 10) || 1;
+    limit = parseInt(limit, 10) || 10;
+
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100;
+
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+
+    if (search && search.trim()) {
+      filter.$or = [
+        { brand_name: { $regex: search.trim(), $options: "i" } },
+        { input_brand_name: { $regex: search.trim(), $options: "i" } },
+        { normalized_brand_name: { $regex: search.trim(), $options: "i" } },
+        { brand_alias: { $regex: search.trim(), $options: "i" } },
+        { domain: { $regex: search.trim(), $options: "i" } },
+      ];
+    }
+
+    const allowedSortFields = [
+      "createdAt",
+      "updatedAt",
+      "brand_name",
+      "input_brand_name",
+      "normalized_brand_name",
+      "founded_year",
+    ];
+
+    const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortOrder = order === "asc" ? 1 : -1;
+
+    const [brands, totalBrands] = await Promise.all([
+      BrandInfo.find(filter)
+        .sort({ [finalSortBy]: sortOrder })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      BrandInfo.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.ceil(totalBrands / limit);
+
+    return res.status(200).json({
+      success: true,
+      message: "Brands fetched successfully",
+      data: brands,
+      pagination: {
+        totalBrands,
+        totalPages,
+        currentPage: page,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("ListBrand error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch brands",
+      error: error.message,
+    });
+  }
+};
