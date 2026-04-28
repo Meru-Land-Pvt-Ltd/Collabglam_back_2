@@ -803,3 +803,146 @@ exports.getInvoicesByUserId = async (req, res) => {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
+
+/**
+ * ✅ Get payment history by userId
+ * route: POST /payment/history
+ * body: { userId, role?, status? }
+ */
+exports.getPaymentHistoryByUserId = async (req, res) => {
+  try {
+    const { userId, role, status } = req.body || {};
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId is required",
+      });
+    }
+
+    if (role && !["Brand", "Influencer"].includes(String(role))) {
+      return res.status(400).json({
+        success: false,
+        message: 'role must be "Brand" or "Influencer"',
+      });
+    }
+
+    const statusFilter =
+      status && String(status).toLowerCase() !== "all"
+        ? { status: String(status) }
+        : {};
+
+    // ✅ Subscription / plan payments
+    const planQuery = {
+      userId: String(userId),
+      ...statusFilter,
+    };
+
+    if (role) {
+      planQuery.role = String(role);
+    }
+
+    const planPaymentsRaw = await Payment.find(planQuery)
+      .sort({ paidAt: -1, createdAt: -1 })
+      .select(
+        "orderId paymentId amount currency receipt userId role planId planName status createdAt paidAt invoiceNumber invoiceIssuedAt subtotalCents discountCents taxCents totalCents invoiceFilePath invoiceEmailTo invoiceEmailSentAt"
+      )
+      .lean();
+
+    // ✅ Milestone payments
+    let milestoneQuery = {
+      ...statusFilter,
+    };
+
+    if (String(role) === "Brand") {
+      milestoneQuery.brandId = String(userId);
+    } else if (String(role) === "Influencer") {
+      milestoneQuery.influencerId = String(userId);
+    } else {
+      milestoneQuery.$or = [
+        { brandId: String(userId) },
+        { influencerId: String(userId) },
+      ];
+    }
+
+    const milestonePaymentsRaw = await MilestonePayment.find(milestoneQuery)
+      .sort({ paidAt: -1, createdAt: -1 })
+      .select(
+        "orderId paymentId amount currency receipt brandId influencerId campaignId campaignName milestoneTitle status createdAt paidAt invoiceNumber invoiceIssuedAt subtotalCents discountCents taxCents totalCents invoiceFilePath invoiceEmailTo invoiceEmailSentAt"
+      )
+      .lean();
+
+    const planPayments = planPaymentsRaw.map((payment) => ({
+      paymentType: "plan",
+      orderId: payment.orderId,
+      paymentId: payment.paymentId,
+      userId: payment.userId,
+      role: payment.role,
+      planId: payment.planId,
+      planName: payment.planName,
+      amount: Number(payment.totalCents ?? payment.amount ?? payment.subtotalCents ?? 0),
+      currency: payment.currency || "USD",
+      status: payment.status,
+      receipt: payment.receipt,
+      invoiceNumber: payment.invoiceNumber || "",
+      invoiceIssuedAt: payment.invoiceIssuedAt || null,
+      invoiceFilePath: payment.invoiceFilePath || "",
+      paidAt: payment.paidAt || null,
+      createdAt: payment.createdAt || null,
+      subtotalCents: Number(payment.subtotalCents || payment.amount || 0),
+      discountCents: Number(payment.discountCents || 0),
+      taxCents: Number(payment.taxCents || 0),
+      totalCents: Number(payment.totalCents || payment.amount || 0),
+    }));
+
+    const milestonePayments = milestonePaymentsRaw.map((payment) => ({
+      paymentType: "milestone",
+      orderId: payment.orderId,
+      paymentId: payment.paymentId,
+      brandId: payment.brandId,
+      influencerId: payment.influencerId,
+      campaignId: payment.campaignId,
+      campaignName: payment.campaignName,
+      milestoneTitle: payment.milestoneTitle,
+      amount: Number(payment.totalCents ?? payment.amount ?? payment.subtotalCents ?? 0),
+      currency: payment.currency || "USD",
+      status: payment.status,
+      receipt: payment.receipt,
+      invoiceNumber: payment.invoiceNumber || "",
+      invoiceIssuedAt: payment.invoiceIssuedAt || null,
+      invoiceFilePath: payment.invoiceFilePath || "",
+      paidAt: payment.paidAt || null,
+      createdAt: payment.createdAt || null,
+      subtotalCents: Number(payment.subtotalCents || payment.amount || 0),
+      discountCents: Number(payment.discountCents || 0),
+      taxCents: Number(payment.taxCents || 0),
+      totalCents: Number(payment.totalCents || payment.amount || 0),
+    }));
+
+    const history = [...planPayments, ...milestonePayments].sort((a, b) => {
+      const dateA = new Date(a.paidAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.paidAt || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment history fetched successfully",
+      userId,
+      role: role || "All",
+      counts: {
+        plans: planPayments.length,
+        milestones: milestonePayments.length,
+        total: history.length,
+      },
+      history,
+    });
+  } catch (error) {
+    console.error("getPaymentHistoryByUserId error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
