@@ -48,7 +48,7 @@ const { buildOtpEmailTemplate } = require("../template/buildOtpEmailTemplate");
 const UUIDv4Regex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const BASE_API_URL = "https://api.collabglam.com";
+const BASE_API_URL = "http://192.168.1.20:8000";
 const WELCOME_EMAIL_API_URL = `${BASE_API_URL}/emails/send-welcome`;
 
 /* ========================= SMTP / Mailer ========================= */

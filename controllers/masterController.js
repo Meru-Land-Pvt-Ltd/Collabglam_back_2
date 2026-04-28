@@ -2474,8 +2474,7 @@ exports.BrandInformation = async (req, res) => {
 };
 
 const generateRandomCode = (length = 9) => {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
   let code = "";
 
@@ -2490,6 +2489,33 @@ const generateRandomCode = (length = 9) => {
 const createPromoCode = () => {
   return `CG${generateRandomCode(9)}`;
 };
+
+const PLAN_RANK_BY_ID = {
+  "69a934e0e77ebbeb19aab640": 0, // free
+  "69a934e0e77ebbeb19aab641": 1, // lower
+  "69a934e0e77ebbeb19aab642": 2, // mid
+  "69a934e0e77ebbeb19aab643": 3, // top
+};
+
+const PLAN_LABEL_BY_ID = {
+  "69a934e0e77ebbeb19aab640": "free",
+  "69a934e0e77ebbeb19aab641": "lower",
+  "69a934e0e77ebbeb19aab642": "mid",
+  "69a934e0e77ebbeb19aab643": "top",
+};
+
+const TOP_PLAN_ID = "69a934e0e77ebbeb19aab643";
+const FREE_PLAN_ID = "69a934e0e77ebbeb19aab640";
+
+function getPlanRank(planId) {
+  const id = String(planId || "");
+  return PLAN_RANK_BY_ID[id] ?? 0;
+}
+
+function getPlanLabel(planId) {
+  const id = String(planId || "");
+  return PLAN_LABEL_BY_ID[id] || "free";
+}
 
 exports.CreateBrandCoupon = async (req, res) => {
   try {
@@ -2529,6 +2555,159 @@ exports.CreateBrandCoupon = async (req, res) => {
       });
     }
 
+    const now = new Date();
+    const couponExpiryDate = new Date(expiredAt);
+
+    if (Number.isNaN(couponExpiryDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expiredAt date",
+      });
+    }
+
+    // Previous date / current time not allowed
+    if (couponExpiryDate <= now) {
+      return res.status(400).json({
+        success: false,
+        message: "Previous date is not allowed. Coupon expiry date must be in the future",
+      });
+    }
+
+    const targetPlanId = String(subscriptionId);
+
+    if (!(targetPlanId in PLAN_RANK_BY_ID)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subscription plan. Allowed plans are free, lower, mid and top",
+      });
+    }
+
+    const [brandDoc, targetPlan, activeCoupon] = await Promise.all([
+      brand.findById(brandId)
+        .select({
+          subscription: 1,
+          subscriptionExpired: 1,
+        })
+        .lean(),
+
+      subscription.findById(subscriptionId)
+        .select({
+          _id: 1,
+          planName: 1,
+          name: 1,
+          planId: 1,
+          monthlyCost: 1,
+          annualCost: 1,
+          status: 1,
+        })
+        .lean(),
+
+      BrandCoupon.findOne({
+        brandId,
+        hasUsed: false,
+        expiredAt: { $gt: now },
+      })
+        .select({
+          _id: 1,
+          promocode: 1,
+          subscriptionId: 1,
+          newPrice: 1,
+          mode: 1,
+          expiredAt: 1,
+        })
+        .lean(),
+    ]);
+
+    if (!brandDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Brand not found",
+      });
+    }
+
+    if (!targetPlan) {
+      return res.status(404).json({
+        success: false,
+        message: "Subscription plan not found",
+      });
+    }
+
+    if (targetPlan.status && targetPlan.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Selected subscription plan is not active",
+      });
+    }
+
+    // If brand already has unused + not expired coupon, block new coupon
+    if (activeCoupon) {
+      return res.status(409).json({
+        success: false,
+        message: "Brand already has an active coupon",
+        data: {
+          couponId: activeCoupon._id,
+          promocode: activeCoupon.promocode,
+          subscriptionId: activeCoupon.subscriptionId,
+          newPrice: activeCoupon.newPrice,
+          mode: activeCoupon.mode,
+          expiredAt: activeCoupon.expiredAt,
+        },
+      });
+    }
+
+    const currentSubscription = brandDoc.subscription || {};
+
+    const currentPlanId = currentSubscription.planRef
+      ? String(currentSubscription.planRef)
+      : FREE_PLAN_ID;
+
+    const subscriptionExpiresAt = currentSubscription.expiresAt
+      ? new Date(currentSubscription.expiresAt)
+      : null;
+
+    const isCurrentSubscriptionExpired =
+      Boolean(brandDoc.subscriptionExpired) ||
+      (
+        subscriptionExpiresAt &&
+        !Number.isNaN(subscriptionExpiresAt.getTime()) &&
+        subscriptionExpiresAt <= now
+      );
+
+    const currentRank = getPlanRank(currentPlanId);
+    const targetRank = getPlanRank(targetPlanId);
+
+    // If already top plan, do not create any coupon
+    if (currentPlanId === TOP_PLAN_ID) {
+      return res.status(400).json({
+        success: false,
+        message: "Brand is already on the highest package",
+        meta: {
+          currentPlanId,
+          currentPlan: getPlanLabel(currentPlanId),
+          targetPlanId,
+          targetPlan: getPlanLabel(targetPlanId),
+          subscriptionExpired: isCurrentSubscriptionExpired,
+          expiresAt: currentSubscription.expiresAt || null,
+        },
+      });
+    }
+
+    // Same or lower package coupon not allowed
+    if (targetRank <= currentRank) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot create coupon for ${getPlanLabel(targetPlanId)} plan because brand is already on ${getPlanLabel(currentPlanId)} plan or higher`,
+        meta: {
+          currentPlanId,
+          currentPlan: getPlanLabel(currentPlanId),
+          targetPlanId,
+          targetPlan: getPlanLabel(targetPlanId),
+          subscriptionExpired: isCurrentSubscriptionExpired,
+          expiresAt: currentSubscription.expiresAt || null,
+        },
+      });
+    }
+
     let promocode;
     let isUnique = false;
 
@@ -2537,7 +2716,9 @@ exports.CreateBrandCoupon = async (req, res) => {
 
       const existingPromoCode = await BrandCoupon.findOne({
         promocode,
-      });
+      })
+        .select({ _id: 1 })
+        .lean();
 
       if (!existingPromoCode) {
         isUnique = true;
@@ -2551,7 +2732,7 @@ exports.CreateBrandCoupon = async (req, res) => {
       mode,
       promocode,
       hasUsed: false,
-      expiredAt,
+      expiredAt: couponExpiryDate,
     });
 
     return res.status(201).json({
@@ -2560,7 +2741,6 @@ exports.CreateBrandCoupon = async (req, res) => {
       promocode: brandCoupon.promocode,
       data: brandCoupon,
     });
-
   } catch (error) {
     console.error("CreateBrandCoupon error:", error);
 
@@ -2571,6 +2751,7 @@ exports.CreateBrandCoupon = async (req, res) => {
     });
   }
 };
+
 exports.subscriptionList = async (req, res) => {
   try {
     const list = await subscription
