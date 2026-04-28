@@ -75,8 +75,8 @@ async function attachFallbackCampaignData(threadDoc) {
 
   const instantlyCampaignId = String(
     threadDoc?.instantlyCampaignId ||
-      threadDoc?.prospectId?.instantly?.campaignId ||
-      ""
+    threadDoc?.prospectId?.instantly?.campaignId ||
+    ""
   ).trim();
 
   if (!instantlyCampaignId) return threadDoc;
@@ -108,17 +108,17 @@ function serializeThread(threadDoc) {
     _id: threadDoc._id,
     prospectId: prospect
       ? {
-          _id: prospect?._id,
-          companyName: prospect?.companyName || "",
-          primaryContact: prospect?.primaryContact || {},
-          stage: prospect?.stage || "",
-        }
+        _id: prospect?._id,
+        companyName: prospect?.companyName || "",
+        primaryContact: prospect?.primaryContact || {},
+        stage: prospect?.stage || "",
+      }
       : null,
     campaignId: campaign
       ? {
-          _id: campaign?._id,
-          name: campaign?.name || "",
-        }
+        _id: campaign?._id,
+        name: campaign?.name || "",
+      }
       : null,
     sdrId: campaign?.sdrId || null,
     RHId: campaign?.RHId || null,
@@ -398,19 +398,28 @@ exports.replyToThread = async (req, res) => {
 
     const replyToId = await resolveReplyTargetForThread(thread);
 
+    const replyTargetUuid = await resolveReplyTargetForThread(thread);
+
+    if (!replyTargetUuid) {
+      return res.status(400).json({
+        success: false,
+        message: "Reply target email id is missing for this conversation",
+      });
+    }
+
+    const htmlBody = bodyText
+      .split("\n")
+      .map((line) => (line.trim() ? `<p>${line}</p>` : "<br/>"))
+      .join("");
+
     const response = await instantlyService.replyToEmail({
+      reply_to_uuid: replyTargetUuid,
       eaccount: fromEmail,
-      to_address_email_list: toEmail,
-      subject,
+      subject: subject || thread.subject || "",
       body: {
-        html: bodyText
-          .split("\n")
-          .map((line) => (line.trim() ? `<p>${line}</p>` : "<br/>"))
-          .join(""),
+        text: bodyText,
+        html: htmlBody,
       },
-      body_text: bodyText,
-      reply_to_id: replyToId || undefined,
-      thread_id: thread.instantlyThreadId || undefined,
     });
 
     const providerMessageId = String(
@@ -450,9 +459,20 @@ exports.replyToThread = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(error?.statusCode || 500).json({
+    console.error("replyToThread error:", {
+      status: error?.response?.status,
+      data: error?.response?.data,
+      message: error?.message,
+    });
+
+    return res.status(error?.response?.status || error?.statusCode || 500).json({
       success: false,
-      message: error.message || "Failed to send reply",
+      message:
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to send reply",
+      details: error?.response?.data || null,
     });
   }
 };

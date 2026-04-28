@@ -87,10 +87,16 @@ function normalizeDailyAnalyticsRows(payload) {
       item?.label ||
       item?.created_at ||
       "",
+    emailAccount: normalizeEmail(
+      item?.email_account ||
+      item?.emailAccount ||
+      item?.email ||
+      item?.account_email ||
+      item?.accountEmail
+    ),
     sent: toSafeNumber(
       item?.sent,
       item?.emails_sent,
-      item?.warmup_emails_sent,
       item?.total_sent
     ),
     received: toSafeNumber(
@@ -107,11 +113,69 @@ function normalizeDailyAnalyticsRows(payload) {
   }));
 }
 
+function filterDailyRowsByEmail(dailyRows = [], email = "") {
+  const normalizedEmail = normalizeEmail(email);
+
+  return dailyRows.filter((item) => {
+    if (!item?.emailAccount) return true;
+    return item.emailAccount === normalizedEmail;
+  });
+}
+
+function getTodayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getDailyRowForDate(dailyRows = [], targetDate = getTodayDateString()) {
+  const normalizedTargetDate = normalizeDailyDate(targetDate);
+
+  return (
+    dailyRows.find(
+      (item) => normalizeDailyDate(item?.date) === normalizedTargetDate
+    ) || null
+  );
+}
+
+function normalizeDailyDate(value) {
+  if (!value) return "";
+  return String(value).slice(0, 10);
+}
+
+function getEmailsSentSinceAssignment(assignment, dailyRows = []) {
+  const today = getTodayDateString();
+  const todayRow = getDailyRowForDate(dailyRows, today);
+
+  if (!todayRow) return 0;
+
+  const currentSent = toSafeNumber(todayRow?.sent);
+
+  const baselineDate = normalizeDailyDate(
+    assignment?.instantlyMeta?.sentBaselineDate
+  );
+
+  const hasBaseline =
+    assignment?.instantlyMeta &&
+    Object.prototype.hasOwnProperty.call(
+      assignment.instantlyMeta,
+      "sentBaselineToday"
+    );
+
+  const baselineSent = toSafeNumber(
+    assignment?.instantlyMeta?.sentBaselineToday
+  );
+
+  if (hasBaseline && baselineDate === today) {
+    return Math.max(0, currentSent - baselineSent);
+  }
+
+  return currentSent;
+}
+
 async function findInstantlyAccountByEmail(email) {
   try {
     const account = await instantlyService.getAccount(email);
     if (account) return account;
-  } catch (error) {}
+  } catch (error) { }
 
   const listPayload = await instantlyService.listAccounts({});
   const items = getInstantlyItems(listPayload);
@@ -122,8 +186,6 @@ async function findInstantlyAccountByEmail(email) {
 }
 
 function serializeAssignment(row, liveAccount = null, dailyRows = []) {
-  const latestDaily = dailyRows[dailyRows.length - 1] || null;
-
   return {
     _id: row?._id || null,
     email: row?.email || "",
@@ -136,7 +198,7 @@ function serializeAssignment(row, liveAccount = null, dailyRows = []) {
     assignedAt: row?.assignedAt || null,
     unassignedAt: row?.unassignedAt || null,
     adminId: row?.adminId || null,
-    emailsSentToday: toSafeNumber(latestDaily?.sent),
+    emailsSentToday: getEmailsSentSinceAssignment(row, dailyRows),
     instantlyMeta: {
       status:
         toSafeNullableNumber(liveAccount?.status, row?.instantlyMeta?.status),
@@ -278,9 +340,9 @@ function buildAccountPatchPayload(body = {}) {
     tags: Array.isArray(body?.tags)
       ? body.tags
       : String(body?.tags || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
     daily_limit: toSafeNumber(body?.dailyLimit),
     minimum_wait_time: toSafeNumber(body?.minimumWaitTime),
     campaign_slow_ramp: Boolean(body?.campaignSlowRamp),
@@ -400,6 +462,13 @@ exports.assignMailbox = async (req, res) => {
       ? true
       : requestedPrimary || existingActiveCount === 0;
 
+    const dailyPayload = await instantlyService
+      .getAccountDailyAnalytics({ email })
+      .catch(() => null);
+
+    const dailyRows = normalizeDailyAnalyticsRows(dailyPayload);
+    const latestDaily = getDailyRowForDate(dailyRows);
+
     const doc = await OutreachMailboxAssignment.findOneAndUpdate(
       { email },
       {
@@ -430,6 +499,9 @@ exports.assignMailbox = async (req, res) => {
               typeof instantlyAccount?.stat_warmup_score === "number"
                 ? instantlyAccount.stat_warmup_score
                 : null,
+
+            sentBaselineToday: toSafeNumber(latestDaily?.sent),
+            sentBaselineDate: getTodayDateString(),
           },
         },
         $setOnInsert: {
@@ -521,13 +593,22 @@ exports.listMyMailboxAccounts = async (req, res) => {
       rows.map(async (row) => {
         const [liveAccount, dailyPayload] = await Promise.all([
           instantlyService.getAccount(row.email).catch(() => null),
-          instantlyService.getAccountDailyAnalytics({ email: row.email }).catch(() => null),
+          instantlyService
+            .getAccountDailyAnalytics({
+              emails: [row.email],
+              start_date: getTodayDateString(),
+              end_date: getTodayDateString(),
+            })
+            .catch(() => null),
         ]);
 
         return serializeAssignment(
           row,
           liveAccount,
-          normalizeDailyAnalyticsRows(dailyPayload)
+          filterDailyRowsByEmail(
+            normalizeDailyAnalyticsRows(dailyPayload),
+            row.email
+          )
         );
       })
     );
@@ -625,11 +706,25 @@ exports.getMyMailboxAccountDetails = async (req, res) => {
 
     const [liveAccount, dailyPayload, campaigns] = await Promise.all([
       instantlyService.getAccount(email).catch(() => null),
-      instantlyService.getAccountDailyAnalytics({ email }).catch(() => null),
+      instantlyService
+        .getAccountDailyAnalytics({
+          emails: [email],
+          start_date: getTodayDateString(),
+          end_date: getTodayDateString(),
+        })
+        .catch(() => null),
       getCampaignsForMailbox(role, req.admin.adminId, email),
     ]);
 
-    const dailyRows = normalizeDailyAnalyticsRows(dailyPayload).slice(-7);
+    const dailyRows = filterDailyRowsByEmail(
+      normalizeDailyAnalyticsRows(dailyPayload),
+      email
+    )
+      .sort(
+        (a, b) =>
+          new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()
+      )
+      .slice(-7);
     const warmupSummary = dailyRows.reduce(
       (acc, item) => {
         acc.sent += item.sent;
@@ -657,7 +752,7 @@ exports.getMyMailboxAccountDetails = async (req, res) => {
           isPaused: toSafeNumber(liveAccount?.status) === 0,
           statusLabel: getAssignmentStatusLabel(liveAccount, assignment),
           assignedAt: assignment?.assignedAt || null,
-          emailsSentToday: dailyRows[dailyRows.length - 1]?.sent || 0,
+          emailsSentToday: getEmailsSentSinceAssignment(assignment, dailyRows),
           instantlyMeta: {
             status: toSafeNullableNumber(liveAccount?.status, assignment?.instantlyMeta?.status),
             warmupStatus: toSafeNullableNumber(
@@ -705,7 +800,7 @@ exports.getMyMailboxAccountDetails = async (req, res) => {
           ),
           campaignSlowRamp: Boolean(
             liveAccount?.campaign_slow_ramp ??
-              liveAccount?.campaign_slow_ramp_enabled
+            liveAccount?.campaign_slow_ramp_enabled
           ),
           replyToAddress:
             liveAccount?.reply_to_address ||
@@ -721,7 +816,7 @@ exports.getMyMailboxAccountDetails = async (req, res) => {
             "",
           enableCustomTrackingDomain: Boolean(
             liveAccount?.enable_custom_tracking_domain ||
-              liveAccount?.custom_tracking_domain_enabled
+            liveAccount?.custom_tracking_domain_enabled
           ),
           warmupFilterTag:
             liveAccount?.warmup_filter_tag ||
