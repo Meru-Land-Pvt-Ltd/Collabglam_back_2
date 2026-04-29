@@ -29,6 +29,7 @@ const PortalSettings = require("../models/portalSettings");
 const BrandAssigned = require("../models/brandAssigned");
 const ApplyCampaign = require("../models/applyCampaign");
 const CampaignAssigned = require("../models/CampaignAssigned");
+const BrandAssignedPlanHistory = require("../models/assignedPlanHistory");
 
 const { BrandWalletModel } = require("../models/brandWallet");
 const {
@@ -966,6 +967,34 @@ exports.adminAssignBrandPlan = async (req, res) => {
       });
     }
 
+    const rawAdminId = String(req.admin?.adminId || req.admin?._id || "").trim();
+
+    const assignedByAdminId = mongoose.Types.ObjectId.isValid(rawAdminId)
+      ? new mongoose.Types.ObjectId(rawAdminId)
+      : null;
+
+    const assignedPlanHistory = await BrandAssignedPlanHistory.create({
+      brandId: updated._id,
+
+      planId: plan.planId,
+
+      oldPlanName,
+      newPlanName: subscription.planName,
+
+      billingCycle: subscription.billingCycle || billingCycle,
+
+      startedAt: subscription.startedAt || new Date(),
+      expiresAt: subscription.expiresAt || null,
+
+      durationDays: durationDays || null,
+
+      assignedByAdminId,
+      assignedByAdminEmail: req.admin?.email || "",
+
+      source: "admin_manual",
+      status: "assigned",
+    });
+
     await sendSubscriptionLifecycleEmail({
       userType: "Brand",
       user: updated,
@@ -976,11 +1005,13 @@ exports.adminAssignBrandPlan = async (req, res) => {
 
     return res.json({
       status: "success",
-      message: `Brand plan assigned successfully. Email notification sent to ${updated.email || updated.proxyEmail || "brand user"}.`,
+      message: `Brand plan assigned successfully. Email notification sent to ${updated.email || updated.proxyEmail || "brand user"
+        }.`,
       brand: {
         ...updated,
         brandId: String(updated._id),
       },
+      assignedPlanHistory,
     });
   } catch (error) {
     console.error("adminAssignBrandPlan error:", error);
@@ -2937,13 +2968,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         },
         ...(debug
           ? {
-              debug: {
-                reason: "No ApplyCampaign rows found for this influencer",
-                influencerId,
-                applyRowsFound: applyRows.length,
-                invitationsFound: invitations.length,
-              },
-            }
+            debug: {
+              reason: "No ApplyCampaign rows found for this influencer",
+              influencerId,
+              applyRowsFound: applyRows.length,
+              invitationsFound: invitations.length,
+            },
+          }
           : {}),
       });
     }
@@ -2982,13 +3013,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           },
           ...(debug
             ? {
-                debug: {
-                  reason: "Admin has no visible brand keys",
-                  rawActor,
-                  resolvedActor: actor,
-                  appliedCampaignIds,
-                },
-              }
+              debug: {
+                reason: "Admin has no visible brand keys",
+                rawActor,
+                resolvedActor: actor,
+                appliedCampaignIds,
+              },
+            }
             : {}),
         });
       }
@@ -3023,13 +3054,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           },
           ...(debug
             ? {
-                debug: {
-                  reason: "Admin has no visible campaign ids",
-                  rawActor,
-                  resolvedActor: actor,
-                  appliedCampaignIds,
-                },
-              }
+              debug: {
+                reason: "Admin has no visible campaign ids",
+                rawActor,
+                resolvedActor: actor,
+                appliedCampaignIds,
+              },
+            }
             : {}),
         });
       }
@@ -3110,16 +3141,16 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       statusFilter === "all"
         ? normalized
         : normalized.filter((item) => {
-            if (statusFilter === "active") {
-              return item.status !== "rejected";
-            }
+          if (statusFilter === "active") {
+            return item.status !== "rejected";
+          }
 
-            return (
-              item.status === statusFilter ||
-              String(item.statusBrand || "").toLowerCase() === statusFilter ||
-              String(item.statusInfluencer || "").toLowerCase() === statusFilter
-            );
-          });
+          return (
+            item.status === statusFilter ||
+            String(item.statusBrand || "").toLowerCase() === statusFilter ||
+            String(item.statusInfluencer || "").toLowerCase() === statusFilter
+          );
+        });
 
     const field = getCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -3186,18 +3217,18 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       },
       ...(debug
         ? {
-            debug: {
-              rawActor,
-              resolvedActor: actor,
-              visibleBrandKeys,
-              visibleCampaignIds,
-              influencerId,
-              applyRowsFound: applyRows.length,
-              invitationsFound: invitations.length,
-              appliedCampaignIds,
-              campaignDocsFound: campaignDocs.length,
-            },
-          }
+          debug: {
+            rawActor,
+            resolvedActor: actor,
+            visibleBrandKeys,
+            visibleCampaignIds,
+            influencerId,
+            applyRowsFound: applyRows.length,
+            invitationsFound: invitations.length,
+            appliedCampaignIds,
+            campaignDocsFound: campaignDocs.length,
+          },
+        }
         : {}),
     });
   } catch (error) {
@@ -4135,6 +4166,110 @@ exports.adminCreateInfluencer = async (req, res) => {
         message: "Influencer already exists with this email.",
       });
     }
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
+  }
+};
+
+
+
+exports.getBrandAssignedPlanHistoryList = async (req, res) => {
+  try {
+    const params = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
+
+    const brandId = String(params.brandId || params._id || "").trim();
+    const page = parsePositiveInt(params.page, 1, { min: 1, max: 100000 });
+    const limit = parsePositiveInt(params.limit, 10, { min: 1, max: 100 });
+    const sortBy = String(params.sortBy || "createdAt").trim();
+    const sortOrder = normalizeSortOrder(params.sortOrder, "desc");
+    const status = String(params.status || "").trim();
+
+    if (!brandId) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId is required",
+      });
+    }
+
+    if (!isObjectId(brandId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid brandId",
+      });
+    }
+
+    const brand = await Brand.findById(brandId)
+      .select("_id brandName name email proxyEmail")
+      .lean();
+
+    if (!brand) {
+      return res.status(404).json({
+        success: false,
+        message: "Brand not found",
+      });
+    }
+
+    const filter = {
+      brandId: toObjectId(brandId),
+    };
+
+    if (status && status !== "all") {
+      filter.status = status;
+    }
+
+    const allowedSortFields = new Set([
+      "createdAt",
+      "updatedAt",
+      "startedAt",
+      "expiresAt",
+      "oldPlanName",
+      "newPlanName",
+      "billingCycle",
+      "status",
+    ]);
+
+    const finalSortBy = allowedSortFields.has(sortBy) ? sortBy : "createdAt";
+    const dir = sortOrder === "asc" ? 1 : -1;
+
+    const [total, histories] = await Promise.all([
+      BrandAssignedPlanHistory.countDocuments(filter),
+
+      BrandAssignedPlanHistory.find(filter)
+        .populate({
+          path: "assignedByAdminId",
+          select: "name email role",
+        })
+        .sort({ [finalSortBy]: dir, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Brand assigned plan history fetched successfully",
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      sortBy: finalSortBy,
+      sortOrder,
+      brand: {
+        _id: brand._id,
+        brandId: String(brand._id),
+        name: brand.name || brand.brandName || "",
+        email: brand.email || brand.proxyEmail || "",
+      },
+      histories,
+    });
+  } catch (error) {
+    console.error("getBrandAssignedPlanHistoryList error:", error);
 
     return res.status(500).json({
       success: false,

@@ -27,6 +27,7 @@ const {
   adminAddCampaignFunds,
   adminCreateBrand,
   adminCreateInfluencer,
+  getBrandAssignedPlanHistoryList,
 } = require("../controllers/adminController");
 
 const { adminAuth } = require("../middlewares/adminAuth");
@@ -79,5 +80,7 @@ router.post("/campaign/add-funds", adminAuth, adminAddCampaignFunds);
 // Admin-created placeholder users
 router.post("/brand/create", adminAuth, adminCreateBrand);
 router.post("/influencer/create", adminAuth, adminCreateInfluencer);
+
+router.post("/assigned-plan-history", adminAuth, getBrandAssignedPlanHistoryList);
 
 module.exports = router;

@@ -19,4 +19,9 @@ router.get("/brand/current", ctrl.getCurrentBrandPlanLite );
 router.post("/send-expiring-soon-emails", ctrl.sendExpiringSoonEmails);
 router.post("/send-expired-emails", ctrl.sendExpiredSubscriptionEmails);
 
+router.post(
+  "/brand/move-expired-to-free",
+  ctrl.moveExpiredBrandsToFree
+);
+
 module.exports = router;
