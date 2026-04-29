@@ -1587,6 +1587,58 @@ exports.createFolder = async (req, res) => {
   }
 };
 
+exports.getFolderByAssignedCampaign = async (req, res) => {
+  try {
+    const rawCampaignId = cleanStr(req.params?.campaignId || req.query?.campaignId || req.body?.campaignId);
+
+    if (!rawCampaignId) {
+      return res.status(400).json({ success: false, error: 'campaignId is required' });
+    }
+
+    const campaign = await findCampaignByAnyIdForAssignment(rawCampaignId);
+    const or = [];
+
+    or.push({ 'assignedCampaign.campaignsId': rawCampaignId });
+
+    if (mongoose.Types.ObjectId.isValid(rawCampaignId)) {
+      or.push({ 'assignedCampaign.campaignId': new mongoose.Types.ObjectId(rawCampaignId) });
+    }
+
+    if (campaign?._id) {
+      or.push({ 'assignedCampaign.campaignId': campaign._id });
+    }
+
+    if (campaign?.campaignsId) {
+      or.push({ 'assignedCampaign.campaignsId': cleanStr(campaign.campaignsId) });
+    }
+
+    const doc = await PitchFolder.findOne({
+      archivedAt: null,
+      $or: or,
+    })
+      .populate(buildCreatorPopulate())
+      .populate(buildUpdatedByPopulate())
+      .populate(buildSharedByPopulate())
+      .sort({ updatedAt: -1 })
+      .exec();
+
+    if (!doc) {
+      return res.status(404).json({
+        success: false,
+        error: 'No pitch folder is assigned to this campaign',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: await serializeFolderDetailWithCampaignState(doc),
+    });
+  } catch (err) {
+    console.error('[getFolderByAssignedCampaign] Error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Internal error' });
+  }
+};
+
 exports.getFolderById = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {

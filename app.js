@@ -90,6 +90,7 @@ const defaultCorsOrigins = [
   "http://192.168.1.4:3000",
 
   "https://mhd.sharemitra.com",
+  "http://192.168.1.31:3000"
 ];
 
 

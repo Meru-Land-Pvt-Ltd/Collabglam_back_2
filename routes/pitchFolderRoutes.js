@@ -19,6 +19,7 @@ router.post('/shared/:token/media-kit-link-request/:itemId', controller.requestS
 // admin routes
 router.get('/list', adminAuth, controller.listFolders);
 router.post('/create', adminAuth, controller.createFolder);
+router.get('/campaign/:campaignId', adminAuth, controller.getFolderByAssignedCampaign);
 router.get('/:id', adminAuth, controller.getFolderById);
 router.post('/update', adminAuth, controller.updateFolder);
 router.post('/duplicate', adminAuth, controller.duplicateFolder);

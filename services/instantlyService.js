@@ -33,11 +33,33 @@ function encodeId(value) {
   return encodeURIComponent(normalizeString(value));
 }
 
+function serializeParams(params = {}) {
+  const searchParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== "") {
+          searchParams.append(key, String(item));
+        }
+      });
+      return;
+    }
+
+    searchParams.append(key, String(value));
+  });
+
+  return searchParams.toString();
+}
+
 async function request(method, url, { params, data, headers, responseType } = {}) {
   const res = await instantlyClient.request({
     method,
     url,
     params,
+    paramsSerializer: serializeParams,
     data,
     headers,
     responseType,
@@ -66,7 +88,16 @@ async function getWarmupAnalytics(payload = {}) {
 }
 
 async function getAccountDailyAnalytics(params = {}) {
-  return request("get", "/accounts/analytics/daily", { params });
+  const normalizedParams = { ...params };
+
+  if (normalizedParams.email && !normalizedParams.emails) {
+    normalizedParams.emails = [normalizeString(normalizedParams.email).toLowerCase()];
+    delete normalizedParams.email;
+  }
+
+  return request("get", "/accounts/analytics/daily", {
+    params: normalizedParams,
+  });
 }
 
 async function testAccountVitals(payload = {}) {
@@ -109,8 +140,33 @@ async function updateCampaign(id, payload) {
   return request("patch", `/campaigns/${encodeId(id)}`, { data: payload });
 }
 
-async function deleteCampaign(id) {
-  return request("delete", `/campaigns/${encodeId(id)}`);
+async function deleteCampaign(campaignId) {
+  if (!campaignId) {
+    throw new Error("Instantly campaign id is required");
+  }
+
+  const res = await instantlyClient.request({
+    method: "delete",
+    url: `/campaigns/${encodeId(campaignId)}`,
+    data: null,
+    transformRequest: [
+      (data, headers) => {
+        if (headers) {
+          if (typeof headers.delete === "function") {
+            headers.delete("Content-Type");
+            headers.delete("content-type");
+          } else {
+            delete headers["Content-Type"];
+            delete headers["content-type"];
+          }
+        }
+
+        return data;
+      },
+    ],
+  });
+
+  return unwrap(res);
 }
 
 async function activateCampaign(id, payload = {}) {
@@ -164,16 +220,16 @@ async function getCampaignSendingStatus(id, params = {}) {
 async function sendTestEmail(payload = {}) {
   const eaccount = String(
     payload.eaccount ||
-      payload.account_email ||
-      payload.accountEmail ||
-      ""
+    payload.account_email ||
+    payload.accountEmail ||
+    ""
   ).trim();
 
   const to_address_email_list = String(
     payload.to_address_email_list ||
-      payload.to_email ||
-      payload.toEmail ||
-      ""
+    payload.to_email ||
+    payload.toEmail ||
+    ""
   ).trim();
 
   const subject = String(payload.subject || "").trim();
