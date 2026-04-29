@@ -71,7 +71,7 @@ const server = http.createServer(app);
 const GridFSBucket = mongoose.mongo.GridFSBucket;
 const { Types } = mongoose;
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 9000;
 const JSON_LIMIT = process.env.JSON_LIMIT || "50mb";
 const URLENCODED_LIMIT = process.env.URLENCODED_LIMIT || "50mb";
 const FILE_SIZE_LIMIT_MB = Number(process.env.FILE_SIZE_LIMIT_MB || 100);
@@ -81,7 +81,7 @@ const defaultCorsOrigins = [
   "https://collabglam.com",
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://192.168.1.49:3000",
+  "http://192.168.1.4:3000",
   "https://mhd.sharemitra.com",
 ];
 
