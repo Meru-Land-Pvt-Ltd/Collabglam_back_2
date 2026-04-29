@@ -29,12 +29,32 @@ function influencerAuth(req, _res, next) {
 
     const decoded = jwt.verify(token, secret);
 
-    if (!decoded || !decoded.influencerId || decoded.role !== "influencer") {
+    const influencerId =
+      decoded?.influencerId ||
+      decoded?.creatorId ||
+      decoded?.userId ||
+      decoded?.id ||
+      decoded?._id;
+
+    const role = String(decoded?.role || "").toLowerCase();
+
+    const allowedRoles = ["influencer", "creator"];
+
+    if (!decoded || !influencerId || !allowedRoles.includes(role)) {
+      console.log("Influencer auth forbidden:", {
+        decoded,
+        resolvedInfluencerId: influencerId,
+        resolvedRole: role,
+      });
+
       throw new ForbiddenError("Forbidden");
     }
 
-    // attach user info to request
-    req.user = decoded;
+    req.user = {
+      ...decoded,
+      influencerId,
+      role,
+    };
 
     next();
   } catch (err) {

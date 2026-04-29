@@ -2834,14 +2834,34 @@ exports.adminList = async (req, res) => {
       influencerId,
       search,
       appliedBy,
+      adminId,
     } = req.body || {};
+
+    console.log("adminList payload:", {
+      page,
+      limit,
+      status,
+      campaignId,
+      brandId,
+      influencerId,
+      search,
+      appliedBy,
+      adminId,
+    });
 
     const p = Math.max(1, parseInt(page, 10) || 1);
     const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
 
     const filter = {};
 
+    const trimmedAdminId = String(adminId || "").trim();
+
+    if (trimmedAdminId) {
+      filter.adminNotInterested = { $ne: trimmedAdminId };
+    }
+
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
+
     if (normalizedStatus && normalizedStatus !== "__ALL__") {
       filter.status = normalizedStatus;
     }
@@ -2851,6 +2871,7 @@ exports.adminList = async (req, res) => {
     if (influencerId) filter.influencerId = String(influencerId);
 
     const searchTerm = typeof search === "string" ? search.trim() : "";
+
     if (searchTerm) {
       const pattern = escapeRegex(searchTerm);
       const re = new RegExp(pattern, "i");
@@ -2859,8 +2880,30 @@ exports.adminList = async (req, res) => {
 
     if (appliedBy && typeof appliedBy === "string") {
       const role = String(appliedBy).toLowerCase();
+
       if (role === "brand") filter["createdBy.role"] = "Brand";
       if (role === "influencer") filter["createdBy.role"] = "Influencer";
+    }
+
+    console.log("adminList Mongo filter:", JSON.stringify(filter, null, 2));
+
+    const hiddenTest = trimmedAdminId
+      ? await Dispute.findOne({
+          disputeId: "ds000029",
+        })
+          .select("disputeId status adminNotInterested")
+          .lean()
+      : null;
+
+    if (hiddenTest) {
+      console.log("ds000029 hidden test:", hiddenTest);
+      console.log("Should hide for this admin:", {
+        adminId: trimmedAdminId,
+        adminNotInterested: hiddenTest.adminNotInterested,
+        includesAdminId: Array.isArray(hiddenTest.adminNotInterested)
+          ? hiddenTest.adminNotInterested.includes(trimmedAdminId)
+          : false,
+      });
     }
 
     const total = await Dispute.countDocuments(filter);
@@ -2872,9 +2915,17 @@ exports.adminList = async (req, res) => {
       .lean();
 
     try {
-      const uniqueBrandIds = [...new Set(rows.map((r) => r.brandId).filter(Boolean))];
-      const uniqueInfluencerIds = [...new Set(rows.map((r) => r.influencerId).filter(Boolean))];
-      const uniqueCampaignIds = [...new Set(rows.map((r) => r.campaignId).filter(Boolean))];
+      const uniqueBrandIds = [
+        ...new Set(rows.map((r) => r.brandId).filter(Boolean)),
+      ];
+
+      const uniqueInfluencerIds = [
+        ...new Set(rows.map((r) => r.influencerId).filter(Boolean)),
+      ];
+
+      const uniqueCampaignIds = [
+        ...new Set(rows.map((r) => r.campaignId).filter(Boolean)),
+      ];
 
       const toObjectIds = (ids = []) =>
         ids
@@ -2889,18 +2940,20 @@ exports.adminList = async (req, res) => {
       const [brands, influencers, campaigns] = await Promise.all([
         brandObjectIds.length
           ? Brand.find({ _id: { $in: brandObjectIds } })
-            .select("_id name brandName companyName")
-            .lean()
+              .select("_id name brandName companyName")
+              .lean()
           : [],
+
         influencerObjectIds.length
           ? Influencer.find({ _id: { $in: influencerObjectIds } })
-            .select("_id name fullName influencerName username")
-            .lean()
+              .select("_id name fullName influencerName username")
+              .lean()
           : [],
+
         campaignObjectIds.length
           ? Campaign.find({ _id: { $in: campaignObjectIds } })
-            .select("_id campaignTitle title name")
-            .lean()
+              .select("_id campaignTitle title name")
+              .lean()
           : [],
       ]);
 
@@ -2949,6 +3002,7 @@ exports.adminList = async (req, res) => {
       });
     } catch (e) {
       console.error("Error enriching adminList:", e);
+
       return res.status(200).json({
         page: p,
         limit: l,
@@ -3075,6 +3129,48 @@ exports.adminUpdateStatus = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminUpdateStatus:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.adminMarkNotInterested = async (req, res) => {
+  try {
+    const { disputeId, adminId } = req.body || {};
+
+    const trimmedDisputeId = String(disputeId || "").trim();
+    const trimmedAdminId = String(adminId || "").trim();
+
+    if (!trimmedDisputeId) {
+      return res.status(400).json({ message: "disputeId is required" });
+    }
+
+    if (!trimmedAdminId) {
+      return res.status(400).json({ message: "adminId is required" });
+    }
+
+    const dispute = await Dispute.findOne({ disputeId: trimmedDisputeId });
+
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    dispute.adminNotInterested = Array.isArray(dispute.adminNotInterested)
+      ? dispute.adminNotInterested
+      : [];
+
+    if (!dispute.adminNotInterested.includes(trimmedAdminId)) {
+      dispute.adminNotInterested.push(trimmedAdminId);
+    }
+
+    await dispute.save();
+
+    return res.status(200).json({
+      message: "Dispute hidden for this admin",
+      disputeId: dispute.disputeId,
+      adminId: trimmedAdminId,
+      status: dispute.status,
+    });
+  } catch (err) {
+    console.error("Error in adminMarkNotInterested:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
