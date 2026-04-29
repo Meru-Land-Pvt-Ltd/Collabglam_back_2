@@ -16,6 +16,7 @@ const { Category } = require("../models/categories");
 const subscriptionHelper = require("../utils/subscriptionHelper");
 const { sendSubscriptionLifecycleEmail } = require("../utils/subscriptionEmailHelper");
 const crypto = require("crypto");
+const BrandCoupon = require("../models/brandCoupon")
 
 const Campaign = require("../models/campaign");
 const Milestone = require("../models/milestone");
@@ -27,6 +28,7 @@ const SubscriptionPlan = require("../models/subscription");
 const PortalSettings = require("../models/portalSettings");
 const BrandAssigned = require("../models/brandAssigned");
 const ApplyCampaign = require("../models/applyCampaign");
+const CampaignAssigned = require("../models/CampaignAssigned");
 
 const { BrandWalletModel } = require("../models/brandWallet");
 const {
@@ -437,7 +439,70 @@ function extractHandleFromModash(modashDoc) {
 }
 
 async function enrichLiteCampaignBrandMeta(rows = []) {
-  const brandIds = [
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+
+  const rowBrandKeys = [
+    ...new Set(
+      rows
+        .map((row) => String(row?.brandId || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+
+  const rowBrandObjectIds = rowBrandKeys
+    .filter((id) => isObjectId(id))
+    .map((id) => toObjectId(id));
+
+  const brandLookupOr = [];
+
+  if (rowBrandObjectIds.length) {
+    brandLookupOr.push({ _id: { $in: rowBrandObjectIds } });
+  }
+
+  if (rowBrandKeys.length) {
+    brandLookupOr.push({ brandId: { $in: rowBrandKeys } });
+  }
+
+  const brands = brandLookupOr.length
+    ? await Brand.find({ $or: brandLookupOr })
+      .select("_id brandId name brandName subscription.planName subscription.planId")
+      .lean()
+    : [];
+
+  const brandMap = new Map();
+
+  brands.forEach((brand) => {
+    const meta = {
+      brandMongoId: String(brand._id),
+      brandName: brand.brandName || brand.name || "—",
+      brandPlanName: brand?.subscription?.planName || "free",
+      brandPlanId: brand?.subscription?.planId || "",
+    };
+
+    brandMap.set(String(brand._id), meta);
+
+    if (brand.brandId) {
+      brandMap.set(String(brand.brandId), meta);
+    }
+  });
+
+  return rows.map((row) => {
+    const meta = brandMap.get(String(row.brandId));
+
+    return {
+      ...row,
+      brandMongoId: meta?.brandMongoId || String(row.brandId || ""),
+      brandName: row.brandName || meta?.brandName || "—",
+      brandPlanName: meta?.brandPlanName || row.brandPlanName || "free",
+      brandPlanId: meta?.brandPlanId || row.brandPlanId || "",
+    };
+  });
+}
+
+async function enrichLiteCampaignAssignments(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+
+  const brandObjectIds = [
     ...new Set(
       rows
         .map((row) => String(row?.brandId || ""))
@@ -445,36 +510,164 @@ async function enrichLiteCampaignBrandMeta(rows = []) {
     ),
   ].map((id) => toObjectId(id));
 
-  if (!brandIds.length) {
-    return rows.map((row) => ({
-      ...row,
-      brandPlanName: "free",
-    }));
+  const campaignObjectIds = [
+    ...new Set(
+      rows
+        .map((row) => String(row?._id || ""))
+        .filter((id) => isObjectId(id))
+    ),
+  ].map((id) => toObjectId(id));
+
+  const brandAssignments = brandObjectIds.length
+    ? await BrandAssigned.find({
+      brandId: { $in: brandObjectIds },
+      status: "active",
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean()
+    : [];
+
+  const campaignAssignments = campaignObjectIds.length
+    ? await CampaignAssigned.find({
+      campaignId: { $in: campaignObjectIds },
+      status: "active",
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean()
+    : [];
+
+  const brandAssignmentMap = new Map();
+
+  for (const assignment of brandAssignments) {
+    const key = String(assignment.brandId);
+    if (!brandAssignmentMap.has(key)) {
+      brandAssignmentMap.set(key, assignment);
+    }
   }
 
-  const brands = await Brand.find({ _id: { $in: brandIds } })
-    .select("_id name brandName subscription.planName")
-    .lean();
+  const campaignAssignmentMap = new Map();
 
-  const brandMap = new Map(
-    brands.map((brand) => [
-      String(brand._id),
-      {
-        brandName: brand.brandName || brand.name || "—",
-        brandPlanName: brand?.subscription?.planName || "free",
-      },
-    ])
-  );
+  for (const assignment of campaignAssignments) {
+    const key = String(assignment.campaignId);
+    if (!campaignAssignmentMap.has(key)) {
+      campaignAssignmentMap.set(key, assignment);
+    }
+  }
+
+  const assigneeIds = [
+    ...new Set(
+      [
+        ...brandAssignments.flatMap((assignment) => [
+          assignment?.RHId,
+          assignment?.bdmId,
+          assignment?.idmId,
+          assignment?.sdrId,
+        ]),
+        ...campaignAssignments.flatMap((assignment) => [
+          assignment?.RHId,
+          assignment?.bdmId,
+          assignment?.idmId,
+        ]),
+      ]
+        .filter(Boolean)
+        .map((id) => String(id))
+        .filter((id) => isObjectId(id))
+    ),
+  ].map((id) => toObjectId(id));
+
+  const assignees = assigneeIds.length
+    ? await ASSIGNEE_MODEL.find({ _id: { $in: assigneeIds } })
+      .select("_id name email role")
+      .lean()
+    : [];
+
+  const assigneeMap = new Map();
+
+  assignees.forEach((admin) => {
+    assigneeMap.set(String(admin._id), admin.name || admin.email || "");
+  });
 
   return rows.map((row) => {
-    const meta = brandMap.get(String(row.brandId));
+    const brandAssignment =
+      brandAssignmentMap.get(String(row.brandMongoId || row.brandId));
+    const campaignAssignment = campaignAssignmentMap.get(String(row._id));
+
+    const RHId = campaignAssignment?.RHId || brandAssignment?.RHId || null;
+    const bdmId = campaignAssignment?.bdmId || brandAssignment?.bdmId || null;
+    const idmId = campaignAssignment?.idmId || brandAssignment?.idmId || null;
 
     return {
       ...row,
-      brandName: row.brandName || meta?.brandName || "—",
-      brandPlanName: meta?.brandPlanName || "free",
+
+      RHId,
+      bdmId,
+      idmId,
+
+      assignedRh: RHId ? assigneeMap.get(String(RHId)) || "" : "",
+      assignedBme: bdmId ? assigneeMap.get(String(bdmId)) || "" : "",
+      assignedIme: idmId ? assigneeMap.get(String(idmId)) || "" : "",
+
+      assignmentId: campaignAssignment?._id || brandAssignment?._id || null,
+      assignmentStatus:
+        campaignAssignment?.status || brandAssignment?.status || null,
     };
   });
+}
+
+async function getScopedCampaignAccessForAdmin(actor = {}) {
+  const role = String(actor?.role || "").trim().toLowerCase();
+  const adminId = String(actor?.adminId || actor?._id || "").trim();
+
+  if (!adminId) {
+    return {
+      brandKeys: [],
+      campaignIds: [],
+    };
+  }
+
+  if (role === ROLES.SUPER_ADMIN) {
+    return {
+      brandKeys: null,
+      campaignIds: null,
+    };
+  }
+
+  // IME visibility is campaign-based, not brand-based.
+  if (role === ROLES.IME) {
+    const imeFilters = [{ idmId: adminId }];
+
+    if (isObjectId(adminId)) {
+      imeFilters.push({ idmId: toObjectId(adminId) });
+    }
+
+    const assignedCampaigns = await CampaignAssigned.find({
+      status: "active",
+      $or: imeFilters,
+    })
+      .select("campaignId")
+      .lean();
+
+    const campaignIds = [
+      ...new Set(
+        assignedCampaigns
+          .map((item) => String(item?.campaignId || ""))
+          .filter((id) => isObjectId(id))
+      ),
+    ].map((id) => toObjectId(id));
+
+    return {
+      brandKeys: null,
+      campaignIds,
+    };
+  }
+
+  // RH/BME visibility remains brand-based.
+  const brandKeys = await getScopedCampaignBrandKeysForAdmin(actor);
+
+  return {
+    brandKeys,
+    campaignIds: null,
+  };
 }
 
 async function enrichBrandsWithAssignments(brandDocs = []) {
@@ -677,6 +870,17 @@ function toCampaignSummary(doc = {}) {
     campaignStatus: doc.campaignStatus || "",
     byAi: Number(doc.byAi || 0),
     createdByAdmin: doc.createdByAdmin || null,
+
+    assignedRh: doc.assignedRh || "",
+    assignedBme: doc.assignedBme || "",
+    assignedIme: doc.assignedIme || "",
+
+    RHId: doc.RHId || null,
+    bdmId: doc.bdmId || null,
+    idmId: doc.idmId || null,
+
+    assignmentId: doc.assignmentId || null,
+    assignmentStatus: doc.assignmentStatus || null,
   };
 }
 
@@ -1260,14 +1464,18 @@ exports.getAllCampaigns = async (req, res) => {
     const brandId = String(req.body?.brandId || "").trim();
 
     const actor = req.admin || {};
-    const visibleBrandKeys = await getScopedCampaignBrandKeysForAdmin(actor);
+    const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
 
     const filter = buildCampaignBaseFilter({
       search,
       statusFlag,
-      brandKeys: visibleBrandKeys,
+      brandKeys: scopedAccess.brandKeys,
       requestedBrandId: brandId,
     });
+
+    if (Array.isArray(scopedAccess.campaignIds)) {
+      filter._id = { $in: scopedAccess.campaignIds };
+    }
 
     const field = getCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -1302,11 +1510,15 @@ exports.getBrandById = async (req, res) => {
     const id = String(req.query?.id || "").trim();
 
     if (!id) {
-      return res.status(400).json({ message: "Query parameter id is required." });
+      return res.status(400).json({
+        message: "Query parameter id is required.",
+      });
     }
 
     if (!isObjectId(id)) {
-      return res.status(400).json({ message: "Invalid brand _id." });
+      return res.status(400).json({
+        message: "Invalid brand _id.",
+      });
     }
 
     const brandDoc = await Brand.findById(id)
@@ -1314,20 +1526,41 @@ exports.getBrandById = async (req, res) => {
       .lean();
 
     if (!brandDoc) {
-      return res.status(404).json({ message: "Brand not found." });
+      return res.status(404).json({
+        message: "Brand not found.",
+      });
     }
 
     const [enrichedBrand] = await enrichBrandsWithAssignments([brandDoc]);
-    const milestoneDoc = await Milestone.findOne({ brandId: brandDoc.brandId }).lean();
+
+    const milestoneDoc = await Milestone.findOne({
+      brandId: brandDoc.brandId,
+    }).lean();
+
     const walletBalance = milestoneDoc ? milestoneDoc.walletBalance : 0;
+
+    const brandCouponHistory = await BrandCoupon.find({
+      brandId: brandDoc._id,
+    })
+      .populate({
+        path: "subscriptionId",
+        select: "name title price duration description",
+      })
+      .select("-__v")
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       ...enrichedBrand,
       walletBalance,
+      brandCouponHistory,
     });
   } catch (error) {
     console.error("Error in getBrandById:", error);
-    return res.status(500).json({ message: "Internal server error while fetching brand." });
+
+    return res.status(500).json({
+      message: "Internal server error while fetching brand.",
+    });
   }
 };
 
@@ -1442,7 +1675,7 @@ exports.getCampaignById = async (req, res) => {
     }
 
     const actor = req.admin || {};
-    const visibleBrandKeys = await getScopedCampaignBrandKeysForAdmin(actor);
+    const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
 
     const filter = {
       $or: [{ campaignsId: id }],
@@ -1452,11 +1685,22 @@ exports.getCampaignById = async (req, res) => {
       filter.$or.push({ _id: new mongoose.Types.ObjectId(id) });
     }
 
-    if (Array.isArray(visibleBrandKeys)) {
-      if (!visibleBrandKeys.length) {
+    // RH / BME brand-based visibility
+    if (Array.isArray(scopedAccess.brandKeys)) {
+      if (!scopedAccess.brandKeys.length) {
         return res.status(404).json({ message: "Campaign not found." });
       }
-      filter.brandId = { $in: visibleBrandKeys };
+
+      filter.brandId = { $in: scopedAccess.brandKeys };
+    }
+
+    // IME campaign-based visibility
+    if (Array.isArray(scopedAccess.campaignIds)) {
+      if (!scopedAccess.campaignIds.length) {
+        return res.status(404).json({ message: "Campaign not found." });
+      }
+
+      filter._id = { $in: scopedAccess.campaignIds };
     }
 
     const campaign = await Campaign.findOne(filter).lean();
@@ -2327,14 +2571,18 @@ exports.getAllCampaignsLite = async (req, res) => {
     const brandId = String(req.body?.brandId || "").trim();
 
     const actor = req.admin || {};
-    const visibleBrandKeys = await getScopedCampaignBrandKeysForAdmin(actor);
+    const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
 
     const filter = buildCampaignBaseFilter({
       search,
       statusFlag,
-      brandKeys: visibleBrandKeys,
+      brandKeys: scopedAccess.brandKeys,
       requestedBrandId: brandId,
     });
+
+    if (Array.isArray(scopedAccess.campaignIds)) {
+      filter._id = { $in: scopedAccess.campaignIds };
+    }
 
     const field = getCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -2351,8 +2599,9 @@ exports.getAllCampaignsLite = async (req, res) => {
       .lean();
 
     const rowsWithCreators = await enrichLiteCampaignCreatedBy(rows);
-    const enrichedRows = await enrichLiteCampaignBrandMeta(rowsWithCreators);
-    const campaigns = enrichedRows.map(toCampaignSummary);
+    const rowsWithBrandMeta = await enrichLiteCampaignBrandMeta(rowsWithCreators);
+    const rowsWithAssignments = await enrichLiteCampaignAssignments(rowsWithBrandMeta);
+    const campaigns = rowsWithAssignments.map(toCampaignSummary);
 
     return res.status(200).json({
       page,
@@ -2527,15 +2776,25 @@ exports.assignBrand = async (req, res) => {
 
 exports.getCampaignsByInfluencerId = async (req, res) => {
   try {
+    const params = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
+
     const influencerMongoId = String(
-      req.body?._id || req.body?.id || req.body?.influencerId || ""
+      params._id || params.id || params.influencerId || ""
     ).trim();
-    const page = parsePositiveInt(req.body?.page, 1);
-    const limit = parsePositiveInt(req.body?.limit, 10);
-    const search = String(req.body?.search || "").trim();
-    const sortBy = String(req.body?.sortBy || "createdAt").trim();
-    const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
-    const statusFilter = String(req.body?.status || "all").trim().toLowerCase();
+
+    const page = parsePositiveInt(params.page, 1);
+    const limit = parsePositiveInt(params.limit, 10);
+    const search = String(params.search || "").trim();
+    const sortBy = String(params.sortBy || "createdAt").trim();
+    const sortOrder = normalizeSortOrder(params.sortOrder, "desc");
+    const statusFilter = String(params.status || "all").trim().toLowerCase();
+
+    const debug =
+      params.debug === true ||
+      String(params.debug || "").toLowerCase() === "true";
 
     if (!influencerMongoId) {
       return res.status(400).json({ message: "influencer _id is required" });
@@ -2545,9 +2804,10 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       return res.status(400).json({ message: "Invalid influencer _id" });
     }
 
-    const influencerObjectId = toObjectId(influencerId);
+    const influencerId = String(influencerMongoId);
+    const influencerObjectId = toObjectId(influencerMongoId);
 
-    const influencer = await Influencer.findById(influencerMongoId)
+    const influencer = await Influencer.findById(influencerObjectId)
       .select("_id name email")
       .lean();
 
@@ -2555,20 +2815,38 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       return res.status(404).json({ message: "Influencer not found" });
     }
 
-    const invitationFilter = {
-      influencerId: String(influencerMongoId),
-    };
+    const rawActor = req.admin || req.user || {};
+    const actor = await resolveActorFromMaster(rawActor);
+    const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
 
-    const invitations = await Invitation.find(invitationFilter)
+    const visibleBrandKeys = scopedAccess.brandKeys;
+    const visibleCampaignIds = scopedAccess.campaignIds;
+
+    const applyRows = await ApplyCampaign.find({
+      $or: [
+        { "applicants.influencerId": influencerId },
+        { "approved.influencerId": influencerId },
+        { "applicants.influencerId": influencerObjectId },
+        { "approved.influencerId": influencerObjectId },
+      ],
+    })
+      .select("campaignId campaignsId applicants approved createdAt updatedAt")
+      .lean();
+
+    const invitations = await Invitation.find({
+      influencerId,
+    })
       .select("campaignId invitationId status createdAt updatedAt")
       .lean();
+
+    const isSameInfluencer = (value) => String(value || "") === influencerId;
 
     const getMatchedApplicant = (row) => {
       const applicants = Array.isArray(row?.applicants) ? row.applicants : [];
       const approved = Array.isArray(row?.approved) ? row.approved : [];
 
-      const approvedMatch = approved.find(
-        (item) => String(item?.influencerId || "") === influencerId
+      const approvedMatch = approved.find((item) =>
+        isSameInfluencer(item?.influencerId)
       );
 
       if (approvedMatch) {
@@ -2578,8 +2856,8 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         };
       }
 
-      const applicantMatch = applicants.find(
-        (item) => String(item?.influencerId || "") === influencerId
+      const applicantMatch = applicants.find((item) =>
+        isSameInfluencer(item?.influencerId)
       );
 
       return {
@@ -2616,13 +2894,8 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         return "undecided";
       }
 
-      if (statusBrand) {
-        return statusBrand;
-      }
-
-      if (statusInfluencer) {
-        return statusInfluencer;
-      }
+      if (statusBrand) return statusBrand;
+      if (statusInfluencer) return statusInfluencer;
 
       return "active";
     };
@@ -2630,7 +2903,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     const applyMap = new Map();
 
     for (const row of applyRows) {
-      const campaignId = String(row?.campaignId || "").trim();
+      const campaignId = String(row?.campaignId || row?.campaignsId || "").trim();
       if (!campaignId) continue;
 
       const { applicant, fromApprovedArray } = getMatchedApplicant(row);
@@ -2664,12 +2937,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
         },
         ...(debug
           ? {
-            debug: {
-              reason: "No ApplyCampaign rows found for this influencer",
-              influencerId,
-              applyRowsFound: applyRows.length,
-            },
-          }
+              debug: {
+                reason: "No ApplyCampaign rows found for this influencer",
+                influencerId,
+                applyRowsFound: applyRows.length,
+                invitationsFound: invitations.length,
+              },
+            }
           : {}),
       });
     }
@@ -2681,7 +2955,9 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     const andFilters = [
       {
         $or: [
-          { _id: { $in: campaignObjectIds } },
+          ...(campaignObjectIds.length
+            ? [{ _id: { $in: campaignObjectIds } }]
+            : []),
           { campaignsId: { $in: appliedCampaignIds } },
           { campaignId: { $in: appliedCampaignIds } },
         ],
@@ -2706,13 +2982,13 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           },
           ...(debug
             ? {
-              debug: {
-                reason: "Admin has no visible brand keys",
-                rawActor,
-                resolvedActor: actor,
-                appliedCampaignIds,
-              },
-            }
+                debug: {
+                  reason: "Admin has no visible brand keys",
+                  rawActor,
+                  resolvedActor: actor,
+                  appliedCampaignIds,
+                },
+              }
             : {}),
         });
       }
@@ -2726,6 +3002,40 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
           { brandId: { $in: visibleBrandKeys } },
           { brandId: { $in: visibleBrandObjectIds } },
         ],
+      });
+    }
+
+    if (Array.isArray(visibleCampaignIds)) {
+      if (!visibleCampaignIds.length) {
+        return res.status(200).json({
+          success: true,
+          page,
+          limit,
+          total: 0,
+          pages: 1,
+          totalPages: 1,
+          count: 0,
+          campaigns: [],
+          influencer: {
+            _id: String(influencer._id),
+            name: influencer.name || "",
+            email: influencer.email || "",
+          },
+          ...(debug
+            ? {
+                debug: {
+                  reason: "Admin has no visible campaign ids",
+                  rawActor,
+                  resolvedActor: actor,
+                  appliedCampaignIds,
+                },
+              }
+            : {}),
+        });
+      }
+
+      andFilters.push({
+        _id: { $in: visibleCampaignIds },
       });
     }
 
@@ -2800,16 +3110,16 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       statusFilter === "all"
         ? normalized
         : normalized.filter((item) => {
-          if (statusFilter === "active") {
-            return item.status !== "rejected";
-          }
+            if (statusFilter === "active") {
+              return item.status !== "rejected";
+            }
 
-          return (
-            item.status === statusFilter ||
-            String(item.statusBrand || "").toLowerCase() === statusFilter ||
-            String(item.statusInfluencer || "").toLowerCase() === statusFilter
-          );
-        });
+            return (
+              item.status === statusFilter ||
+              String(item.statusBrand || "").toLowerCase() === statusFilter ||
+              String(item.statusInfluencer || "").toLowerCase() === statusFilter
+            );
+          });
 
     const field = getCampaignSortField(sortBy);
     const dir = sortOrder === "asc" ? 1 : -1;
@@ -2876,16 +3186,18 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       },
       ...(debug
         ? {
-          debug: {
-            rawActor,
-            resolvedActor: actor,
-            visibleBrandKeys,
-            influencerId,
-            applyRowsFound: applyRows.length,
-            appliedCampaignIds,
-            campaignDocsFound: campaignDocs.length,
-          },
-        }
+            debug: {
+              rawActor,
+              resolvedActor: actor,
+              visibleBrandKeys,
+              visibleCampaignIds,
+              influencerId,
+              applyRowsFound: applyRows.length,
+              invitationsFound: invitations.length,
+              appliedCampaignIds,
+              campaignDocsFound: campaignDocs.length,
+            },
+          }
         : {}),
     });
   } catch (error) {

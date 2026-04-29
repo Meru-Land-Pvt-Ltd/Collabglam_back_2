@@ -406,6 +406,12 @@ function buildSafeErrorMessage(err, fallback) {
   return isSensitive ? fallback : raw || fallback;
 }
 
+
+function isAuthError(err) {
+  const status = Number(err && err.status);
+  return status == 401 || status == 403;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                             Country aliases                                */
 /* -------------------------------------------------------------------------- */
@@ -2613,6 +2619,21 @@ function sortUnifiedResults(items = [], query, mode = 'search') {
     .sort((a, b) => compareUnifiedRankedItems(a, b, queryInfo));
 }
 
+function decorateUnifiedResults(items = [], query) {
+  const queryInfo = classifyQuery(query);
+
+  return items
+    .map((item) => {
+      const relevance = computeRelevanceScore(item, query);
+      return {
+        ...item,
+        __relevanceScore: relevance.score,
+        __matched: relevance.matched,
+      };
+    })
+    .sort((a, b) => compareUnifiedRankedItems(a, b, queryInfo));
+}
+
 function mergeUnifiedSearchItems(items = []) {
   const map = new Map();
 
@@ -2917,11 +2938,25 @@ async function frontendUnifiedSearch(req, res) {
     const pagesPerPlatform = 1;
 
     const responses = [];
+    const warnings = [];
 
     if (queryInfo.allowLookupInSearch) {
       for (const platform of platforms) {
         const lookupLimit = Math.min(25, fetchLimitByPlatform.get(platform) || desiredPoolSize);
-        responses.push(await runLookupPlatformSearch(platform, query, lookupLimit));
+        try {
+          responses.push(await runLookupPlatformSearch(platform, query, lookupLimit));
+        } catch (err) {
+          if (isAuthError(err)) {
+            warnings.push({
+              platform,
+              kind: 'lookup',
+              status: err.status,
+              message: 'Lookup search skipped because the current Modash auth settings do not allow this endpoint.',
+            });
+            continue;
+          }
+          throw err;
+        }
       }
     }
 
@@ -2946,15 +2981,62 @@ async function frontendUnifiedSearch(req, res) {
         if (aiCallIndex > 0 && aiDelayMs > 0) {
           await sleep(aiDelayMs);
         }
-        const result = await runAiPlatformSearch(
-          platform,
-          payload,
-          requestedPageIndex,
-          fetchLimit
-        );
-        responses.push(result);
+
+        try {
+          const result = await runAiPlatformSearch(
+            platform,
+            payload,
+            requestedPageIndex,
+            fetchLimit
+          );
+          responses.push(result);
+        } catch (err) {
+          if (isAuthError(err)) {
+            warnings.push({
+              platform,
+              kind: 'ai',
+              status: err.status,
+              message: 'AI search skipped because the current Modash key/header does not allow the AI endpoint.',
+            });
+            aiCallIndex += 1;
+            continue;
+          }
+          throw err;
+        }
+
         aiCallIndex += 1;
       }
+    }
+
+    if (!responses.length) {
+      return res.json({
+        searchMode: doStandard && doAi ? 'combined' : doAi ? 'ai' : 'standard',
+        query,
+        results: [],
+        total: 0,
+        unique: 0,
+        pagination: {
+          page: pagination.page,
+          limit: pagination.limit,
+          total: 0,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPrevPage: pagination.page > 1,
+        },
+        meta: {
+          queryIntent: queryInfo.intent,
+          lookupTotal: 0,
+          standardTotal: 0,
+          aiTotal: 0,
+          platforms,
+          aiDelayMs: doAi ? aiDelayMs : 0,
+          pagesPerPlatform,
+          requestedPageIndex,
+          fetchPlan,
+          warnings,
+          perPlatform: [],
+        },
+      });
     }
 
     const merged = mergeUnifiedSearchItems(
@@ -2962,22 +3044,20 @@ async function frontendUnifiedSearch(req, res) {
     );
 
     const cachedEnriched = await enrichResultsFromCache(merged);
-    const effectiveAutoFilters = deriveAiFiltersFromPayload(payload);
-    const filteredEnriched = cachedEnriched.filter((item) =>
-      itemMatchesUnifiedAutoFilters(item, effectiveAutoFilters)
-    );
 
-    const rankedResults = sortUnifiedResults(filteredEnriched, query, 'search');
+    // Do not remove provider results again in the backend. Modash already applies the requested filters.
+    // We only decorate and sort for display so the API can still return the full fetched set.
+    const orderedResults = decorateUnifiedResults(cachedEnriched, query);
 
     const balancedResults =
       platforms.length > 1
         ? balanceRankedResultsAcrossPlatforms(
-            rankedResults,
+            orderedResults,
             platforms,
             pagination.limit,
             query
           )
-        : rankedResults;
+        : orderedResults;
 
     const pagedResults = balancedResults.slice(
       pagination.offset,
@@ -3016,6 +3096,7 @@ async function frontendUnifiedSearch(req, res) {
         pagesPerPlatform,
         requestedPageIndex,
         fetchPlan,
+        warnings,
         perPlatform: responses.map((entry) => ({
           platform: entry.platform,
           kind: entry.kind,
@@ -3032,7 +3113,7 @@ async function frontendUnifiedSearch(req, res) {
     return res.status(status).json({ error: safe });
   }
 }
-;
+
 /* -------------------------------------------------------------------------- */
 /*                              Saved filters                                 */
 /* -------------------------------------------------------------------------- */
@@ -4517,6 +4598,322 @@ async function getCreatorByUserId(req, res) {
     });
   }
 }
+function cleanParam(value, fallback = "") {
+  try {
+    if (value === undefined || value === null) return fallback;
+
+    if (typeof value === "string") {
+      const clean = value.trim();
+      return clean || fallback;
+    }
+
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const clean = cleanParam(item, "");
+        if (clean) return clean;
+      }
+      return fallback;
+    }
+
+    if (typeof value === "object") {
+      if (value.value !== undefined) return cleanParam(value.value, fallback);
+      if (value.query !== undefined) return cleanParam(value.query, fallback);
+      if (value.name !== undefined) return cleanParam(value.name, fallback);
+      if (value.label !== undefined) return cleanParam(value.label, fallback);
+      if (value.title !== undefined) return cleanParam(value.title, fallback);
+      if (value.id !== undefined) return cleanParam(value.id, fallback);
+
+      return fallback;
+    }
+
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+function cleanParam(value, fallback = "") {
+  try {
+    if (value === undefined || value === null) return fallback;
+
+    if (typeof value === "string") {
+      const clean = value.trim();
+      return clean || fallback;
+    }
+
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const clean = cleanParam(item, "");
+        if (clean) return clean;
+      }
+      return fallback;
+    }
+
+    if (typeof value === "object") {
+      if (value.value !== undefined) return cleanParam(value.value, fallback);
+      if (value.query !== undefined) return cleanParam(value.query, fallback);
+      if (value.name !== undefined) return cleanParam(value.name, fallback);
+      if (value.label !== undefined) return cleanParam(value.label, fallback);
+      if (value.title !== undefined) return cleanParam(value.title, fallback);
+      if (value.id !== undefined) return cleanParam(value.id, fallback);
+
+      return fallback;
+    }
+
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getUrlParam(req, key, fallback = "") {
+  const directValue = req.query && req.query[key];
+  const directClean = cleanParam(directValue, "");
+
+  if (directClean) return directClean;
+
+  const rawUrl = cleanParam(req.originalUrl || req.url, "");
+  const questionIndex = rawUrl.indexOf("?");
+
+  if (questionIndex === -1) return fallback;
+
+  const queryString = rawUrl.slice(questionIndex + 1);
+  if (!queryString) return fallback;
+
+  const parts = queryString.split("&");
+
+  for (const part of parts) {
+    const equalIndex = part.indexOf("=");
+
+    const rawKey = equalIndex === -1 ? part : part.slice(0, equalIndex);
+    const rawValue = equalIndex === -1 ? "" : part.slice(equalIndex + 1);
+
+    if (decodeURIComponent(rawKey) === key) {
+      return decodeURIComponent(rawValue || "").trim() || fallback;
+    }
+  }
+
+  return fallback;
+}
+
+function safeNumber(value, fallback = 20) {
+  const cleanValue = cleanParam(value, String(fallback));
+  const numberValue = parseInt(cleanValue, 10);
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return fallback;
+  }
+
+  return numberValue;
+}
+
+function getModashBaseUrl() {
+  const baseUrl = cleanParam(
+    process.env.MODASH_BASE_URL,
+    "https://api.modash.io/v1"
+  );
+
+  return baseUrl.replace(/\/+$/, "");
+}
+
+function normalizeModashPlatform(platform) {
+  const cleanPlatform = cleanParam(platform, "tiktok").toLowerCase();
+
+  const allowedPlatforms = ["tiktok", "instagram", "youtube"];
+
+  if (!allowedPlatforms.includes(cleanPlatform)) {
+    const error = new Error(
+      `Invalid platform '${cleanPlatform}'. Use tiktok, instagram, or youtube.`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return cleanPlatform;
+}
+
+function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+
+    const timer = setTimeout(() => {
+      controller.abort();
+
+      const error = new Error(
+        `Modash request timeout after ${timeoutMs / 1000} seconds`
+      );
+      error.statusCode = 504;
+      reject(error);
+    }, timeoutMs);
+
+    fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+
+        if (error.name === "AbortError") {
+          const timeoutError = new Error(
+            `Modash request timeout after ${timeoutMs / 1000} seconds`
+          );
+          timeoutError.statusCode = 504;
+          reject(timeoutError);
+          return;
+        }
+
+        reject(error);
+      });
+  });
+}
+
+async function getModashLocations({ platform, query, limit = 20 }) {
+  const token = cleanParam(process.env.MODASH_API_KEY, "");
+
+  if (!token) {
+    const error = new Error("MODASH_API_KEY is missing in .env");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const cleanPlatform = normalizeModashPlatform(platform);
+  const cleanQuery = cleanParam(query, "");
+  const cleanLimit = safeNumber(limit, 20);
+
+  if (!cleanQuery) {
+    const error = new Error("query is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const baseUrl = getModashBaseUrl();
+
+  const url =
+    `${baseUrl}/${cleanPlatform}/locations` +
+    `?query=${encodeURIComponent(cleanQuery)}` +
+    `&limit=${encodeURIComponent(String(cleanLimit))}`;
+
+  console.log("[Modash Locations] URL:", url);
+
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    },
+    12000
+  );
+
+  const text = await response.text();
+
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.message || data?.error || "Failed to fetch locations from Modash"
+    );
+
+    error.statusCode = response.status;
+    error.data = data;
+
+    throw error;
+  }
+
+  const locations = Array.isArray(data?.locations)
+    ? data.locations
+    : Array.isArray(data?.results)
+      ? data.results
+      : Array.isArray(data?.items)
+        ? data.items
+        : [];
+
+  return {
+    platform: cleanPlatform,
+    query: cleanQuery,
+    total: data?.total || locations.length || 0,
+    locations,
+  };
+}
+
+exports.getModashLocationController = async (req, res) => {
+  console.log("✅ [Location API] controller hit");
+
+  let controllerTimeout;
+
+  try {
+    controllerTimeout = setTimeout(() => {
+      if (!res.headersSent) {
+        return res.status(504).json({
+          success: false,
+          message: "Controller timeout after 15 seconds",
+          hint: "Route is hit, but Modash request or backend process is hanging.",
+        });
+      }
+    }, 15000);
+
+    const platform = getUrlParam(req, "platform", "tiktok");
+    const query = getUrlParam(req, "query", "");
+    const limit = getUrlParam(req, "limit", "20");
+
+    console.log("[Location API] parsed params:", {
+      platform,
+      query,
+      limit,
+    });
+
+    const data = await getModashLocations({
+      platform,
+      query,
+      limit,
+    });
+
+    clearTimeout(controllerTimeout);
+
+    if (res.headersSent) return;
+
+    return res.status(200).json({
+      success: true,
+      message: "Locations fetched successfully",
+      platform: data.platform,
+      query: data.query,
+      total: data.total,
+      locations: data.locations,
+    });
+  } catch (error) {
+    if (controllerTimeout) clearTimeout(controllerTimeout);
+
+    console.error("[Location API] error:", error);
+    console.error("[Location API] stack:", error.stack);
+
+    if (res.headersSent) return;
+
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || "Internal server error",
+      data: error.data || null,
+    });
+  }
+};
 
 /* -------------------------------------------------------------------------- */
 /*                                   Exports                                  */
@@ -4536,6 +4933,7 @@ getCreatorByUserId,
   findCachedReport,
   getSavedInfluencers,
   getRandomInfluencers,
+  getModashLocations,
   exportSavedInfluencersCsv,
   getMediaKitLink,
 };

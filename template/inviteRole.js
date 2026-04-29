@@ -3,15 +3,47 @@
 /**
  * @param {{ inviteLink: string, invitedEmail: string, role: string, expiryMinutes?: number }} opts
  */
+
+function formatAdminRole(role) {
+  const value = String(role || "").trim().toLowerCase();
+
+  const roleLabels = {
+    super_admin: "Super Admin",
+    revenue_head: "Revenue Head",
+    ime: "IME",
+    bme: "BME",
+    sdr: "SDR",
+  };
+
+  if (roleLabels[value]) {
+    return roleLabels[value];
+  }
+
+  return value
+    .replace(/[_-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => {
+      const upperWords = ["sdr", "bme", "ime", "rh"];
+      if (upperWords.includes(word.toLowerCase())) {
+        return word.toUpperCase();
+      }
+
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
 function adminInviteEmailTemplate(opts) {
   const expiry = opts.expiryMinutes ?? 60;
+  const displayRole = formatAdminRole(opts.role);
 
   const subject = "You're invited to CollabGlam Admin";
 
   const headline = "You're invited";
-  const subText = `You have been invited to CollabGlam Admin as <b>${opts.role}</b>. Click the button below to set your password and activate your account.`;
+  const subText = `You have been invited to CollabGlam Admin as <b>${displayRole}</b>. Click the button below to set your password and activate your account.`;
 
-  const text = `You have been invited to CollabGlam Admin as ${opts.role}.
+  const text = `You have been invited to CollabGlam Admin as ${displayRole}.
 Set your password using this link: ${opts.inviteLink}
 This link expires in ${expiry} minutes.`;
 

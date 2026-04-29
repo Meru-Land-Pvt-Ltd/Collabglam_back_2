@@ -23,4 +23,5 @@ router.post('/export-csv',  ModashController.exportSavedInfluencersCsv);
 router.get('/media-kit-link',  ModashController.getMediaKitLink);
 router.post("/creator", ModashController.upsertCreator);
 router.get("/creator/:userId", ModashController.getCreatorByUserId);
+router.get("/locations", ModashController.getModashLocations);
 module.exports = router;
