@@ -5,7 +5,7 @@ const Stripe = require("stripe");
 const Payment = require("../models/payment");
 const Brand = require("../models/brand");
 const BrandCoupon = require("../models/brandCoupon");
-const Influencer = require("../models/influencer");
+const { InfluencerModel } = require("../models/influencer");
 const subscriptionHelper = require("../utils/subscriptionHelper");
 const MilestonePayment = require("../models/milestonePayment");
 const SubscriptionPlan = require("../models/subscription");
@@ -118,7 +118,7 @@ exports.createOrder = async (req, res) => {
 
     let user;
     if (role === "Brand") user = await Brand.findOne({ _id: userId });
-    else user = await Influencer.findOne({ influencerId: userId });
+    else user = await InfluencerModel.findOne({ _id: userId });
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
