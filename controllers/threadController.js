@@ -98,11 +98,54 @@ async function attachFallbackCampaignData(threadDoc) {
   return threadDoc;
 }
 
-function serializeThread(threadDoc) {
+function shouldHideBrandEmail(admin) {
+  return normalizeRole(admin?.role) !== "super_admin";
+}
+
+function getBrandDisplayNameFromThread(threadDoc) {
+  return (
+    threadDoc?.prospectId?.companyName ||
+    threadDoc?.brandName ||
+    threadDoc?.prospectId?.primaryContact?.name ||
+    "Lead"
+  );
+}
+
+function getTeamDisplayNameFromThread(threadDoc) {
+  const ownerRole = normalizeRole(threadDoc?.ownerRole);
+
+  if (ownerRole === OWNER_ROLE.BME) {
+    return (
+      threadDoc?.prospectId?.assignedBmeId?.name ||
+      threadDoc?.campaignId?.assignedBmeId?.name ||
+      "BME"
+    );
+  }
+
+  if (ownerRole === OWNER_ROLE.IME) {
+    return (
+      threadDoc?.prospectId?.assignedImeId?.name ||
+      threadDoc?.campaignId?.IMEId?.name ||
+      "IME"
+    );
+  }
+
+  if (ownerRole === OWNER_ROLE.REVENUE_HEAD) {
+    return threadDoc?.campaignId?.RHId?.name || "Revenue Head";
+  }
+
+  return threadDoc?.campaignId?.sdrId?.name || "SDR";
+}
+
+function serializeThread(threadDoc, admin = {}) {
   if (!threadDoc) return null;
 
   const campaign = threadDoc.campaignId;
   const prospect = threadDoc.prospectId;
+
+  const hideEmail = shouldHideBrandEmail(admin);
+  const brandDisplayName = getBrandDisplayNameFromThread(threadDoc);
+  const teamDisplayName = getTeamDisplayNameFromThread(threadDoc);
 
   return {
     _id: threadDoc._id,
@@ -110,7 +153,10 @@ function serializeThread(threadDoc) {
       ? {
         _id: prospect?._id,
         companyName: prospect?.companyName || "",
-        primaryContact: prospect?.primaryContact || {},
+        primaryContact: {
+          ...(prospect?.primaryContact || {}),
+          email: hideEmail ? "" : prospect?.primaryContact?.email || "",
+        },
         stage: prospect?.stage || "",
       }
       : null,
@@ -131,8 +177,10 @@ function serializeThread(threadDoc) {
     instantlyCampaignId: threadDoc.instantlyCampaignId || "",
     mailboxes: threadDoc.mailboxes || {},
     subject: threadDoc.subject || "",
-    brandEmail: threadDoc.brandEmail || "",
-    brandName: threadDoc.brandName || "",
+    brandEmail: hideEmail ? "" : threadDoc.brandEmail || "",
+    brandName: threadDoc.brandName || brandDisplayName,
+    brandDisplayName,
+    teamDisplayName,
     status: threadDoc.status || "",
     handoffAt: threadDoc.handoffAt || null,
     lastMessageAt: threadDoc.lastMessageAt || null,
@@ -146,7 +194,13 @@ function serializeThread(threadDoc) {
   };
 }
 
-function serializeMessage(messageDoc) {
+function serializeMessage(messageDoc, threadDoc = null, admin = {}) {
+  const hideEmail = shouldHideBrandEmail(admin);
+  const isInbound = String(messageDoc.direction || "").toLowerCase() === "inbound";
+
+  const brandDisplayName = getBrandDisplayNameFromThread(threadDoc);
+  const teamDisplayName = getTeamDisplayNameFromThread(threadDoc);
+
   return {
     _id: messageDoc._id,
     threadId: messageDoc.threadId,
@@ -155,10 +209,22 @@ function serializeMessage(messageDoc) {
     provider: messageDoc.provider || "",
     providerMessageId: messageDoc.providerMessageId || "",
     providerThreadId: messageDoc.providerThreadId || "",
-    from: messageDoc.from || "",
-    to: Array.isArray(messageDoc.to) ? messageDoc.to : [],
-    cc: Array.isArray(messageDoc.cc) ? messageDoc.cc : [],
-    bcc: Array.isArray(messageDoc.bcc) ? messageDoc.bcc : [],
+
+    from: hideEmail && isInbound ? brandDisplayName : messageDoc.from || "",
+    to:
+      hideEmail && isInbound
+        ? [teamDisplayName]
+        : hideEmail && !isInbound
+          ? [brandDisplayName]
+          : Array.isArray(messageDoc.to)
+            ? messageDoc.to
+            : [],
+
+    fromDisplayName: isInbound ? brandDisplayName : teamDisplayName,
+    toDisplayNames: isInbound ? [teamDisplayName] : [brandDisplayName],
+
+    cc: hideEmail ? [] : Array.isArray(messageDoc.cc) ? messageDoc.cc : [],
+    bcc: hideEmail ? [] : Array.isArray(messageDoc.bcc) ? messageDoc.bcc : [],
     subject: messageDoc.subject || "",
     bodyText: messageDoc.bodyText || "",
     bodyHtml: messageDoc.bodyHtml || "",
@@ -332,7 +398,7 @@ exports.listBmeThreads = async (req, res) => {
     return res.status(200).json({
       success: true,
       count: filtered.length,
-      data: filtered.map(serializeThread),
+      data: filtered.map((thread) => serializeThread(thread, req.admin)),
     });
   } catch (error) {
     return res.status(error?.statusCode || 500).json({
@@ -351,7 +417,8 @@ exports.getThreadMessages = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      thread: serializeThread(thread),
+      thread: serializeThread(thread, req.admin),
+      messages: messages.map((message) => serializeMessage(message, thread, req.admin)),
       messages: messages.map(serializeMessage),
     });
   } catch (error) {

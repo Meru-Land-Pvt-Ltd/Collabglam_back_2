@@ -203,10 +203,21 @@ async function upsertRevenueHeadReviewQueue({
     },
     {
       $set: {
-        campaignId: campaign?._id || null,
+        campaignId:
+          campaign?._id ||
+          existingThread?.campaignId ||
+          null,
         prospectId: prospect._id,
-        sdrId: prospect.sdrId || campaign?.sdrId || null,
-        RHId: resolvedRHId,
+        sdrId:
+          prospect.sdrId ||
+          campaign?.sdrId ||
+          existingThread?.sdrId ||
+          null,
+        RHId:
+          resolvedRHId ||
+          campaign?.RHId ||
+          existingThread?.RHId ||
+          null,
         assignedBmeId: null,
         instantlyThreadId: resolvedThreadId,
         instantlyEmailId: payload.emailId || "",
@@ -267,8 +278,8 @@ exports.handleInstantlyWebhook = async (req, res) => {
 
     const campaign = campaignId
       ? await OutreachCampaign.findOne({
-          "instantly.campaignId": campaignId,
-        })
+        "instantly.campaignId": campaignId,
+      })
       : null;
 
     const existingThread = await ConversationThread.findOne({
@@ -286,9 +297,9 @@ exports.handleInstantlyWebhook = async (req, res) => {
 
     const senderMailbox = campaignSenderEmail
       ? await OutreachMailboxAssignment.findOne({
-          email: campaignSenderEmail,
-          isActive: true,
-        }).lean()
+        email: campaignSenderEmail,
+        isActive: true,
+      }).lean()
       : null;
 
     const isImeCampaign =
