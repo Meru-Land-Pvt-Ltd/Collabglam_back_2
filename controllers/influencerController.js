@@ -2287,23 +2287,31 @@ exports.getBulkByIds = async (req, res) => {
 
 exports.getLiteById = async (req, res) => {
   try {
-    const id = String(req.query?._id || req.query?.id || "").trim();
+    const influencerId = String(
+      req.query?.influencerId ||
+      req.query?.id ||
+      req.user?._id ||
+      req.user?.id ||
+      req.influencer?._id ||
+      req.influencer?.id ||
+      ""
+    ).trim();
 
-    if (!id) {
+    if (!influencerId) {
       return res.status(400).json({
-        message: 'Query parameter "_id" or "id" is required.',
+        message: 'Query parameter "influencerId" is required.',
       });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(influencerId)) {
       return res.status(400).json({
         message: "Valid influencer _id is required.",
       });
     }
 
-    const doc = await InfluencerModel.findById(id)
+    const doc = await InfluencerModel.findById(influencerId)
       .select(
-        "_id name email primaryPlatform subscription.planId subscription.planName subscription.expiresAt"
+        "_id name email profileImage profilePic profilePicture avatar image photo primaryPlatform subscription.planId subscription.planName subscription.expiresAt"
       )
       .lean();
 
@@ -2313,29 +2321,65 @@ exports.getLiteById = async (req, res) => {
       });
     }
 
-    const socialProfiles = await loadSocialProfilesFromModash(id);
+    let socialProfiles = [];
+
+    try {
+      socialProfiles = await loadSocialProfilesFromModash(influencerId);
+    } catch (err) {
+      console.error("Failed to load social profiles from Modash:", err);
+      socialProfiles = [];
+    }
 
     let primaryProfile = null;
 
-    if (socialProfiles.length) {
+    if (Array.isArray(socialProfiles) && socialProfiles.length) {
       primaryProfile =
         socialProfiles.find((p) => p.provider === doc.primaryPlatform) ||
         socialProfiles
           .slice()
-          .sort((a, b) => (b.followers || 0) - (a.followers || 0))[0];
+          .sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0))[0];
     }
+
+    const pickImage = (value) => {
+      if (!value || typeof value !== "object") return "";
+
+      return (
+        value.profileImage ||
+        value.profilePic ||
+        value.profilePicture ||
+        value.avatar ||
+        value.picture ||
+        value.image ||
+        value.imageUrl ||
+        value.photo ||
+        value.thumbnail ||
+        value.profilePictureUrl ||
+        value.profile_pic_url ||
+        ""
+      );
+    };
+
+    const profileImage =
+      pickImage(doc) ||
+      pickImage(primaryProfile) ||
+      socialProfiles.map(pickImage).find(Boolean) ||
+      "";
 
     return res.status(200).json({
       _id: String(doc._id),
+      influencerId: String(doc._id),
       name: doc.name || "",
       email: doc.email || "",
+      profileImage,
       planId: doc.subscription?.planId || null,
       planName: doc.subscription?.planName || null,
       expiresAt: doc.subscription?.expiresAt || null,
       primaryPlatform: doc.primaryPlatform || null,
       socialProfiles,
       primaryProfile,
-      socialProfilesCount: socialProfiles.length,
+      socialProfilesCount: Array.isArray(socialProfiles)
+        ? socialProfiles.length
+        : 0,
     });
   } catch (err) {
     console.error("Error in getLiteById:", err);

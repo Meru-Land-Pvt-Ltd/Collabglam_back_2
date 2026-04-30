@@ -118,6 +118,11 @@ const disputeSchema = new mongoose.Schema(
       ],
       default: ["other"],
     },
+    otherIssueDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
     priority: {
       type: String,

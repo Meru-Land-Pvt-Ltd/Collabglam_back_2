@@ -347,6 +347,16 @@ function parseIssueTypePayload(rawIssueType) {
   return ['other'];
 }
 
+function normalizeOtherIssueDescription(issueTypes, rawDescription) {
+  const text = String(rawDescription || "").trim();
+
+  if (!Array.isArray(issueTypes) || !issueTypes.includes("other")) {
+    return "";
+  }
+
+  return text;
+}
+
 function areStringArraysEqual(a = [], b = []) {
   if (a.length !== b.length) return false;
   return a.every((value, index) => String(value) === String(b[index]));
@@ -520,6 +530,7 @@ exports.brandEditDispute = async (req, res) => {
       subject,
       description = '',
       issueType,
+      otherIssueDescription = '',
       attachments = [],
       removedAttachmentUrls = [],
     } = req.body || {};
@@ -626,6 +637,11 @@ exports.brandEditDispute = async (req, res) => {
       });
     }
 
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const parsedRemovedAttachmentUrls =
       parseRemovedAttachmentUrlsPayload(removedAttachmentUrls);
 
@@ -649,6 +665,11 @@ exports.brandEditDispute = async (req, res) => {
     if (!areStringArraysEqual(currentIssueType, parsedIssueType)) {
       dispute.issueType = parsedIssueType;
       changeSummary.push('issue type');
+    }
+
+    if ((dispute.otherIssueDescription || '') !== normalizedOtherIssueDescription) {
+      dispute.otherIssueDescription = normalizedOtherIssueDescription;
+      changeSummary.push('other issue description');
     }
 
     const existingAttachments = Array.isArray(dispute.attachments)
@@ -745,6 +766,7 @@ exports.brandCreateDispute = async (req, res) => {
       attachments = [],
       issueType,
       related,
+      otherIssueDescription = "",
     } = req.body || {};
 
     console.log("brandCreateDispute payload:", {
@@ -755,6 +777,7 @@ exports.brandCreateDispute = async (req, res) => {
       description,
       issueType,
       related,
+      otherIssueDescription,
     });
 
     if (!brandId || !influencerId || !subject) {
@@ -829,6 +852,11 @@ exports.brandCreateDispute = async (req, res) => {
       parsedIssueType = ["other"];
     }
 
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const sanitizedAttachments = await buildAttachmentsFromReq(req, attachments);
 
     const dispute = new Dispute({
@@ -838,6 +866,7 @@ exports.brandCreateDispute = async (req, res) => {
       subject: String(subject).trim(),
       description: String(description || ""),
       issueType: parsedIssueType,
+      otherIssueDescription: normalizedOtherIssueDescription,
       createdBy: { id: String(brandId), role: "Brand" },
       attachments: sanitizedAttachments,
     });
@@ -883,6 +912,7 @@ exports.brandCreateDispute = async (req, res) => {
       message: "Dispute created",
       disputeId: dispute.disputeId,
       issueType: dispute.issueType,
+      otherIssueDescription: dispute.otherIssueDescription,
     });
   } catch (err) {
     console.error("Error in brandCreateDispute:", err);
@@ -939,7 +969,7 @@ exports.brandList = async (req, res) => {
     // Search will be applied AFTER enrichment so campaign/influencer fields work too.
     const rows = await Dispute.find(filter)
       .select(
-        "disputeId subject description issueType status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy"
+        "disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy"
       )
       .sort({ createdAt: -1 })
       .lean();
@@ -1078,6 +1108,7 @@ exports.brandList = async (req, res) => {
             r.raisedAgainst?.name,
             r.raisedAgainst?.handle,
             r.status,
+            r.otherIssueDescription,
             ...(Array.isArray(r.issueType) ? r.issueType : []),
           ]
             .filter(Boolean)
@@ -1719,6 +1750,9 @@ exports.influencerCreateDispute = async (req, res) => {
       subject,
       description = '',
       attachments = [],
+      issueType,
+      related,
+      otherIssueDescription = '',
     } = req.body || {};
 
     if (!influencerId || !brandId || !subject) {
@@ -1747,6 +1781,12 @@ exports.influencerCreateDispute = async (req, res) => {
     }
 
 
+    const parsedIssueType = parseIssueTypePayload(issueType ?? related);
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const sanitizedAttachments = await buildAttachmentsFromReq(req, attachments);
 
     const dispute = new Dispute({
@@ -1755,6 +1795,8 @@ exports.influencerCreateDispute = async (req, res) => {
       influencerId: String(influencerId),
       subject: String(subject).trim(),
       description: String(description || ''),
+      issueType: parsedIssueType,
+      otherIssueDescription: normalizedOtherIssueDescription,
       createdBy: { id: String(influencerId), role: 'Influencer' },
       attachments: sanitizedAttachments,
     });
@@ -1800,7 +1842,12 @@ exports.influencerCreateDispute = async (req, res) => {
 
     return res
       .status(201)
-      .json({ message: 'Dispute created', disputeId: dispute.disputeId });
+      .json({
+        message: 'Dispute created',
+        disputeId: dispute.disputeId,
+        issueType: dispute.issueType,
+        otherIssueDescription: dispute.otherIssueDescription,
+      });
   } catch (err) {
     console.error('Error in influencerCreateDispute:', err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -1858,7 +1905,7 @@ exports.influencerList = async (req, res) => {
     const total = await Dispute.countDocuments(filter);
     const rows = await Dispute.find(filter)
       .select(
-        'disputeId subject description status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy'
+        'disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy'
       )
       .sort({ createdAt: -1 })
       .skip((p - 1) * l)
@@ -2231,6 +2278,7 @@ exports.influencerEditDispute = async (req, res) => {
       subject,
       description = "",
       issueType,
+      otherIssueDescription = "",
       attachments = [],
       removedAttachmentUrls = [],
     } = req.body || {};
@@ -2298,6 +2346,11 @@ exports.influencerEditDispute = async (req, res) => {
       });
     }
 
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const parsedRemovedAttachmentUrls =
       parseRemovedAttachmentUrlsPayload(removedAttachmentUrls);
 
@@ -2325,6 +2378,11 @@ exports.influencerEditDispute = async (req, res) => {
     if (!areStringArraysEqual(currentIssueType, parsedIssueType)) {
       dispute.issueType = parsedIssueType;
       changeSummary.push("issue type");
+    }
+
+    if ((dispute.otherIssueDescription || "") !== normalizedOtherIssueDescription) {
+      dispute.otherIssueDescription = normalizedOtherIssueDescription;
+      changeSummary.push("other issue description");
     }
 
     const existingAttachments = Array.isArray(dispute.attachments)
