@@ -16,11 +16,41 @@ function nameFromEmail(email = "") {
 
   if (!local) return "";
 
-  const withSpaces = local
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/[._-]+/g, " ");
+  return cleanName(local);
+}
 
-  return cleanName(withSpaces);
+async function getMailboxAssignment(email = "") {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedEmail) return null;
+
+  /*
+    No populate here.
+
+    We only want the mailbox assignment record itself:
+    - displayName
+    - mailboxName
+    - senderName
+    - email
+
+    We do NOT want adminId.name, because that can show Priyanshu
+    for adityakumar@collabglam.com.
+  */
+  return OutreachMailboxAssignment.findOne({
+    email: normalizedEmail,
+    isActive: true,
+  }).lean();
+}
+
+function getAssignmentMailboxName(assignment = null) {
+  return (
+    cleanName(assignment?.displayName) ||
+    cleanName(assignment?.mailboxName) ||
+    cleanName(assignment?.senderName) ||
+    cleanName(assignment?.fromName) ||
+    cleanName(assignment?.accountName) ||
+    ""
+  );
 }
 
 async function getMailboxDisplayName(email = "", fallback = "") {
@@ -30,25 +60,22 @@ async function getMailboxDisplayName(email = "", fallback = "") {
     return cleanName(fallback) || "";
   }
 
-  const assignment = await OutreachMailboxAssignment.findOne({
-    email: normalizedEmail,
-    isActive: true,
-  })
-    .populate("adminId", "name email")
-    .lean();
+  const assignment = await getMailboxAssignment(normalizedEmail);
+  const assignmentMailboxName = getAssignmentMailboxName(assignment);
 
   /*
     Priority:
-    1. mailbox displayName if you add it later
-    2. assigned admin name
-    3. fallback
-    4. email local part
+    1. Name stored on exact mailbox assignment.
+    2. Email local-part fallback.
+    3. Manual fallback.
+
+    Never use assigned admin name here.
   */
   return (
-    cleanName(assignment?.displayName) ||
-    cleanName(assignment?.adminId?.name) ||
+    assignmentMailboxName ||
+    nameFromEmail(normalizedEmail) ||
     cleanName(fallback) ||
-    nameFromEmail(normalizedEmail)
+    ""
   );
 }
 
@@ -56,4 +83,6 @@ module.exports = {
   cleanName,
   nameFromEmail,
   getMailboxDisplayName,
+  getMailboxAssignment,
+  getAssignmentMailboxName,
 };
