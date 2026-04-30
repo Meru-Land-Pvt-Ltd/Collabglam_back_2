@@ -27,6 +27,17 @@ const brandCouponSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    
+    discountType: {
+  type: String,
+  enum: ["fixed", "percentage"],
+  default: "fixed",
+},
+
+discountPercentage: {
+  type: Number,
+  default: 0,
+},
 
    promocode:{
         type: String,

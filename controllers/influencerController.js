@@ -14,7 +14,7 @@ const bcrypt = require("bcryptjs");
 const BrandModule = require("../models/brand");
 const BrandModel = BrandModule.BrandModel || BrandModule.default || BrandModule;
 const Brand = BrandModel;
-
+const SubscriptionPlan = require("../models/subscription");
 const InfluencerModule = require("../models/influencer");
 const InfluencerModel =
   InfluencerModule.InfluencerModel ||
@@ -1513,7 +1513,47 @@ exports.sendSignupOtpInfluencer = async (req, res) => {
     });
   }
 };
+function buildSubscriptionFromPlan(plan) {
+  return {
+    planId: plan.planId,
+    planName: plan.name,
+    role: plan.role,
+    planRef: plan._id,
 
+    monthlyCost: plan.monthlyCost || 0,
+    annualCost: plan.annualCost || 0,
+    billingCycle: "monthly",
+
+    autoRenew: false,
+    status: "active",
+
+    durationMins: plan.durationMins || 43200,
+    startedAt: new Date(),
+    expiresAt: null,
+
+    features: Array.isArray(plan.features)
+      ? plan.features.map((feature) => ({
+          key: feature.key,
+          value: feature.value ?? null,
+          limit:
+            typeof feature.value === "number"
+              ? feature.value
+              : typeof feature.limit === "number"
+                ? feature.limit
+                : 0,
+          used: 0,
+          note: feature.note || null,
+          resetsEvery: feature.resetsEvery || null,
+          resetsAt: null,
+        }))
+      : [],
+
+    internalCredits: {
+      used: 0,
+      resetsAt: null,
+    },
+  };
+}
 exports.verifyOtpSignUpInfluencer = async (req, res) => {
   try {
     const { email, otp, location } = req.body || {};
@@ -1600,32 +1640,44 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
       });
     }
 
+    const freePlan = await SubscriptionPlan.findOne({
+      role: "Influencer",
+      name: "free",
+      status: "active",
+    });
+
+    if (!freePlan && !existingInfluencer?.subscription?.planId) {
+      return res.status(500).json({
+        message: "Free influencer plan not found",
+      });
+    }
+
     const cleanLanguages = Array.isArray(payload?.languages)
       ? payload.languages
-        .filter(
-          (item) =>
-            item &&
-            typeof item.name === "string" &&
-            item.name.trim().length > 0
-        )
-        .map((item) => ({
-          _id: item._id || undefined,
-          name: String(item.name).trim(),
-        }))
+          .filter(
+            (item) =>
+              item &&
+              typeof item.name === "string" &&
+              item.name.trim().length > 0
+          )
+          .map((item) => ({
+            _id: item._id || undefined,
+            name: String(item.name).trim(),
+          }))
       : [];
 
     const cleanCategories = Array.isArray(payload?.categories)
       ? payload.categories
-        .filter(
-          (item) =>
-            item &&
-            typeof item.name === "string" &&
-            item.name.trim().length > 0
-        )
-        .map((item) => ({
-          _id: item._id || undefined,
-          name: String(item.name).trim(),
-        }))
+          .filter(
+            (item) =>
+              item &&
+              typeof item.name === "string" &&
+              item.name.trim().length > 0
+          )
+          .map((item) => ({
+            _id: item._id || undefined,
+            name: String(item.name).trim(),
+          }))
       : [];
 
     let proxyEmail = existingInfluencer?.proxyEmail || "";
@@ -1664,6 +1716,12 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
           // Keep true for audit history.
           existingInfluencer.isAdminCreated = true;
 
+          if (!existingInfluencer.subscription?.planId && freePlan) {
+            existingInfluencer.subscription = buildSubscriptionFromPlan(freePlan);
+          }
+
+          existingInfluencer.subscriptionExpired = false;
+
           savedInfluencer = await existingInfluencer.save();
         } else {
           savedInfluencer = await InfluencerModel.create({
@@ -1687,6 +1745,9 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
             isAdminCreated: false,
             signupCompleted: true,
             signupCompletedAt: new Date(),
+
+            subscription: buildSubscriptionFromPlan(freePlan),
+            subscriptionExpired: false,
           });
         }
 
