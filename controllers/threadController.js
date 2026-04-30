@@ -1,16 +1,36 @@
 const ProspectBrand = require("../models/prospectBrand");
 const OutreachCampaign = require("../models/outreachCampaign");
-const { ConversationThread, ConversationMessage } = require("../models/conversationThread");
+const {
+  ConversationThread,
+  ConversationMessage,
+} = require("../models/conversationThread");
 const instantlyService = require("../services/instantlyService");
-const { OWNER_ROLE, THREAD_STATUS } = require("../constants/outreach");
+const {
+  OWNER_ROLE,
+  THREAD_STATUS,
+  MESSAGE_DIRECTION,
+} = require("../constants/outreach");
+const {
+  cleanName,
+  getMailboxDisplayName,
+  nameFromEmail,
+} = require("../utils/mailboxDisplayName");
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
 }
 
+function normalizeEmail(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
 function isRevenueHeadRole(role) {
   const value = normalizeRole(role);
   return value === "revenue_head" || value === "rh";
+}
+
+function isSuperAdmin(admin = {}) {
+  return normalizeRole(admin?.role) === "super_admin";
 }
 
 function ensureRole(admin, allowed = []) {
@@ -21,6 +41,7 @@ function ensureRole(admin, allowed = []) {
     if (item === "revenue_head" || item === "rh") {
       return isRevenueHeadRole(role);
     }
+
     return item === role;
   });
 
@@ -29,6 +50,178 @@ function ensureRole(admin, allowed = []) {
     error.statusCode = 403;
     throw error;
   }
+}
+
+function shouldHideBrandEmail(admin) {
+  return !isSuperAdmin(admin);
+}
+
+function decodeHtmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function stripHtmlToPlainText(value = "") {
+  return decodeHtmlEntities(
+    String(value || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(div|p|li|tr|h1|h2|h3|h4|h5|h6)>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+  )
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function escapeHtml(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function textToEmailHtml(value = "") {
+  return String(value || "")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => {
+      return `<p>${escapeHtml(paragraph).replace(/\n/g, "<br/>")}</p>`;
+    })
+    .join("");
+}
+
+function sanitizeOutgoingEmailHtml(value = "") {
+  return String(value || "")
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object[\s\S]*?>[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed[\s\S]*?>[\s\S]*?<\/embed>/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*(['"]).*?\1/gi, "")
+    .replace(/\s+href\s*=\s*(['"])\s*javascript:[\s\S]*?\1/gi, "")
+    .replace(/(<br\s*\/?>\s*){3,}/gi, "<br><br>")
+    .trim();
+}
+
+function normalizeReplyBody(bodyTextInput = "", bodyHtmlInput = "") {
+  const bodyTextRaw = String(bodyTextInput || "").trim();
+  const bodyHtmlRaw = String(bodyHtmlInput || "").trim();
+
+  const bodyHtml = bodyHtmlRaw
+    ? sanitizeOutgoingEmailHtml(bodyHtmlRaw)
+    : textToEmailHtml(bodyTextRaw);
+
+  const bodyText = bodyTextRaw
+    ? stripHtmlToPlainText(bodyTextRaw)
+    : stripHtmlToPlainText(bodyHtml);
+
+  const finalBodyText = bodyText || stripHtmlToPlainText(bodyHtml);
+  const finalBodyHtml = bodyHtml || textToEmailHtml(finalBodyText);
+
+  return {
+    bodyText: finalBodyText,
+    bodyHtml: finalBodyHtml,
+  };
+}
+
+function firstUsefulName(...values) {
+  for (const value of values) {
+    const cleaned = cleanName(value || "");
+
+    if (cleaned) return cleaned;
+  }
+
+  return "";
+}
+
+function getBrandDisplayNameFromThread(threadDoc) {
+  return (
+    firstUsefulName(
+      threadDoc?.prospectId?.companyName,
+      threadDoc?.brandName,
+      threadDoc?.prospectId?.primaryContact?.name
+    ) || "Lead"
+  );
+}
+
+function getMailboxNameFromThread(threadDoc) {
+  const mailboxes = threadDoc?.mailboxes || {};
+  const ownerRole = normalizeRole(threadDoc?.ownerRole);
+
+  if (ownerRole === OWNER_ROLE.BME) {
+    return (
+      firstUsefulName(
+        mailboxes.currentReplyFromName,
+        mailboxes.bmeName,
+        mailboxes.campaignSenderName,
+        nameFromEmail(mailboxes.currentReplyFromEmail),
+        nameFromEmail(mailboxes.bmeEmail),
+        nameFromEmail(mailboxes.campaignSenderEmail)
+      ) || "Team Member"
+    );
+  }
+
+  if (ownerRole === OWNER_ROLE.IME) {
+    return (
+      firstUsefulName(
+        mailboxes.currentReplyFromName,
+        mailboxes.imeName,
+        mailboxes.campaignSenderName,
+        nameFromEmail(mailboxes.currentReplyFromEmail),
+        nameFromEmail(mailboxes.imeEmail),
+        nameFromEmail(mailboxes.campaignSenderEmail)
+      ) || "Team Member"
+    );
+  }
+
+  if (ownerRole === OWNER_ROLE.REVENUE_HEAD || ownerRole === "rh") {
+    return (
+      firstUsefulName(
+        mailboxes.currentReplyFromName,
+        mailboxes.RHName,
+        mailboxes.campaignSenderName,
+        nameFromEmail(mailboxes.currentReplyFromEmail),
+        nameFromEmail(mailboxes.RHEmail),
+        nameFromEmail(mailboxes.campaignSenderEmail)
+      ) || "Team Member"
+    );
+  }
+
+  return (
+    firstUsefulName(
+      mailboxes.currentReplyFromName,
+      mailboxes.campaignSenderName,
+      nameFromEmail(mailboxes.currentReplyFromEmail),
+      nameFromEmail(mailboxes.campaignSenderEmail)
+    ) || "Team Member"
+  );
+}
+
+async function resolveMailboxDisplayName(email = "", fallback = "") {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    return firstUsefulName(fallback) || "";
+  }
+
+  const fromAssignment = await getMailboxDisplayName(normalizedEmail, fallback);
+
+  return (
+    firstUsefulName(
+      fromAssignment,
+      fallback,
+      nameFromEmail(normalizedEmail)
+    ) || ""
+  );
 }
 
 async function buildThreadScope(admin) {
@@ -40,25 +233,38 @@ async function buildThreadScope(admin) {
   }
 
   if (role === OWNER_ROLE.BME) {
-    return { ownerRole: OWNER_ROLE.BME, ownerId: adminId };
+    return {
+      ownerRole: OWNER_ROLE.BME,
+      ownerId: adminId,
+    };
   }
 
   if (role === OWNER_ROLE.IME) {
-    return { ownerRole: OWNER_ROLE.IME, ownerId: adminId };
+    return {
+      ownerRole: OWNER_ROLE.IME,
+      ownerId: adminId,
+    };
   }
 
   if (isRevenueHeadRole(role)) {
     const campaigns = await OutreachCampaign.find({
-      $or: [
-        { RHId: adminId },
-        { flowType: "ime_influencer" },
-      ],
+      RHId: adminId,
     })
       .select("_id")
       .lean();
 
     return {
-      campaignId: { $in: campaigns.map((item) => item._id) },
+      $or: [
+        {
+          ownerRole: OWNER_ROLE.REVENUE_HEAD,
+          ownerId: adminId,
+        },
+        {
+          campaignId: {
+            $in: campaigns.map((item) => item._id),
+          },
+        },
+      ],
     };
   }
 
@@ -71,6 +277,7 @@ async function attachFallbackCampaignData(threadDoc) {
   if (!threadDoc) return threadDoc;
 
   const hasCampaign = Boolean(threadDoc?.campaignId?._id || threadDoc?.campaignId);
+
   if (hasCampaign) return threadDoc;
 
   const instantlyCampaignId = String(
@@ -84,11 +291,20 @@ async function attachFallbackCampaignData(threadDoc) {
   const fallbackCampaign = await OutreachCampaign.findOne({
     "instantly.campaignId": instantlyCampaignId,
   })
-    .select("name sdrId RHId IMEId flowType")
+    .select("name sdrId RHId IMEId flowType teamMailboxes")
     .populate([
-      { path: "sdrId", select: "name email role" },
-      { path: "RHId", select: "name email role" },
-      { path: "IMEId", select: "name email role" },
+      {
+        path: "sdrId",
+        select: "name email role",
+      },
+      {
+        path: "RHId",
+        select: "name email role",
+      },
+      {
+        path: "IMEId",
+        select: "name email role",
+      },
     ]);
 
   if (fallbackCampaign) {
@@ -98,57 +314,27 @@ async function attachFallbackCampaignData(threadDoc) {
   return threadDoc;
 }
 
-function shouldHideBrandEmail(admin) {
-  return normalizeRole(admin?.role) !== "super_admin";
-}
+function getThreadCampaignObject(threadDoc) {
+  const campaign = threadDoc?.campaignId;
 
-function getBrandDisplayNameFromThread(threadDoc) {
-  return (
-    threadDoc?.prospectId?.companyName ||
-    threadDoc?.brandName ||
-    threadDoc?.prospectId?.primaryContact?.name ||
-    "Lead"
-  );
-}
+  if (!campaign) return null;
 
-function getTeamDisplayNameFromThread(threadDoc) {
-  const ownerRole = normalizeRole(threadDoc?.ownerRole);
-
-  if (ownerRole === OWNER_ROLE.BME) {
-    return (
-      threadDoc?.prospectId?.assignedBmeId?.name ||
-      threadDoc?.campaignId?.assignedBmeId?.name ||
-      "BME"
-    );
-  }
-
-  if (ownerRole === OWNER_ROLE.IME) {
-    return (
-      threadDoc?.prospectId?.assignedImeId?.name ||
-      threadDoc?.campaignId?.IMEId?.name ||
-      "IME"
-    );
-  }
-
-  if (ownerRole === OWNER_ROLE.REVENUE_HEAD) {
-    return threadDoc?.campaignId?.RHId?.name || "Revenue Head";
-  }
-
-  return threadDoc?.campaignId?.sdrId?.name || "SDR";
+  return campaign;
 }
 
 function serializeThread(threadDoc, admin = {}) {
   if (!threadDoc) return null;
 
-  const campaign = threadDoc.campaignId;
+  const campaign = getThreadCampaignObject(threadDoc);
   const prospect = threadDoc.prospectId;
-
   const hideEmail = shouldHideBrandEmail(admin);
+
   const brandDisplayName = getBrandDisplayNameFromThread(threadDoc);
-  const teamDisplayName = getTeamDisplayNameFromThread(threadDoc);
+  const teamDisplayName = getMailboxNameFromThread(threadDoc);
 
   return {
     _id: threadDoc._id,
+
     prospectId: prospect
       ? {
         _id: prospect?._id,
@@ -160,75 +346,118 @@ function serializeThread(threadDoc, admin = {}) {
         stage: prospect?.stage || "",
       }
       : null,
+
     campaignId: campaign
       ? {
         _id: campaign?._id,
         name: campaign?.name || "",
       }
       : null,
+
     sdrId: campaign?.sdrId || null,
     RHId: campaign?.RHId || null,
     IMEId: campaign?.IMEId || null,
     assignedBmeId: prospect?.assignedBmeId || null,
     assignedImeId: prospect?.assignedImeId || campaign?.IMEId || null,
+
     ownerRole: threadDoc.ownerRole || "",
     ownerId: threadDoc.ownerId || "",
+
     instantlyThreadId: threadDoc.instantlyThreadId || "",
     instantlyCampaignId: threadDoc.instantlyCampaignId || "",
+
     mailboxes: threadDoc.mailboxes || {},
+
     subject: threadDoc.subject || "",
+
     brandEmail: hideEmail ? "" : threadDoc.brandEmail || "",
     brandName: threadDoc.brandName || brandDisplayName,
     brandDisplayName,
     teamDisplayName,
+
     status: threadDoc.status || "",
     handoffAt: threadDoc.handoffAt || null,
     lastMessageAt: threadDoc.lastMessageAt || null,
     lastInboundAt: threadDoc.lastInboundAt || null,
     lastOutboundAt: threadDoc.lastOutboundAt || null,
+
     unreadForRevenueHead: Boolean(threadDoc.unreadForRevenueHead),
     unreadForBme: Boolean(threadDoc.unreadForBme),
     unreadForIme: Boolean(threadDoc.unreadForIme),
+
     createdAt: threadDoc.createdAt || null,
     updatedAt: threadDoc.updatedAt || null,
   };
 }
 
 function serializeMessage(messageDoc, threadDoc = null, admin = {}) {
+  if (!messageDoc) return null;
+
   const hideEmail = shouldHideBrandEmail(admin);
-  const isInbound = String(messageDoc.direction || "").toLowerCase() === "inbound";
+  const isInbound =
+    String(messageDoc.direction || "").toLowerCase() === MESSAGE_DIRECTION.INBOUND;
 
   const brandDisplayName = getBrandDisplayNameFromThread(threadDoc);
-  const teamDisplayName = getTeamDisplayNameFromThread(threadDoc);
+  const mailboxDisplayName = getMailboxNameFromThread(threadDoc);
+
+  const storedFromName = firstUsefulName(messageDoc.fromName);
+  const storedToNames = Array.isArray(messageDoc.toNames)
+    ? messageDoc.toNames.map((item) => firstUsefulName(item)).filter(Boolean)
+    : [];
+
+  const fallbackFromName = isInbound
+    ? brandDisplayName
+    : firstUsefulName(nameFromEmail(messageDoc.from), mailboxDisplayName);
+
+  const fallbackToNames = isInbound
+    ? [mailboxDisplayName]
+    : [brandDisplayName];
+
+  const fromDisplayName = storedFromName || fallbackFromName;
+  const toDisplayNames = storedToNames.length ? storedToNames : fallbackToNames;
 
   return {
     _id: messageDoc._id,
     threadId: messageDoc.threadId,
     prospectId: messageDoc.prospectId,
+
     direction: messageDoc.direction,
     provider: messageDoc.provider || "",
     providerMessageId: messageDoc.providerMessageId || "",
     providerThreadId: messageDoc.providerThreadId || "",
 
-    from: hideEmail && isInbound ? brandDisplayName : messageDoc.from || "",
-    to:
+    from:
       hideEmail && isInbound
-        ? [teamDisplayName]
+        ? brandDisplayName
         : hideEmail && !isInbound
-          ? [brandDisplayName]
-          : Array.isArray(messageDoc.to)
-            ? messageDoc.to
-            : [],
+          ? fromDisplayName
+          : messageDoc.from || "",
 
-    fromDisplayName: isInbound ? brandDisplayName : teamDisplayName,
-    toDisplayNames: isInbound ? [teamDisplayName] : [brandDisplayName],
+    fromName: fromDisplayName,
+    fromDisplayName,
+
+    to:
+      hideEmail
+        ? toDisplayNames
+        : Array.isArray(messageDoc.to)
+          ? messageDoc.to
+          : [],
+
+    toNames: toDisplayNames,
+    toDisplayNames,
 
     cc: hideEmail ? [] : Array.isArray(messageDoc.cc) ? messageDoc.cc : [],
+    ccNames: hideEmail ? [] : Array.isArray(messageDoc.ccNames) ? messageDoc.ccNames : [],
+
     bcc: hideEmail ? [] : Array.isArray(messageDoc.bcc) ? messageDoc.bcc : [],
+    bccNames: hideEmail ? [] : Array.isArray(messageDoc.bccNames) ? messageDoc.bccNames : [],
+
     subject: messageDoc.subject || "",
     bodyText: messageDoc.bodyText || "",
     bodyHtml: messageDoc.bodyHtml || "",
+
     repliedByAdminId: messageDoc.repliedByAdminId || null,
+
     sentAt: messageDoc.sentAt || null,
     receivedAt: messageDoc.receivedAt || null,
     createdAt: messageDoc.createdAt || null,
@@ -239,22 +468,40 @@ function serializeMessage(messageDoc, threadDoc = null, admin = {}) {
 async function getScopedThread(admin, threadId) {
   const scope = await buildThreadScope(admin);
 
-  let thread = await ConversationThread.findOne({ _id: threadId, ...scope })
+  let thread = await ConversationThread.findOne({
+    _id: threadId,
+    ...scope,
+  })
     .populate({
       path: "campaignId",
-      select: "name sdrId RHId IMEId flowType",
+      select: "name sdrId RHId IMEId flowType teamMailboxes",
       populate: [
-        { path: "sdrId", select: "name email role" },
-        { path: "RHId", select: "name email role" },
-        { path: "IMEId", select: "name email role" },
+        {
+          path: "sdrId",
+          select: "name email role",
+        },
+        {
+          path: "RHId",
+          select: "name email role",
+        },
+        {
+          path: "IMEId",
+          select: "name email role",
+        },
       ],
     })
     .populate({
       path: "prospectId",
       select: "companyName primaryContact stage assignedBmeId assignedImeId instantly",
       populate: [
-        { path: "assignedBmeId", select: "name email role" },
-        { path: "assignedImeId", select: "name email role" },
+        {
+          path: "assignedBmeId",
+          select: "name email role",
+        },
+        {
+          path: "assignedImeId",
+          select: "name email role",
+        },
       ],
     });
 
@@ -265,16 +512,21 @@ async function getScopedThread(admin, threadId) {
   }
 
   thread = await attachFallbackCampaignData(thread);
+
   return thread;
 }
 
 async function resolveReplyTargetForThread(thread) {
   const latestInbound = await ConversationMessage.findOne({
     threadId: thread?._id,
-    direction: "inbound",
-    providerMessageId: { $nin: ["", null] },
+    direction: MESSAGE_DIRECTION.INBOUND,
+    providerMessageId: {
+      $nin: ["", null],
+    },
   })
-    .sort({ createdAt: -1 })
+    .sort({
+      createdAt: -1,
+    })
     .select("providerMessageId")
     .lean();
 
@@ -284,9 +536,13 @@ async function resolveReplyTargetForThread(thread) {
 
   const latestAny = await ConversationMessage.findOne({
     threadId: thread?._id,
-    providerMessageId: { $nin: ["", null] },
+    providerMessageId: {
+      $nin: ["", null],
+    },
   })
-    .sort({ createdAt: -1 })
+    .sort({
+      createdAt: -1,
+    })
     .select("providerMessageId")
     .lean();
 
@@ -297,51 +553,90 @@ async function resolveReplyTargetForThread(thread) {
   return String(thread?.prospectId?.instantly?.lastEmailId || "").trim();
 }
 
+function buildThreadQueryWithFilters(baseScope = {}, queryParams = {}) {
+  const query = {
+    ...baseScope,
+  };
+
+  if (String(queryParams?.campaignId || "").trim()) {
+    query.campaignId = String(queryParams.campaignId).trim();
+  }
+
+  return query;
+}
+
 exports.listBmeThreads = async (req, res) => {
   try {
     ensureRole(req.admin, ["revenue_head", "bme", "ime", "super_admin"]);
 
     const scope = await buildThreadScope(req.admin);
-    const query = { ...scope };
-
-    if (String(req.query?.campaignId || "").trim()) {
-      query.campaignId = String(req.query.campaignId).trim();
-    }
+    const query = buildThreadQueryWithFilters(scope, req.query);
 
     let threads = await ConversationThread.find(query)
       .populate({
         path: "campaignId",
-        select: "name sdrId RHId IMEId flowType",
+        select: "name sdrId RHId IMEId flowType teamMailboxes",
         populate: [
-          { path: "sdrId", select: "name email role" },
-          { path: "RHId", select: "name email role" },
-          { path: "IMEId", select: "name email role" },
+          {
+            path: "sdrId",
+            select: "name email role",
+          },
+          {
+            path: "RHId",
+            select: "name email role",
+          },
+          {
+            path: "IMEId",
+            select: "name email role",
+          },
         ],
       })
       .populate({
         path: "prospectId",
         select: "companyName primaryContact stage assignedBmeId assignedImeId instantly",
         populate: [
-          { path: "assignedBmeId", select: "name email role" },
-          { path: "assignedImeId", select: "name email role" },
+          {
+            path: "assignedBmeId",
+            select: "name email role",
+          },
+          {
+            path: "assignedImeId",
+            select: "name email role",
+          },
         ],
       })
-      .sort({ lastMessageAt: -1, updatedAt: -1 });
+      .sort({
+        lastMessageAt: -1,
+        updatedAt: -1,
+      });
 
-    threads = await Promise.all(threads.map((thread) => attachFallbackCampaignData(thread)));
+    threads = await Promise.all(
+      threads.map((thread) => attachFallbackCampaignData(thread))
+    );
+
+    const hideEmail = shouldHideBrandEmail(req.admin);
 
     const filtered = threads.filter((thread) => {
-      const campaign = thread.campaignId;
+      const campaign = getThreadCampaignObject(thread);
       const prospect = thread.prospectId;
 
-      if (normalizeRole(req.admin?.role) === "super_admin" && String(req.query?.RHId || "").trim()) {
-        if (String(campaign?.RHId?._id || campaign?.RHId || "") !== String(req.query.RHId).trim()) {
+      if (
+        normalizeRole(req.admin?.role) === "super_admin" &&
+        String(req.query?.RHId || "").trim()
+      ) {
+        if (
+          String(campaign?.RHId?._id || campaign?.RHId || "") !==
+          String(req.query.RHId).trim()
+        ) {
           return false;
         }
       }
 
       if (String(req.query?.sdrId || "").trim()) {
-        if (String(campaign?.sdrId?._id || campaign?.sdrId || "") !== String(req.query.sdrId).trim()) {
+        if (
+          String(campaign?.sdrId?._id || campaign?.sdrId || "") !==
+          String(req.query.sdrId).trim()
+        ) {
           return false;
         }
       }
@@ -365,28 +660,29 @@ exports.listBmeThreads = async (req, res) => {
       }
 
       const search = String(req.query?.search || "").trim().toLowerCase();
+
       if (!search) return true;
+
+      const brandDisplayName = getBrandDisplayNameFromThread(thread);
+      const mailboxDisplayName = getMailboxNameFromThread(thread);
 
       const haystack = [
         thread.subject,
         thread.brandName,
-        thread.brandEmail,
+        hideEmail ? "" : thread.brandEmail,
         campaign?.name,
         prospect?.companyName,
         prospect?.primaryContact?.name,
-        prospect?.primaryContact?.email,
+        hideEmail ? "" : prospect?.primaryContact?.email,
         thread.ownerRole,
         thread.status,
+        mailboxDisplayName,
+        brandDisplayName,
         campaign?.sdrId?.name,
-        campaign?.sdrId?.email,
         campaign?.RHId?.name,
-        campaign?.RHId?.email,
         campaign?.IMEId?.name,
-        campaign?.IMEId?.email,
         prospect?.assignedBmeId?.name,
-        prospect?.assignedBmeId?.email,
         prospect?.assignedImeId?.name,
-        prospect?.assignedImeId?.email,
       ]
         .filter(Boolean)
         .join(" ")
@@ -413,13 +709,19 @@ exports.getThreadMessages = async (req, res) => {
     ensureRole(req.admin, ["revenue_head", "bme", "ime", "super_admin"]);
 
     const thread = await getScopedThread(req.admin, req.params.threadId);
-    const messages = await ConversationMessage.find({ threadId: thread._id }).sort({ createdAt: 1 });
+
+    const messages = await ConversationMessage.find({
+      threadId: thread._id,
+    }).sort({
+      createdAt: 1,
+    });
 
     return res.status(200).json({
       success: true,
       thread: serializeThread(thread, req.admin),
-      messages: messages.map((message) => serializeMessage(message, thread, req.admin)),
-      messages: messages.map(serializeMessage),
+      messages: messages.map((message) =>
+        serializeMessage(message, thread, req.admin)
+      ),
     });
   } catch (error) {
     return res.status(error?.statusCode || 500).json({
@@ -434,17 +736,25 @@ exports.replyToThread = async (req, res) => {
     ensureRole(req.admin, ["revenue_head", "bme", "ime", "super_admin"]);
 
     const thread = await getScopedThread(req.admin, req.params.threadId);
-    const bodyText = String(req.body?.bodyText || "").trim();
+
     const subject = String(req.body?.subject || thread.subject || "").trim();
 
-    if (!bodyText) {
+    const { bodyText, bodyHtml } = normalizeReplyBody(
+      req.body?.bodyText,
+      req.body?.bodyHtml
+    );
+
+    if (!bodyText || !bodyHtml) {
       return res.status(400).json({
         success: false,
         message: "Reply body is required",
       });
     }
 
-    const toEmail = thread?.prospectId?.primaryContact?.email || thread?.brandEmail || "";
+    const toEmail = normalizeEmail(
+      thread?.prospectId?.primaryContact?.email || thread?.brandEmail || ""
+    );
+
     if (!toEmail) {
       return res.status(400).json({
         success: false,
@@ -452,18 +762,18 @@ exports.replyToThread = async (req, res) => {
       });
     }
 
-    const fromEmail =
+    const fromEmail = normalizeEmail(
       thread?.mailboxes?.currentReplyFromEmail ||
       thread?.mailboxes?.campaignSenderEmail ||
-      "";
+      ""
+    );
+
     if (!fromEmail) {
       return res.status(400).json({
         success: false,
         message: "Reply mailbox is missing for this thread",
       });
     }
-
-    const replyToId = await resolveReplyTargetForThread(thread);
 
     const replyTargetUuid = await resolveReplyTargetForThread(thread);
 
@@ -474,36 +784,51 @@ exports.replyToThread = async (req, res) => {
       });
     }
 
-    const htmlBody = bodyText
-      .split("\n")
-      .map((line) => (line.trim() ? `<p>${line}</p>` : "<br/>"))
-      .join("");
+    const fromDisplayName = await resolveMailboxDisplayName(
+      fromEmail,
+      thread?.mailboxes?.currentReplyFromName ||
+      thread?.mailboxes?.campaignSenderName ||
+      nameFromEmail(fromEmail)
+    );
+
+    const brandDisplayName = getBrandDisplayNameFromThread(thread);
 
     const response = await instantlyService.replyToEmail({
       reply_to_uuid: replyTargetUuid,
       eaccount: fromEmail,
       subject: subject || thread.subject || "",
       body: {
-        text: bodyText,
-        html: htmlBody,
+        html: bodyHtml,
       },
     });
 
     const providerMessageId = String(
-      response?.id || response?.data?.id || response?.message_id || ""
+      response?.id ||
+      response?.data?.id ||
+      response?.message_id ||
+      response?.data?.message_id ||
+      ""
     ).trim();
 
     const message = await ConversationMessage.create({
       threadId: thread._id,
       prospectId: thread.prospectId?._id || thread.prospectId || null,
-      direction: "outbound",
+
+      direction: MESSAGE_DIRECTION.OUTBOUND,
       provider: "instantly",
       providerMessageId,
       providerThreadId: thread.instantlyThreadId || "",
+
       from: fromEmail,
+      fromName: fromDisplayName || nameFromEmail(fromEmail),
+
       to: [toEmail],
+      toNames: [brandDisplayName],
+
       subject,
       bodyText,
+      bodyHtml,
+
       repliedByAdminId: req.admin.adminId,
       sentAt: new Date(),
     });
@@ -515,14 +840,21 @@ exports.replyToThread = async (req, res) => {
     thread.unreadForRevenueHead = false;
     thread.unreadForBme = false;
     thread.unreadForIme = false;
+
+    thread.mailboxes = {
+      ...(thread.mailboxes || {}),
+      currentReplyFromEmail: fromEmail,
+      currentReplyFromName: fromDisplayName || nameFromEmail(fromEmail),
+    };
+
     await thread.save();
 
     return res.status(200).json({
       success: true,
       message: "Reply sent successfully",
       data: {
-        thread: serializeThread(thread),
-        message: serializeMessage(message),
+        thread: serializeThread(thread, req.admin),
+        message: serializeMessage(message, thread, req.admin),
       },
     });
   } catch (error) {

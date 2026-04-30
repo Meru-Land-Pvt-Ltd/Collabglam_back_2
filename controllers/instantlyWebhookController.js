@@ -13,6 +13,7 @@ const {
   REVIEW_STATUS,
   THREAD_STATUS,
 } = require("../constants/outreach");
+const { cleanName, getMailboxDisplayName } = require("../utils/mailboxDisplayName");
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -416,6 +417,13 @@ exports.handleInstantlyWebhook = async (req, res) => {
       { new: true, upsert: true }
     );
 
+    const brandDisplayName =
+      cleanName(prospect.companyName) ||
+      cleanName(prospect.primaryContact?.name) ||
+      "Lead";
+
+    const mailboxDisplayName = await getMailboxDisplayName(campaignSenderEmail);
+
     await ConversationMessage.create({
       threadId: thread._id,
       prospectId: prospect._id,
@@ -423,8 +431,13 @@ exports.handleInstantlyWebhook = async (req, res) => {
       provider: "instantly",
       providerMessageId: payload.emailId || "",
       providerThreadId: resolvedThreadId,
+
       from: prospect.primaryContact?.email || payload.email || "",
+      fromName: brandDisplayName,
+
       to: campaignSenderEmail ? [campaignSenderEmail] : [],
+      toNames: mailboxDisplayName ? [mailboxDisplayName] : [],
+
       subject: payload.subject || "",
       bodyText: payload.bodyText || payload.snippet || "",
       bodyHtml: "",
