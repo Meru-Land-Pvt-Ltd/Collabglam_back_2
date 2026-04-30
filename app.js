@@ -81,7 +81,7 @@ const defaultCorsOrigins = [
   "https://collabglam.com",
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://192.168.1.9:3000",
+  "http://192.168.1.40:3000",
   "https://mhd.sharemitra.com",
 ];
 

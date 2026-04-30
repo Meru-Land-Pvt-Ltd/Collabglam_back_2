@@ -2,7 +2,10 @@ const ProspectBrand = require("../models/prospectBrand");
 const OutreachCampaign = require("../models/outreachCampaign");
 const ReplyReviewQueue = require("../models/replyReviewQueue");
 const OutreachMailboxAssignment = require("../models/outreachMailboxAssignment");
-const { ConversationThread, ConversationMessage } = require("../models/conversationThread");
+const {
+  ConversationThread,
+  ConversationMessage,
+} = require("../models/conversationThread");
 const { normalizeInstantlyWebhook } = require("../utils/instantlyWebhookNormalizer");
 const {
   PROSPECT_STAGE,
@@ -15,12 +18,19 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeId(value) {
+  return String(value || "").trim();
+}
+
 function isReplyEventName(eventName = "") {
-  const normalized = String(eventName).toLowerCase();
+  const normalized = String(eventName || "").toLowerCase();
+
   return (
     normalized.includes("reply") ||
     normalized.includes("replied") ||
-    normalized.includes("email.reply")
+    normalized.includes("email.reply") ||
+    normalized.includes("email_replied") ||
+    normalized.includes("lead_replied")
   );
 }
 
@@ -33,6 +43,45 @@ function resolveCampaignSenderEmail(payload, prospect, campaign, thread) {
     normalizeEmail(campaign?.instantly?.senderAccountEmail) ||
     normalizeEmail(campaign?.instantly?.accountEmails?.[0]) ||
     ""
+  );
+}
+
+function resolveCampaignId(payload, prospect) {
+  return (
+    normalizeId(payload.campaignId) ||
+    normalizeId(prospect?.instantly?.campaignId) ||
+    ""
+  );
+}
+
+function resolveThreadId(payload, prospect, existingThread) {
+  return (
+    normalizeId(payload.threadId) ||
+    normalizeId(existingThread?.instantlyThreadId) ||
+    normalizeId(prospect?.instantly?.threadId) ||
+    ""
+  );
+}
+
+function isClosedOrAssignedAway(stage) {
+  return [
+    PROSPECT_STAGE.ASSIGNED_TO_BME,
+    PROSPECT_STAGE.ASSIGNED_TO_IME,
+    PROSPECT_STAGE.UNQUALIFIED,
+    PROSPECT_STAGE.BLOCKED,
+    PROSPECT_STAGE.CLOSED,
+  ].includes(String(stage || ""));
+}
+
+function resolveRevenueHeadId({ prospect, campaign, existingThread, ownerId }) {
+  return (
+    prospect?.RHId ||
+    campaign?.RHId ||
+    (existingThread?.ownerRole === OWNER_ROLE.REVENUE_HEAD
+      ? existingThread.ownerId
+      : null) ||
+    ownerId ||
+    null
   );
 }
 
@@ -56,9 +105,15 @@ function buildThreadUpdate({
       campaignSenderEmail ||
       existingMailboxes.campaignSenderEmail ||
       "",
-    RHEmail: existingMailboxes.RHEmail || campaign?.teamMailboxes?.RHEmail || "",
+    RHEmail:
+      existingMailboxes.RHEmail ||
+      campaign?.teamMailboxes?.RHEmail ||
+      "",
     bmeEmail: existingMailboxes.bmeEmail || "",
-    imeEmail: existingMailboxes.imeEmail || campaign?.teamMailboxes?.IMEEmail || "",
+    imeEmail:
+      existingMailboxes.imeEmail ||
+      campaign?.teamMailboxes?.IMEEmail ||
+      "",
   };
 
   if (ownerRole === OWNER_ROLE.REVENUE_HEAD) {
@@ -94,8 +149,8 @@ function buildThreadUpdate({
       "",
     mailboxes: nextMailboxes,
     subject: payload.subject || existingThread?.subject || "",
-    brandEmail: prospect.primaryContact.email,
-    brandName: prospect.companyName,
+    brandEmail: prospect.primaryContact?.email || payload.email || "",
+    brandName: prospect.companyName || "",
     status: THREAD_STATUS.WAITING_ON_US,
     lastMessageAt: new Date(),
     lastInboundAt: new Date(),
@@ -105,14 +160,95 @@ function buildThreadUpdate({
   };
 }
 
+async function upsertRevenueHeadReviewQueue({
+  prospect,
+  campaign,
+  existingThread,
+  payload,
+  resolvedThreadId,
+  ownerRole,
+  ownerId,
+}) {
+  const resolvedRHId = resolveRevenueHeadId({
+    prospect,
+    campaign,
+    existingThread,
+    ownerId,
+  });
+
+  const shouldQueueForRevenueHeadReview =
+    ownerRole === OWNER_ROLE.REVENUE_HEAD &&
+    resolvedRHId &&
+    !isClosedOrAssignedAway(prospect.stage);
+
+  console.log("reply queue debug", {
+    prospectId: String(prospect._id),
+    ownerRole,
+    ownerId: String(ownerId || ""),
+    resolvedRHId: String(resolvedRHId || ""),
+    stage: prospect.stage,
+    shouldQueueForRevenueHeadReview,
+    from: prospect.primaryContact?.email || payload.email,
+    subject: payload.subject,
+  });
+
+  if (!shouldQueueForRevenueHeadReview) {
+    return null;
+  }
+
+  return ReplyReviewQueue.findOneAndUpdate(
+    {
+      prospectId: prospect._id,
+      reviewStatus: REVIEW_STATUS.PENDING,
+    },
+    {
+      $set: {
+        campaignId: campaign?._id || null,
+        prospectId: prospect._id,
+        sdrId: prospect.sdrId || campaign?.sdrId || null,
+        RHId: resolvedRHId,
+        assignedBmeId: null,
+        instantlyThreadId: resolvedThreadId,
+        instantlyEmailId: payload.emailId || "",
+        latestReplySnippet: payload.snippet || payload.bodyText || "",
+        latestReplySubject: payload.subject || "",
+        reviewStatus: REVIEW_STATUS.PENDING,
+      },
+      $setOnInsert: {
+        createdAt: new Date(),
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+    }
+  );
+}
+
 exports.handleInstantlyWebhook = async (req, res) => {
   try {
     const payload = normalizeInstantlyWebhook(req.body);
+
+    console.log("instantly webhook received", {
+      event: payload.event,
+      email: payload.email,
+      campaignId: payload.campaignId,
+      threadId: payload.threadId,
+      subject: payload.subject,
+    });
 
     if (!isReplyEventName(payload.event)) {
       return res.status(200).json({
         success: true,
         message: "Ignored event",
+      });
+    }
+
+    if (!payload.email) {
+      return res.status(200).json({
+        success: true,
+        message: "Reply event ignored because email is missing",
       });
     }
 
@@ -127,9 +263,7 @@ exports.handleInstantlyWebhook = async (req, res) => {
       });
     }
 
-    const campaignId =
-      String(payload.campaignId || "").trim() ||
-      String(prospect.instantly?.campaignId || "").trim();
+    const campaignId = resolveCampaignId(payload, prospect);
 
     const campaign = campaignId
       ? await OutreachCampaign.findOne({
@@ -141,11 +275,8 @@ exports.handleInstantlyWebhook = async (req, res) => {
       prospectId: prospect._id,
     });
 
-const resolvedThreadId =
-  String(payload.threadId || "").trim() ||
-  String(existingThread?.instantlyThreadId || "").trim() ||
-  String(prospect.instantly?.threadId || "").trim() ||
-  "";
+    const resolvedThreadId = resolveThreadId(payload, prospect, existingThread);
+
     const campaignSenderEmail = resolveCampaignSenderEmail(
       payload,
       prospect,
@@ -166,7 +297,7 @@ const resolvedThreadId =
 
     let route = "FIRST_STANDARD_REPLY";
     let ownerRole = OWNER_ROLE.REVENUE_HEAD;
-    let ownerId = prospect.RHId || null;
+    let ownerId = prospect.RHId || campaign?.RHId || null;
 
     if (
       existingThread?.ownerRole === OWNER_ROLE.IME ||
@@ -202,18 +333,36 @@ const resolvedThreadId =
       ownerId =
         existingThread?.ownerId ||
         prospect.RHId ||
+        campaign?.RHId ||
         null;
     }
+
+    const resolvedRHId = resolveRevenueHeadId({
+      prospect,
+      campaign,
+      existingThread,
+      ownerId,
+    });
+
+    prospect.reply = prospect.reply || {};
+    prospect.instantly = prospect.instantly || {};
 
     prospect.reply.received = true;
     prospect.reply.firstReplyAt = prospect.reply.firstReplyAt || new Date();
     prospect.reply.lastReplyAt = new Date();
     prospect.reply.snippet = payload.snippet || payload.bodyText || "";
     prospect.reply.subject = payload.subject || "";
-    prospect.instantly.threadId = resolvedThreadId || prospect.instantly.threadId;
-    prospect.instantly.lastEmailId = payload.emailId || prospect.instantly.lastEmailId;
+
+    prospect.instantly.threadId =
+      resolvedThreadId || prospect.instantly.threadId || "";
+    prospect.instantly.lastEmailId =
+      payload.emailId || prospect.instantly.lastEmailId || "";
     prospect.instantly.senderAccountEmail =
-      campaignSenderEmail || prospect.instantly.senderAccountEmail;
+      campaignSenderEmail || prospect.instantly.senderAccountEmail || "";
+
+    if (campaign?.instantly?.campaignId && !prospect.instantly.campaignId) {
+      prospect.instantly.campaignId = campaign.instantly.campaignId;
+    }
 
     if (route === "IME_CONTINUATION") {
       prospect.assignedImeId = ownerId || prospect.assignedImeId;
@@ -228,6 +377,9 @@ const resolvedThreadId =
       prospect.stage = PROSPECT_STAGE.ASSIGNED_TO_BME;
       prospect.sdrWriteLocked = true;
     } else {
+      ownerRole = OWNER_ROLE.REVENUE_HEAD;
+      ownerId = resolvedRHId || ownerId;
+
       prospect.currentOwnerRole = OWNER_ROLE.REVENUE_HEAD;
       prospect.currentOwnerId = ownerId || prospect.currentOwnerId;
       prospect.stage = PROSPECT_STAGE.REPLIED_PENDING_REVIEW;
@@ -260,35 +412,23 @@ const resolvedThreadId =
       provider: "instantly",
       providerMessageId: payload.emailId || "",
       providerThreadId: resolvedThreadId,
-      from: prospect.primaryContact.email,
+      from: prospect.primaryContact?.email || payload.email || "",
       to: campaignSenderEmail ? [campaignSenderEmail] : [],
       subject: payload.subject || "",
       bodyText: payload.bodyText || payload.snippet || "",
+      bodyHtml: "",
       receivedAt: new Date(),
     });
 
-    if (route === "FIRST_STANDARD_REPLY") {
-      await ReplyReviewQueue.findOneAndUpdate(
-        {
-          prospectId: prospect._id,
-          reviewStatus: REVIEW_STATUS.PENDING,
-        },
-        {
-          $set: {
-            campaignId: campaign?._id || null,
-            sdrId: prospect.sdrId,
-            RHId: prospect.RHId,
-            assignedBmeId: null,
-            instantlyThreadId: resolvedThreadId,
-            instantlyEmailId: payload.emailId || "",
-            latestReplySnippet: payload.snippet || payload.bodyText || "",
-            latestReplySubject: payload.subject || "",
-            reviewStatus: REVIEW_STATUS.PENDING,
-          },
-        },
-        { new: true, upsert: true }
-      );
-    }
+    const reviewRow = await upsertRevenueHeadReviewQueue({
+      prospect,
+      campaign,
+      existingThread,
+      payload,
+      resolvedThreadId,
+      ownerRole,
+      ownerId,
+    });
 
     if (campaign?._id) {
       await OutreachCampaign.findByIdAndUpdate(campaign._id, {
@@ -303,11 +443,20 @@ const resolvedThreadId =
           ? "Reply assigned to IME"
           : route === "BME_CONTINUATION"
             ? "Reply assigned to BME"
-            : route === "RH_CONTINUATION"
-              ? "Reply assigned to Revenue Head"
-              : "Reply queued for Revenue Head review",
+            : reviewRow
+              ? "Reply queued for Revenue Head review"
+              : "Reply assigned to Revenue Head",
+      debug: {
+        route,
+        ownerRole,
+        ownerId: String(ownerId || ""),
+        reviewQueued: Boolean(reviewRow),
+        reviewId: reviewRow?._id || null,
+      },
     });
   } catch (error) {
+    console.error("Instantly webhook error", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Internal error",
