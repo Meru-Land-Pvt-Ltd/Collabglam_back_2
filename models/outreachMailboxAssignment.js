@@ -11,6 +11,24 @@ const OutreachMailboxAssignmentSchema = new Schema(
       unique: true,
     },
 
+    displayName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    mailboxName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    senderName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     role: {
       type: String,
       enum: Object.values(OWNER_ROLE),

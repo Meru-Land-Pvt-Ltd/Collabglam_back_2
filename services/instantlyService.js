@@ -2,6 +2,7 @@ const axios = require("axios");
 
 const BASE_URL =
   process.env.INSTANTLY_BASE_URL || "https://api.instantly.ai/api/v2";
+
 const API_KEY = process.env.INSTANTLY_API_KEY;
 
 if (!API_KEY) {
@@ -73,6 +74,7 @@ async function requestRaw(method, url, { params, data, headers, responseType } =
     method,
     url,
     params,
+    paramsSerializer: serializeParams,
     data,
     headers,
     responseType,
@@ -124,7 +126,7 @@ async function getCampaignAnalyticsSteps(params = {}) {
    Campaigns
 ========================= */
 
-async function createCampaign(payload) {
+async function createCampaign(payload = {}) {
   return request("post", "/campaigns", { data: payload });
 }
 
@@ -136,7 +138,7 @@ async function getCampaign(id) {
   return request("get", `/campaigns/${encodeId(id)}`);
 }
 
-async function updateCampaign(id, payload) {
+async function updateCampaign(id, payload = {}) {
   return request("patch", `/campaigns/${encodeId(id)}`, { data: payload });
 }
 
@@ -170,11 +172,15 @@ async function deleteCampaign(campaignId) {
 }
 
 async function activateCampaign(id, payload = {}) {
-  return request("post", `/campaigns/${encodeId(id)}/activate`, { data: payload });
+  return request("post", `/campaigns/${encodeId(id)}/activate`, {
+    data: payload,
+  });
 }
 
 async function pauseCampaign(id, payload = {}) {
-  return request("post", `/campaigns/${encodeId(id)}/pause`, { data: payload });
+  return request("post", `/campaigns/${encodeId(id)}/pause`, {
+    data: payload,
+  });
 }
 
 async function searchCampaignsByContact(params = {}) {
@@ -182,7 +188,9 @@ async function searchCampaignsByContact(params = {}) {
 }
 
 async function shareCampaign(id, payload = {}) {
-  return request("post", `/campaigns/${encodeId(id)}/share`, { data: payload });
+  return request("post", `/campaigns/${encodeId(id)}/share`, {
+    data: payload,
+  });
 }
 
 async function createCampaignFromExport(id, payload = {}) {
@@ -192,7 +200,9 @@ async function createCampaignFromExport(id, payload = {}) {
 }
 
 async function exportCampaign(id, payload = {}) {
-  return request("post", `/campaigns/${encodeId(id)}/export`, { data: payload });
+  return request("post", `/campaigns/${encodeId(id)}/export`, {
+    data: payload,
+  });
 }
 
 async function duplicateCampaign(id, payload = {}) {
@@ -206,11 +216,15 @@ async function getLaunchedCampaignCount(params = {}) {
 }
 
 async function addCampaignVariables(id, payload = {}) {
-  return request("post", `/campaigns/${encodeId(id)}/variables`, { data: payload });
+  return request("post", `/campaigns/${encodeId(id)}/variables`, {
+    data: payload,
+  });
 }
 
 async function getCampaignSendingStatus(id, params = {}) {
-  return request("get", `/campaigns/${encodeId(id)}/sendingstatus`, { params });
+  return request("get", `/campaigns/${encodeId(id)}/sendingstatus`, {
+    params,
+  });
 }
 
 /* =========================
@@ -220,16 +234,16 @@ async function getCampaignSendingStatus(id, params = {}) {
 async function sendTestEmail(payload = {}) {
   const eaccount = String(
     payload.eaccount ||
-    payload.account_email ||
-    payload.accountEmail ||
-    ""
+      payload.account_email ||
+      payload.accountEmail ||
+      ""
   ).trim();
 
   const to_address_email_list = String(
     payload.to_address_email_list ||
-    payload.to_email ||
-    payload.toEmail ||
-    ""
+      payload.to_email ||
+      payload.toEmail ||
+      ""
   ).trim();
 
   const subject = String(payload.subject || "").trim();
@@ -253,11 +267,11 @@ async function sendTestEmail(payload = {}) {
   });
 }
 
-async function replyToEmail(payload) {
+async function replyToEmail(payload = {}) {
   return request("post", "/emails/reply", { data: payload });
 }
 
-async function forwardEmail(payload) {
+async function forwardEmail(payload = {}) {
   return request("post", "/emails/forward", { data: payload });
 }
 
@@ -269,7 +283,7 @@ async function getEmail(id) {
   return request("get", `/emails/${encodeId(id)}`);
 }
 
-async function updateEmail(id, payload) {
+async function updateEmail(id, payload = {}) {
   return request("patch", `/emails/${encodeId(id)}`, { data: payload });
 }
 
@@ -289,7 +303,7 @@ async function markThreadAsRead(threadId) {
    Accounts
 ========================= */
 
-async function createAccount(payload) {
+async function createAccount(payload = {}) {
   return request("post", "/accounts", { data: payload });
 }
 
@@ -301,19 +315,21 @@ async function getAccount(email) {
   return request("get", `/accounts/${encodeEmail(email)}`);
 }
 
-async function updateAccount(email, payload) {
-  return request("patch", `/accounts/${encodeEmail(email)}`, { data: payload });
+async function updateAccount(email, payload = {}) {
+  return request("patch", `/accounts/${encodeEmail(email)}`, {
+    data: payload,
+  });
 }
 
 async function deleteAccount(email) {
   return request("delete", `/accounts/${encodeEmail(email)}`);
 }
 
-async function enableWarmup(payload) {
+async function enableWarmup(payload = {}) {
   return request("post", "/accounts/warmup/enable", { data: payload });
 }
 
-async function disableWarmup(payload) {
+async function disableWarmup(payload = {}) {
   return request("post", "/accounts/warmup/disable", { data: payload });
 }
 
@@ -335,7 +351,7 @@ async function getCustomTrackingDomainStatus(params = {}) {
   return request("get", "/accounts/ctd/status", { params });
 }
 
-async function moveAccounts(payload) {
+async function moveAccounts(payload = {}) {
   return request("post", "/accounts/move", { data: payload });
 }
 
@@ -343,7 +359,7 @@ async function moveAccounts(payload) {
    Leads
 ========================= */
 
-async function createLead(payload) {
+async function createLead(payload = {}) {
   return request("post", "/leads", { data: payload });
 }
 
@@ -355,7 +371,7 @@ async function getLead(id) {
   return request("get", `/leads/${encodeId(id)}`);
 }
 
-async function updateLead(id, payload) {
+async function updateLead(id, payload = {}) {
   return request("patch", `/leads/${encodeId(id)}`, { data: payload });
 }
 
@@ -367,31 +383,35 @@ async function bulkDeleteLeads(payload = {}) {
   return request("delete", "/leads", { data: payload });
 }
 
-async function mergeLeads(payload) {
+async function mergeLeads(payload = {}) {
   return request("post", "/leads/merge", { data: payload });
 }
 
-async function updateLeadInterestStatus(payload) {
+async function updateLeadInterestStatus(payload = {}) {
   return request("post", "/leads/update-intereststatus", { data: payload });
 }
 
-async function removeLeadFromSubsequence(payload) {
+async function removeLeadFromSubsequence(payload = {}) {
   return request("post", "/leads/subsequence/remove", { data: payload });
 }
 
-async function bulkAssignLeads(payload) {
+async function bulkAssignLeads(payload = {}) {
   return request("post", "/leads/bulk-assign", { data: payload });
 }
 
-async function moveLeads(payload) {
+async function moveLeads(payload = {}) {
   return request("post", "/leads/move", { data: payload });
 }
 
-async function moveLeadToSubsequence(payload) {
+async function moveLeadToSubsequence(payload = {}) {
   return request("post", "/leads/subsequence/move", { data: payload });
 }
 
-async function addLeads(payload) {
+async function moveLeadsToSubsequence(payload = {}) {
+  return request("post", "/leads/subsequence/move", { data: payload });
+}
+
+async function addLeads(payload = {}) {
   return request("post", "/leads/add", { data: payload });
 }
 
@@ -399,7 +419,7 @@ async function addLeads(payload) {
    Lead Lists
 ========================= */
 
-async function createLeadList(payload) {
+async function createLeadList(payload = {}) {
   return request("post", "/lead-lists", { data: payload });
 }
 
@@ -411,7 +431,7 @@ async function getLeadList(id) {
   return request("get", `/lead-lists/${encodeId(id)}`);
 }
 
-async function updateLeadList(id, payload) {
+async function updateLeadList(id, payload = {}) {
   return request("patch", `/lead-lists/${encodeId(id)}`, { data: payload });
 }
 
@@ -429,7 +449,7 @@ async function getLeadListVerificationStats(id, params = {}) {
    Email Verification
 ========================= */
 
-async function createEmailVerification(payload) {
+async function createEmailVerification(payload = {}) {
   return request("post", "/email-verification", { data: payload });
 }
 
@@ -441,7 +461,7 @@ async function getEmailVerification(email) {
    Lead Labels
 ========================= */
 
-async function createLeadLabel(payload) {
+async function createLeadLabel(payload = {}) {
   return request("post", "/lead-labels", { data: payload });
 }
 
@@ -453,7 +473,7 @@ async function getLeadLabel(id) {
   return request("get", `/lead-labels/${encodeId(id)}`);
 }
 
-async function updateLeadLabel(id, payload) {
+async function updateLeadLabel(id, payload = {}) {
   return request("patch", `/lead-labels/${encodeId(id)}`, { data: payload });
 }
 
@@ -461,7 +481,7 @@ async function deleteLeadLabel(id) {
   return request("delete", `/lead-labels/${encodeId(id)}`);
 }
 
-async function predictAiReplyLabel(payload) {
+async function predictAiReplyLabel(payload = {}) {
   return request("post", "/lead-labels/ai-reply-label", { data: payload });
 }
 
@@ -469,7 +489,7 @@ async function predictAiReplyLabel(payload) {
    Custom Tags
 ========================= */
 
-async function createCustomTag(payload) {
+async function createCustomTag(payload = {}) {
   return request("post", "/custom-tags", { data: payload });
 }
 
@@ -481,7 +501,7 @@ async function getCustomTag(id) {
   return request("get", `/custom-tags/${encodeId(id)}`);
 }
 
-async function updateCustomTag(id, payload) {
+async function updateCustomTag(id, payload = {}) {
   return request("patch", `/custom-tags/${encodeId(id)}`, { data: payload });
 }
 
@@ -489,7 +509,7 @@ async function deleteCustomTag(id) {
   return request("delete", `/custom-tags/${encodeId(id)}`);
 }
 
-async function toggleCustomTagResource(payload) {
+async function toggleCustomTagResource(payload = {}) {
   return request("post", "/custom-tags/toggle-resource", { data: payload });
 }
 
@@ -501,7 +521,7 @@ async function listCustomTagMappings(params = {}) {
    Block List Entries
 ========================= */
 
-async function createBlockListEntry(payload) {
+async function createBlockListEntry(payload = {}) {
   return request("post", "/block-lists-entries", { data: payload });
 }
 
@@ -513,7 +533,7 @@ async function getBlockListEntry(id) {
   return request("get", `/block-lists-entries/${encodeId(id)}`);
 }
 
-async function updateBlockListEntry(id, payload) {
+async function updateBlockListEntry(id, payload = {}) {
   return request("patch", `/block-lists-entries/${encodeId(id)}`, {
     data: payload,
   });
@@ -527,12 +547,16 @@ async function deleteAllBlockListEntries(payload = {}) {
   return request("delete", "/block-lists-entries", { data: payload });
 }
 
-async function bulkCreateBlockListEntries(payload) {
-  return request("post", "/block-lists-entries/bulkcreate", { data: payload });
+async function bulkCreateBlockListEntries(payload = {}) {
+  return request("post", "/block-lists-entries/bulkcreate", {
+    data: payload,
+  });
 }
 
-async function bulkDeleteBlockListEntries(payload) {
-  return request("post", "/block-lists-entries/bulkdelete", { data: payload });
+async function bulkDeleteBlockListEntries(payload = {}) {
+  return request("post", "/block-lists-entries/bulkdelete", {
+    data: payload,
+  });
 }
 
 async function downloadBlockListEntries(params = {}) {
@@ -549,7 +573,7 @@ async function downloadBlockListEntries(params = {}) {
    Inbox Placement Tests
 ========================= */
 
-async function createInboxPlacementTest(payload) {
+async function createInboxPlacementTest(payload = {}) {
   return request("post", "/inbox-placement-tests", { data: payload });
 }
 
@@ -561,7 +585,7 @@ async function getInboxPlacementTest(id) {
   return request("get", `/inbox-placement-tests/${encodeId(id)}`);
 }
 
-async function updateInboxPlacementTest(id, payload) {
+async function updateInboxPlacementTest(id, payload = {}) {
   return request("patch", `/inbox-placement-tests/${encodeId(id)}`, {
     data: payload,
   });
@@ -589,19 +613,19 @@ async function getInboxPlacementAnalytics(id) {
   return request("get", `/inbox-placement-analytics/${encodeId(id)}`);
 }
 
-async function getInboxPlacementStatsByTestId(payload) {
+async function getInboxPlacementStatsByTestId(payload = {}) {
   return request("post", "/inbox-placement-analytics/statsby-test-id", {
     data: payload,
   });
 }
 
-async function getInboxPlacementDeliverabilityInsights(payload) {
+async function getInboxPlacementDeliverabilityInsights(payload = {}) {
   return request("post", "/inbox-placementanalytics/deliverability-insights", {
     data: payload,
   });
 }
 
-async function getInboxPlacementStatsByDate(payload) {
+async function getInboxPlacementStatsByDate(payload = {}) {
   return request("post", "/inbox-placement-analytics/statsby-date", {
     data: payload,
   });
@@ -609,8 +633,6 @@ async function getInboxPlacementStatsByDate(payload) {
 
 /* =========================
    OAuth Compatibility
-   Kept from your existing codebase.
-   Verify these exact endpoints against your tenant docs.
 ========================= */
 
 async function initGoogleOAuth() {
@@ -623,10 +645,6 @@ async function initMicrosoftOAuth() {
 
 async function getOAuthSessionStatus(sessionId) {
   return request("get", `/oauth/session/status/${encodeId(sessionId)}`);
-}
-
-async function moveLeadsToSubsequence(payload = {}) {
-  return request("post", "/leads/subsequence/move", { data: payload });
 }
 
 module.exports = {
@@ -691,6 +709,7 @@ module.exports = {
   bulkAssignLeads,
   moveLeads,
   moveLeadToSubsequence,
+  moveLeadsToSubsequence,
   addLeads,
 
   createLeadList,
@@ -744,6 +763,4 @@ module.exports = {
   initGoogleOAuth,
   initMicrosoftOAuth,
   getOAuthSessionStatus,
-
-  moveLeadsToSubsequence,
 };
