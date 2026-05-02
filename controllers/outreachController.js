@@ -1073,7 +1073,7 @@ async function attachProspectsToCampaign(campaign, prospectDocs = []) {
 
     addLeadsResult = await instantlyService.addLeads({
       campaign_id: campaign.instantly.campaignId,
-      leads: newDocs.map(buildInstantlyLeadFromProspect),
+      leads: newDocs.map((doc) => buildInstantlyLeadFromProspect(doc, getCampaignMappedTemplateVariables(campaign))),
     });
 
     instantlySynced = true;
@@ -1448,10 +1448,7 @@ exports.getOutreachCampaignById = async (req, res) => {
       campaign.configuration = normalizeCampaignConfiguration({});
     }
 
-    const templateVariables =
-      Array.isArray(campaign.templateVariables) && campaign.templateVariables.length
-        ? campaign.templateVariables
-        : buildTemplateVariableList(campaign.csvSchema?.columns || []);
+    const templateVariables = getCampaignMappedTemplateVariables(campaign);
 
     const availableAccountEmails = await getAvailableSenderEmailsForCampaign(campaign);
 
@@ -1595,64 +1592,62 @@ function cleanVariableValue(value) {
   return String(value ?? "").trim();
 }
 
-function buildInstantlyLeadFromProspect(prospect = {}) {
-  const templateVariables = prospect.templateVariables || {};
+function buildInstantlyLeadFromProspect(prospect = {}, templateVariablesForCampaign = []) {
+  const storedTemplateVariables = prospect.templateVariables || {};
   const primaryContact = prospect.primaryContact || {};
+  const allowedVariables = getTemplateVariableKeySet(templateVariablesForCampaign);
+  const exactTemplateVariables = filterVariablesToAllowed(
+    storedTemplateVariables,
+    templateVariablesForCampaign
+  );
 
   const email = normalizeEmail(
     primaryContact.email ||
-    templateVariables.email ||
-    ""
+    storedTemplateVariables.email ||
+    exactTemplateVariables.email ||
+    ''
   );
 
-  const fullName = cleanVariableValue(
-    templateVariables.fullName ||
-    primaryContact.name ||
-    ""
-  );
-
+  const fullName = cleanVariableValue(exactTemplateVariables.fullName || '');
   const nameParts = splitFullName(fullName);
 
-  const firstName = cleanVariableValue(
-    templateVariables.firstName ||
-    nameParts.firstName ||
-    ""
-  );
+  const firstName = allowedVariables.has('firstName')
+    ? cleanVariableValue(exactTemplateVariables.firstName || '')
+    : '';
 
-  const lastName = cleanVariableValue(
-    templateVariables.lastName ||
-    nameParts.lastName ||
-    ""
-  );
+  const lastName = allowedVariables.has('lastName')
+    ? cleanVariableValue(exactTemplateVariables.lastName || '')
+    : '';
 
-  const companyName = cleanVariableValue(
-    templateVariables.companyName ||
-    prospect.companyName ||
-    ""
-  );
+  const companyName = allowedVariables.has('companyName')
+    ? cleanVariableValue(exactTemplateVariables.companyName || '')
+    : '';
 
   const customVariables = {};
 
-  Object.entries(templateVariables || {}).forEach(([key, value]) => {
-    const cleanKey = normalizeTemplateVariableToken(key);
-    if (!cleanKey) return;
+  allowedVariables.forEach((key) => {
+    const value = cleanVariableValue(exactTemplateVariables[key]);
+    if (!value) return;
+    customVariables[key] = value;
+  });
 
-    customVariables[cleanKey] = value == null ? "" : String(value);
+  Object.keys(customVariables).forEach((key) => {
+    if (!cleanVariableValue(customVariables[key])) {
+      delete customVariables[key];
+    }
   });
 
   return {
     email,
 
-    // Native Instantly lead fields for list/contact display.
+    // Native Instantly fields are also strict: only filled if that exact CSV mapping exists.
     first_name: firstName,
-    last_name: lastName,
+    last_name: lastName || nameParts.lastName || '',
     company_name: companyName,
 
-    // Only mapped CSV variables are sent here.
-    // If a template contains an unmapped {{variable}}, campaign sequence sync blanks it before Instantly sends.
+    // Only CSV-mapped variables are sent. Unmapped tokens in templates are blanked earlier.
     custom_variables: customVariables,
 
-    // Instantly expects personalization to be string or null, not object.
     personalization: null,
   };
 }
@@ -1790,7 +1785,7 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
         senderEmails: campaign.instantly.accountEmails || [],
         configuration: campaign.configuration,
         rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
-        templateVariables: campaign.templateVariables || [],
+        templateVariables: getCampaignMappedTemplateVariables(campaign),
       });
 
       await forceSyncInstantlyCampaignBeforeActivation({
@@ -1900,7 +1895,7 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
       senderEmails,
       configuration: getCampaignConfigurationFromDocument(campaign),
       rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
-      templateVariables: campaign.templateVariables || [],
+      templateVariables: getCampaignMappedTemplateVariables(campaign),
     });
 
     const syncResult = await forceSyncInstantlyCampaignBeforeActivation({
@@ -1970,11 +1965,14 @@ function textToHtml(value = "") {
   return escapeHtml(value).replace(/\n/g, "<br/>");
 }
 
-function buildPreviewVariablesFromProspect(prospect = {}, extra = {}) {
-  return {
-    ...(prospect?.templateVariables || {}),
-    ...(extra || {}),
-  };
+function buildPreviewVariablesFromProspect(prospect = {}, extra = {}, templateVariables = []) {
+  return filterVariablesToAllowed(
+    {
+      ...(prospect?.templateVariables || {}),
+      ...(extra || {}),
+    },
+    templateVariables
+  );
 }
 
 function stripHtmlToText(value = "") {
@@ -2114,9 +2112,12 @@ exports.previewCampaignSequence = async (req, res) => {
       previewProspect = await ProspectBrand.findById(campaign.prospectIds[0]).lean();
     }
 
+    const allowedTemplateVariables = getCampaignMappedTemplateVariables(campaign);
+
     const previewVars = buildPreviewVariablesFromProspect(
       previewProspect || {},
-      req.body?.previewVars || {}
+      req.body?.previewVars || {},
+      allowedTemplateVariables
     );
 
     const rendered = renderSequencePreviewContent(variant, previewVars);
@@ -2227,9 +2228,12 @@ exports.sendCampaignTestEmail = async (req, res) => {
       previewProspect = await ProspectBrand.findById(campaign.prospectIds[0]).lean();
     }
 
+    const allowedTemplateVariables = getCampaignMappedTemplateVariables(campaign);
+
     const previewVars = buildPreviewVariablesFromProspect(
       previewProspect || {},
-      req.body?.previewVars || {}
+      req.body?.previewVars || {},
+      allowedTemplateVariables
     );
 
     const rendered = renderSequencePreviewContent(variant, previewVars);
@@ -2980,7 +2984,7 @@ exports.launchOutreachCampaign = async (req, res) => {
       senderEmails,
       configuration,
       rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
-      templateVariables: campaign.templateVariables || [],
+      templateVariables: getCampaignMappedTemplateVariables(campaign),
     });
 
     const localSequenceDebug = getLocalSequenceBodyDebug(createCampaignPayload);
@@ -3152,7 +3156,7 @@ exports.launchOutreachCampaign = async (req, res) => {
     try {
       addLeadsResult = await instantlyService.addLeads({
         campaign_id: instantlyCampaignId,
-        leads: prospects.map(buildInstantlyLeadFromProspect),
+        leads: prospects.map((prospect) => buildInstantlyLeadFromProspect(prospect, getCampaignMappedTemplateVariables(campaign))),
       });
     } catch (error) {
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
@@ -4037,6 +4041,54 @@ function buildTemplateVariableList(columns = []) {
   return [...vars];
 }
 
+function getCampaignMappedTemplateVariables(campaign = {}) {
+  const columns = Array.isArray(campaign?.csvSchema?.columns)
+    ? campaign.csvSchema.columns
+    : [];
+
+  const csvVariables = buildTemplateVariableList(columns);
+
+  if (columns.length) {
+    return csvVariables;
+  }
+
+  return Array.isArray(campaign?.templateVariables) ? campaign.templateVariables : [];
+}
+
+function getTemplateVariableKeySet(templateVariables = []) {
+  const keys = new Set();
+
+  (Array.isArray(templateVariables) ? templateVariables : []).forEach((item) => {
+    const key = normalizeTemplateVariableToken(item);
+    if (!key) return;
+    keys.add(key);
+  });
+
+  return keys;
+}
+
+function filterVariablesToAllowed(input = {}, templateVariables = []) {
+  const allowedKeys = getTemplateVariableKeySet(templateVariables);
+  const output = {};
+
+  allowedKeys.forEach((key) => {
+    const exactValue = input?.[key];
+
+    if (exactValue !== undefined && exactValue !== null) {
+      output[key] = String(exactValue);
+      return;
+    }
+
+    const matchedKey = Object.keys(input || {}).find(
+      (candidate) => String(candidate || '').toLowerCase() === key.toLowerCase()
+    );
+
+    output[key] = matchedKey ? String(input[matchedKey] ?? '') : '';
+  });
+
+  return output;
+}
+
 function getMappedCellValue(row = {}, columns = [], type) {
   const match = columns.find((column) => column.selectedType === type);
   if (!match) return "";
@@ -4239,10 +4291,7 @@ exports.getCampaignTemplateVariables = async (req, res) => {
     const campaign = await getAccessibleCampaign(req, req.params.id);
 
     const columns = Array.isArray(campaign.csvSchema?.columns) ? campaign.csvSchema.columns : [];
-    const templateVariables =
-      Array.isArray(campaign.templateVariables) && campaign.templateVariables.length
-        ? campaign.templateVariables
-        : buildTemplateVariableList(columns);
+    const templateVariables = getCampaignMappedTemplateVariables(campaign);
 
     return res.status(200).json({
       success: true,
