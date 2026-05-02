@@ -2,11 +2,67 @@ const mongoose = require("mongoose");
 const { Schema, model, models } = mongoose;
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DEFAULT_FREE_PLAN_ID = "4c6e497d-a6f9-4c3b-8d64-65bf843be685";
 
 const NamedRefSchema = new Schema(
   {
     _id: { type: Schema.Types.ObjectId, required: false },
     name: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
+
+const subscriptionFeatureSchema = new Schema(
+  {
+    key: { type: String, required: true, trim: true },
+    value: { type: Schema.Types.Mixed, default: null },
+    limit: { type: Number, required: true, default: 0 },
+    used: { type: Number, default: 0 },
+    note: { type: String, default: null, trim: true },
+    resetsEvery: { type: String, default: null, trim: true },
+    resetsAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const internalCreditsSchema = new Schema(
+  {
+    used: { type: Number, default: 0 },
+    resetsAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const subscriptionSchema = new Schema(
+  {
+    planId: { type: String, required: true, default: DEFAULT_FREE_PLAN_ID },
+    planName: { type: String, required: true, default: "free" },
+    role: { type: String, enum: ["Brand", "Influencer"], default: "Influencer" },
+
+    planRef: {
+      type: Schema.Types.ObjectId,
+      ref: "SubscriptionPlan",
+      default: null,
+    },
+
+    monthlyCost: { type: Number, default: 0 },
+    annualCost: { type: Number, default: 0 },
+
+    billingCycle: {
+      type: String,
+      enum: ["monthly", "annual"],
+      default: "monthly",
+    },
+
+    autoRenew: { type: Boolean, default: false },
+    status: { type: String, enum: ["active", "archived"], default: "active" },
+
+    durationMins: { type: Number, default: 43200 },
+    startedAt: { type: Date, default: Date.now },
+    expiresAt: { type: Date, default: null },
+
+    features: { type: [subscriptionFeatureSchema], default: [] },
+    internalCredits: { type: internalCreditsSchema, default: () => ({}) },
   },
   { _id: false }
 );
@@ -75,6 +131,9 @@ const InfluencerSchema = new Schema(
     adminCreatedRole: { type: String, default: "", trim: true },
     adminCreatedAt: { type: Date, default: null },
     signupCompletedAt: { type: Date, default: null },
+
+    subscription: { type: subscriptionSchema, default: () => ({}) },
+    subscriptionExpired: { type: Boolean, default: false },
   },
   {
     timestamps: true,

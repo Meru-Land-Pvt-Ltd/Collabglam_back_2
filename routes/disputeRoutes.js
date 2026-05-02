@@ -21,6 +21,7 @@ const {
   adminGetById,
   adminAddComment,
   adminUpdateStatus,
+  adminMarkNotInterested,
   adminAssign,
   adminCreateDisputeEvidence,
   brandRevokeDispute,
@@ -29,7 +30,7 @@ const {
   brandEditComment,
   brandDeleteComment,
   influencerRevokeDispute,
-  influencerEditDispute
+  influencerEditDispute,
 } = require('../controllers/disputeController');
 
 // ---- Multer config for dispute attachments ----
@@ -79,7 +80,7 @@ const uploadAttachments = (req, res, next) => {
         });
       }
 
-      // Non-Multer error → pass to global error handler
+      // Non-Multer error -> pass to global error handler
       return next(err);
     }
   );
@@ -107,14 +108,18 @@ router.patch(
   uploadAttachments,
   brandEditComment
 );
-
 router.delete(
   '/brand/comment/:id',
   verifyToken,
   brandDeleteComment
 );
 router.patch('/brand/disputes/:id/revoke', verifyToken, brandRevokeDispute);
-router.patch('/brand/disputes/:id/edit', verifyToken, uploadAttachments, brandEditDispute); // reuse create handler for edits (with disputeId in params)
+router.patch(
+  '/brand/disputes/:id/edit',
+  verifyToken,
+  uploadAttachments,
+  brandEditDispute
+);
 
 // -------- Influencer endpoints (require influencer auth) --------
 router.post(
@@ -126,13 +131,12 @@ router.post(
 router.post('/influencer/list', verifyToken, influencerList);
 router.get('/influencer/:id', verifyToken, influencerGetById);
 router.patch(
-  "/influencer/disputes/:id/revoke",
+  '/influencer/disputes/:id/revoke',
   verifyToken,
   influencerRevokeDispute
 );
-
 router.patch(
-  "/influencer/disputes/:id/edit",
+  '/influencer/disputes/:id/edit',
   verifyToken,
   uploadAttachments,
   influencerEditDispute
@@ -144,9 +148,8 @@ router.post(
   influencerAddComment
 );
 router.post('/influencer/applied', verifyToken, influencerCampaignsForDispute);
-// router.patch('/influencer/disputes/:id/revoke', disputeController.influencerRevokeDispute);
 
-// -------- Admin endpoints (relaxed auth, but comments can also have files) --------
+// -------- Admin endpoints (relaxed auth, but comments/evidence can also have files) --------
 router.post('/admin/list', adminList);
 router.get('/admin/:id', adminGetById);
 router.post(
@@ -155,6 +158,12 @@ router.post(
   adminAddComment
 );
 router.post('/admin/update-status', adminUpdateStatus);
+router.post('/admin/not-interested', adminMarkNotInterested);
 router.post('/admin/assign', adminAssign);
-router.post('/admin/:id/evidence', uploadAttachments, adminCreateDisputeEvidence); // reuse create handler for adding evidence (with disputeId in params)
+router.post(
+  '/admin/:id/evidence',
+  uploadAttachments,
+  adminCreateDisputeEvidence
+);
+
 module.exports = router;

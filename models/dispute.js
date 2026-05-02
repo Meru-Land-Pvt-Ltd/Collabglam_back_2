@@ -39,6 +39,7 @@ const attachmentSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+
 const evidenceSchema = new mongoose.Schema(
   {
     evidenceId: { type: String, required: true, default: uuidv4 },
@@ -61,6 +62,7 @@ const evidenceSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+
 const commentSchema = new mongoose.Schema(
   {
     commentId: { type: String, required: true, default: uuidv4 },
@@ -116,6 +118,11 @@ const disputeSchema = new mongoose.Schema(
       ],
       default: ["other"],
     },
+    otherIssueDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
     priority: {
       type: String,
@@ -144,6 +151,13 @@ const disputeSchema = new mongoose.Schema(
       name: { type: String, default: null },
     },
 
+    // Admin-specific hide list. This does not change dispute.status.
+    // When an admin clicks "Not Interested", their adminId is stored here.
+    adminNotInterested: {
+      type: [String],
+      default: [],
+    },
+
     attachments: { type: [attachmentSchema], default: [] },
 
     comments: { type: [commentSchema], default: [] },
@@ -161,5 +175,6 @@ disputeSchema.index({ brandId: 1, createdAt: -1 });
 disputeSchema.index({ influencerId: 1, createdAt: -1 });
 disputeSchema.index({ campaignId: 1, createdAt: -1 });
 disputeSchema.index({ status: 1, createdAt: -1 });
+disputeSchema.index({ adminNotInterested: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Dispute", disputeSchema);
