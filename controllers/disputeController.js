@@ -361,6 +361,341 @@ function areStringArraysEqual(a = [], b = []) {
   if (a.length !== b.length) return false;
   return a.every((value, index) => String(value) === String(b[index]));
 }
+
+function toObjectIdOrNull(value) {
+  const id = String(value || "").trim();
+
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    return null;
+  }
+
+  return new mongoose.Types.ObjectId(id);
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function getBestBrandImage(brand) {
+  return firstNonEmpty(
+    brand?.profilePic,
+    brand?.profileImage,
+    brand?.logoUrl,
+    brand?.brandLogoUrl,
+    brand?.avatarUrl,
+    brand?.avatar,
+    brand?.image,
+    brand?.photo,
+    brand?.companyLogo
+  );
+}
+
+function getBestInfluencerImage(influencer, modash) {
+  return firstNonEmpty(
+    influencer?.profilePic,
+    influencer?.profileImage,
+    influencer?.avatarUrl,
+    influencer?.avatar,
+    influencer?.image,
+    influencer?.photo,
+    modash?.picture,
+    modash?.profilePicture,
+    modash?.profilePic,
+    modash?.image
+  );
+}
+
+function buildBrandLookup(id) {
+  const value = String(id || "").trim();
+  const objectId = toObjectIdOrNull(value);
+
+  const or = [
+    { brandId: value },
+    { email: value },
+  ];
+
+  if (objectId) {
+    or.unshift({ _id: objectId });
+  }
+
+  return { $or: or };
+}
+
+function buildInfluencerLookupForProfile(id) {
+  const value = String(id || "").trim();
+  const objectId = toObjectIdOrNull(value);
+
+  const or = [
+    { influencerId: value },
+    { email: value },
+    { userId: value },
+  ];
+
+  if (objectId) {
+    or.unshift({ _id: objectId });
+  }
+
+  return { $or: or };
+}
+
+async function findCampaignByAnyId(campaignId) {
+  const value = String(campaignId || "").trim();
+  if (!value) return null;
+
+  const objectId = toObjectIdOrNull(value);
+
+  const or = [
+    { campaignsId: value },
+    { campaignId: value },
+  ];
+
+  if (objectId) {
+    or.unshift({ _id: objectId });
+  }
+
+  return Campaign.findOne({ $or: or })
+    .select("_id campaignTitle title name campaignsId campaignId")
+    .lean();
+}
+
+async function findLatestModashForInfluencer(influencerId) {
+  const value = String(influencerId || "").trim();
+  if (!value) return null;
+
+  const objectId = toObjectIdOrNull(value);
+
+  const or = [
+    { influencerId: value },
+    { influencer: value },
+  ];
+
+  if (objectId) {
+    or.push({ influencer: objectId });
+  }
+
+  return Modash.findOne({ $or: or })
+    .select("influencerId influencer picture profilePicture profilePic image handle username provider updatedAt")
+    .sort({ updatedAt: -1 })
+    .lean();
+}
+
+function buildPartyProfile({ role, id, name, email, handle, provider, image, since }) {
+  const safeImage = String(image || "").trim();
+
+  return {
+    role,
+    id: String(id || ""),
+    name: name || null,
+    email: email || "",
+    handle: handle || null,
+    provider: provider || null,
+
+    // Keep multiple aliases because the brand/influencer/admin UIs use different names.
+    profilePic: safeImage || null,
+    logoUrl: safeImage || null,
+    imageUrl: safeImage || null,
+    avatarUrl: safeImage || null,
+
+    since: since || null,
+  };
+}
+
+function formatSinceLabel(dateValue) {
+  if (!dateValue) return null;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function hydrateCommentsWithProfiles(dispute, brandParty, influencerParty) {
+  if (!Array.isArray(dispute.comments)) {
+    dispute.comments = [];
+    return dispute;
+  }
+
+  dispute.comments = dispute.comments.map((comment) => {
+    let party = null;
+
+    if (
+      String(comment.authorRole) === "Brand" &&
+      String(comment.authorId) === String(brandParty?.id)
+    ) {
+      party = brandParty;
+    }
+
+    if (
+      String(comment.authorRole) === "Influencer" &&
+      String(comment.authorId) === String(influencerParty?.id)
+    ) {
+      party = influencerParty;
+    }
+
+    return {
+      ...comment,
+      authorName:
+        party?.name ||
+        comment.authorName ||
+        String(comment.authorRole || "User"),
+      authorProfilePic:
+        party?.profilePic ||
+        comment.authorProfilePic ||
+        null,
+      authorLogoUrl:
+        party?.logoUrl ||
+        comment.authorLogoUrl ||
+        null,
+      authorImageUrl:
+        party?.imageUrl ||
+        comment.authorImageUrl ||
+        null,
+    };
+  });
+
+  return dispute;
+}
+
+async function enrichDisputeForResponse(disputeInput, options = {}) {
+  const dispute =
+    typeof disputeInput?.toObject === "function"
+      ? disputeInput.toObject()
+      : { ...(disputeInput || {}) };
+
+  const [brand, influencer, campaign, modash] = await Promise.all([
+    dispute.brandId
+      ? Brand.findOne(buildBrandLookup(dispute.brandId))
+          .select("_id brandId name brandName companyName email createdAt profilePic profileImage logoUrl brandLogoUrl avatarUrl avatar image photo companyLogo")
+          .lean()
+      : null,
+
+    dispute.influencerId
+      ? Influencer.findOne(buildInfluencerLookupForProfile(dispute.influencerId))
+          .select("_id influencerId userId name fullName influencerName username email createdAt profilePic profileImage avatarUrl avatar image photo handle provider")
+          .lean()
+      : null,
+
+    dispute.campaignId ? findCampaignByAnyId(dispute.campaignId) : null,
+    dispute.influencerId ? findLatestModashForInfluencer(dispute.influencerId) : null,
+  ]);
+
+  const brandName =
+    brand?.name ||
+    brand?.brandName ||
+    brand?.companyName ||
+    dispute.brandName ||
+    null;
+
+  const influencerName =
+    influencer?.name ||
+    influencer?.fullName ||
+    influencer?.influencerName ||
+    influencer?.username ||
+    dispute.influencerName ||
+    null;
+
+  const influencerHandle =
+    modash?.handle ||
+    modash?.username ||
+    influencer?.handle ||
+    dispute.influencerHandle ||
+    null;
+
+  const influencerProvider =
+    modash?.provider ||
+    influencer?.provider ||
+    dispute.influencerProvider ||
+    null;
+
+  const brandImage = getBestBrandImage(brand);
+  const influencerImage = getBestInfluencerImage(influencer, modash);
+
+  const brandSince = formatSinceLabel(brand?.createdAt);
+  const influencerSince = formatSinceLabel(influencer?.createdAt);
+
+  const brandParty = buildPartyProfile({
+    role: "Brand",
+    id: brand?._id || dispute.brandId,
+    name: brandName,
+    email: brand?.email,
+    image: brandImage,
+    since: brandSince,
+  });
+
+  const influencerParty = buildPartyProfile({
+    role: "Influencer",
+    id: influencer?._id || dispute.influencerId,
+    name: influencerName,
+    email: influencer?.email,
+    handle: influencerHandle,
+    provider: influencerProvider,
+    image: influencerImage,
+    since: influencerSince,
+  });
+
+  const raisedByRole = dispute.createdBy?.role || dispute.raisedByRole || null;
+
+  dispute.campaignName =
+    campaign?.campaignTitle ||
+    campaign?.title ||
+    campaign?.name ||
+    dispute.campaignName ||
+    null;
+
+  dispute.brandName = brandName;
+  dispute.influencerName = influencerName;
+  dispute.influencerHandle = influencerHandle;
+  dispute.influencerProvider = influencerProvider;
+
+  dispute.brandEmail = brand?.email || dispute.brandEmail || null;
+  dispute.influencerEmail = influencer?.email || dispute.influencerEmail || null;
+
+  dispute.brandLogoUrl = brandImage || null;
+  dispute.brandProfilePic = brandImage || null;
+  dispute.influencerProfileImage = influencerImage || null;
+  dispute.influencerProfilePic = influencerImage || null;
+
+  dispute.brandSince = brandSince;
+  dispute.influencerSince = influencerSince;
+
+  if (raisedByRole === "Brand") {
+    dispute.raisedBy = brandParty;
+    dispute.raisedAgainst = influencerParty;
+  } else if (raisedByRole === "Influencer") {
+    dispute.raisedBy = influencerParty;
+    dispute.raisedAgainst = brandParty;
+  } else {
+    dispute.raisedBy = dispute.raisedBy || null;
+    dispute.raisedAgainst = dispute.raisedAgainst || null;
+  }
+
+  dispute.raisedByRole = raisedByRole;
+  dispute.raisedById = dispute.createdBy?.id || dispute.raisedBy?.id || null;
+
+  if (typeof options.viewerRole === "string") {
+    dispute.viewerIsRaiser = raisedByRole === options.viewerRole;
+  } else if (typeof dispute.viewerIsRaiser !== "boolean") {
+    dispute.viewerIsRaiser = false;
+  }
+
+  hydrateCommentsWithProfiles(dispute, brandParty, influencerParty);
+
+  return dispute;
+}
+
+async function enrichDisputesForResponse(disputes, options = {}) {
+  const rows = Array.isArray(disputes) ? disputes : [];
+  return Promise.all(rows.map((row) => enrichDisputeForResponse(row, options)));
+}
+
 // ----------------- ID / MODEL HELPERS -----------------
 
 /**
@@ -929,14 +1264,14 @@ exports.brandList = async (req, res) => {
       limit = 10,
       status,
       search,
-      appliedBy, // "brand" | "influencer" optional
+      appliedBy,
     } = req.body || {};
 
     if (!brandId) {
       return res.status(400).json({ message: "brandId is required" });
     }
 
-    const brand = await Brand.findOne({ _id: String(brandId) }).lean();
+    const brand = await Brand.findOne(buildBrandLookup(brandId)).lean();
     if (!brand) {
       return res.status(404).json({ message: "Brand not found" });
     }
@@ -945,13 +1280,10 @@ exports.brandList = async (req, res) => {
     const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
 
     const normalizeSearchValue = (value = "") =>
-      String(value)
-        .trim()
-        .toLowerCase()
-        .replace(/^#+/, "");
+      String(value).trim().toLowerCase().replace(/^#+/, "");
 
     const filter = {
-      brandId: String(brandId),
+      brandId: String(brand._id || brandId),
     };
 
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
@@ -965,150 +1297,36 @@ exports.brandList = async (req, res) => {
       if (role === "influencer") filter["createdBy.role"] = "Influencer";
     }
 
-    // Fetch all disputes matching base filters first.
-    // Search will be applied AFTER enrichment so campaign/influencer fields work too.
     const rows = await Dispute.find(filter)
       .select(
-        "disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy"
+        "disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments evidence comments createdAt updatedAt createdBy"
       )
       .sort({ createdAt: -1 })
       .lean();
 
-    const rowsWithRole = rows.map((r) => ({
-      ...r,
-      raisedByRole: r.createdBy?.role || null,
-      raisedById: r.createdBy?.id || null,
-    }));
+    const enriched = await enrichDisputesForResponse(rows, {
+      viewerRole: "Brand",
+    });
 
-    try {
-      const influencerIds = Array.from(
-        new Set(rowsWithRole.map((r) => r.influencerId).filter(Boolean))
-      ).map(String);
+    const searchTerm = normalizeSearchValue(search);
 
-      const campaignIds = Array.from(
-        new Set(rowsWithRole.map((r) => r.campaignId).filter(Boolean))
-      ).map(String);
-
-      const [influencers, campaigns, modashProfiles] = await Promise.all([
-        influencerIds.length
-          ? Influencer.find({ _id: { $in: influencerIds } })
-            .select("_id name")
-            .lean()
-          : [],
-        campaignIds.length
-          ? Campaign.find({ _id: { $in: campaignIds } })
-            .select("_id campaignTitle")
-            .lean()
-          : [],
-        influencerIds.length
-          ? Modash.find({
-            $or: [
-              { influencerId: { $in: influencerIds } },
-              { influencer: { $in: influencerIds } },
-            ],
-          })
-            .select("influencerId handle username provider updatedAt")
-            .sort({ updatedAt: -1 })
-            .lean()
-          : [],
-      ]);
-
-      const infMap = new Map(
-        (influencers || []).map((i) => [String(i._id), i.name || null])
-      );
-
-      const cmap = new Map(
-        (campaigns || []).map((c) => [String(c._id), c.campaignTitle || null])
-      );
-
-      // keep first/latest handle per influencerId
-      const modashMap = new Map();
-      for (const m of modashProfiles || []) {
-        const key = String(m.influencerId || m.influencer);
-        if (!key) continue;
-        if (!modashMap.has(key)) {
-          modashMap.set(key, {
-            handle: m.handle || m.username || null,
-            provider: m.provider || null,
-          });
-        }
-      }
-
-      const enriched = rowsWithRole.map((r) => {
-        const campaignName = r.campaignId
-          ? cmap.get(String(r.campaignId)) || null
-          : null;
-
-        const influencerName = infMap.get(String(r.influencerId)) || null;
-        const modashMeta = modashMap.get(String(r.influencerId)) || {
-          handle: null,
-          provider: null,
-        };
-
-        const role = r.raisedByRole;
-        let raisedBy = null;
-        let raisedAgainst = null;
-
-        if (role === "Brand") {
-          raisedBy = {
-            role: "Brand",
-            id: r.brandId,
-            name: brand.name || null,
-          };
-          raisedAgainst = {
-            role: "Influencer",
-            id: r.influencerId,
-            name: influencerName,
-            handle: modashMeta.handle,
-            provider: modashMeta.provider,
-          };
-        } else if (role === "Influencer") {
-          raisedBy = {
-            role: "Influencer",
-            id: r.influencerId,
-            name: influencerName,
-            handle: modashMeta.handle,
-            provider: modashMeta.provider,
-          };
-          raisedAgainst = {
-            role: "Brand",
-            id: r.brandId,
-            name: brand.name || null,
-          };
-        }
-
-        const viewerIsRaiser = role === "Brand";
-
-        return {
-          ...r,
-          campaignName,
-          influencerName,
-          influencerHandle: modashMeta.handle,
-          influencerProvider: modashMeta.provider,
-          raisedBy,
-          raisedAgainst,
-          viewerIsRaiser,
-          issueType: Array.isArray(r.issueType) ? r.issueType : [],
-        };
-      });
-
-      const searchTerm = normalizeSearchValue(search);
-
-      const filtered = searchTerm
-        ? enriched.filter((r) => {
+    const filtered = searchTerm
+      ? enriched.filter((r) => {
           const searchableText = [
             r.subject,
             r.description,
+            r.otherIssueDescription,
             r.disputeId,
             r.disputeId ? `#${r.disputeId}` : "",
             r.campaignName,
+            r.brandName,
             r.influencerName,
             r.influencerHandle,
             r.raisedBy?.name,
+            r.raisedBy?.handle,
             r.raisedAgainst?.name,
             r.raisedAgainst?.handle,
             r.status,
-            r.otherIssueDescription,
             ...(Array.isArray(r.issueType) ? r.issueType : []),
           ]
             .filter(Boolean)
@@ -1117,275 +1335,86 @@ exports.brandList = async (req, res) => {
 
           return searchableText.includes(searchTerm);
         })
-        : enriched;
+      : enriched;
 
-      const total = filtered.length;
-      const totalPages = Math.ceil(total / l) || 1;
-      const disputes = filtered.slice((p - 1) * l, p * l);
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / l) || 1;
+    const disputes = filtered.slice((p - 1) * l, p * l);
 
-      return res.status(200).json({
-        page: p,
-        limit: l,
-        total,
-        totalPages,
-        disputes,
-      });
-    } catch (e) {
-      console.error("Error enriching brandList:", e);
-
-      const searchTerm = normalizeSearchValue(search);
-
-      const fallbackFiltered = searchTerm
-        ? rowsWithRole.filter((r) => {
-          const searchableText = [
-            r.subject,
-            r.description,
-            r.disputeId,
-            r.disputeId ? `#${r.disputeId}` : "",
-            ...(Array.isArray(r.issueType) ? r.issueType : []),
-          ]
-            .filter(Boolean)
-            .map((item) => normalizeSearchValue(item))
-            .join(" ");
-
-          return searchableText.includes(searchTerm);
-        })
-        : rowsWithRole;
-
-      const total = fallbackFiltered.length;
-      const totalPages = Math.ceil(total / l) || 1;
-      const disputes = fallbackFiltered.slice((p - 1) * l, p * l);
-
-      return res.status(200).json({
-        page: p,
-        limit: l,
-        total,
-        totalPages,
-        disputes,
-      });
-    }
+    return res.status(200).json({
+      page: p,
+      limit: l,
+      total,
+      totalPages,
+      disputes,
+    });
   } catch (err) {
     console.error("Error in brandList:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.publicGetDisputeById = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!id) {
-      return res.status(400).json({ message: 'Dispute id is required' });
+      return res.status(400).json({ message: "Dispute id is required" });
     }
 
-    const d = await Dispute.findOne({ disputeId: id }).lean();
-    if (!d) {
-      return res.status(404).json({ message: 'Dispute not found' });
+    const dispute = await Dispute.findOne({ disputeId: id }).lean();
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
     }
 
-    try {
-      const [campaign, brand, influencer, modash] = await Promise.all([
-        d.campaignId
-          ? Campaign.findOne({ _id: d.campaignId })
-            .select('_id campaignTitle')
-            .lean()
-          : null,
+    const enrichedDispute = await enrichDisputeForResponse(dispute);
 
-        d.brandId
-          ? Brand.findOne({ _id: d.brandId })
-            .select('_id name')
-            .lean()
-          : null,
-
-        d.influencerId
-          ? Influencer.findOne({ _id: d.influencerId })
-            .select('_id name')
-            .lean()
-          : null,
-
-        d.influencerId
-          ? Modash.findOne({
-            $or: [
-              { influencerId: String(d.influencerId) },
-              { influencer: d.influencerId },
-            ],
-          })
-            .select('influencerId influencer handle username provider updatedAt')
-            .sort({ updatedAt: -1 })
-            .lean()
-          : null,
-      ]);
-
-      d.campaignName = campaign?.campaignTitle || null;
-
-      const brandName = brand?.name || null;
-      const influencerName = influencer?.name || null;
-      const influencerHandle = modash?.handle || modash?.username || null;
-      const influencerProvider = modash?.provider || null;
-      const raisedByRole = d.createdBy?.role || null;
-
-      d.brandName = brandName;
-      d.influencerName = influencerName;
-      d.influencerHandle = influencerHandle;
-      d.influencerProvider = influencerProvider;
-
-      if (raisedByRole === 'Brand') {
-        d.raisedBy = {
-          role: 'Brand',
-          id: d.brandId,
-          name: brandName,
-        };
-        d.raisedAgainst = {
-          role: 'Influencer',
-          id: d.influencerId,
-          name: influencerName,
-          handle: influencerHandle,
-          provider: influencerProvider,
-        };
-      } else if (raisedByRole === 'Influencer') {
-        d.raisedBy = {
-          role: 'Influencer',
-          id: d.influencerId,
-          name: influencerName,
-          handle: influencerHandle,
-          provider: influencerProvider,
-        };
-        d.raisedAgainst = {
-          role: 'Brand',
-          id: d.brandId,
-          name: brandName,
-        };
-      } else {
-        d.raisedBy = null;
-        d.raisedAgainst = null;
-      }
-
-      d.raisedByRole = raisedByRole;
-      d.raisedById = d.createdBy?.id || null;
-      d.viewerIsRaiser = false;
-    } catch (e) {
-      console.error('Error enriching publicGetDisputeById:', e);
-      d.campaignName = d.campaignName || null;
-      d.brandName = d.brandName || null;
-      d.influencerName = d.influencerName || null;
-      d.influencerHandle = d.influencerHandle || null;
-      d.influencerProvider = d.influencerProvider || null;
-    }
-
-    return res.status(200).json({ dispute: d });
+    return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
-    console.error('Error in publicGetDisputeById:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in publicGetDisputeById:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.brandGetById = async (req, res) => {
   try {
     const { id } = req.params;
     const brandId =
       (req.query && req.query.brandId) || (req.body && req.body.brandId);
 
-    if (!id) return res.status(400).json({ message: 'Dispute id is required' });
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
     if (!brandId) {
-      return res.status(400).json({ message: 'brandId is required' });
+      return res.status(400).json({ message: "brandId is required" });
     }
 
-    const brand = await Brand.findOne({ _id: String(brandId) }).lean();
-    if (!brand) return res.status(404).json({ message: 'Brand not found' });
-
-    const d = await Dispute.findOne({ disputeId: id }).lean();
-    if (!d) return res.status(404).json({ message: 'Dispute not found' });
-
-    if (d.brandId !== String(brandId)) {
-      return res.status(403).json({ message: 'Forbidden' });
+    const brand = await Brand.findOne(buildBrandLookup(brandId)).lean();
+    if (!brand) {
+      return res.status(404).json({ message: "Brand not found" });
     }
 
-    try {
-      const [campaign, influencer, modash] = await Promise.all([
-        d.campaignId
-          ? Campaign.findOne({ _id: d.campaignId })
-            .select('_id campaignTitle')
-            .lean()
-          : null,
-
-        d.influencerId
-          ? Influencer.findOne({ _id: d.influencerId })
-            .select('_id name')
-            .lean()
-          : null,
-
-        d.influencerId
-          ? Modash.findOne({
-            $or: [
-              { influencerId: String(d.influencerId) },
-              { influencer: d.influencerId },
-            ],
-          })
-            .select('influencerId influencer handle username provider updatedAt')
-            .sort({ updatedAt: -1 })
-            .lean()
-          : null,
-      ]);
-
-      d.campaignName = campaign?.campaignTitle || null;
-
-      const influencerName = influencer?.name || null;
-      const influencerHandle = modash?.handle || modash?.username || null;
-      const influencerProvider = modash?.provider || null;
-      const raisedByRole = d.createdBy?.role || null;
-
-      d.influencerName = influencerName;
-      d.influencerHandle = influencerHandle;
-      d.influencerProvider = influencerProvider;
-
-      if (raisedByRole === 'Brand') {
-        d.raisedBy = {
-          role: 'Brand',
-          id: d.brandId,
-          name: brand.name || null,
-        };
-        d.raisedAgainst = {
-          role: 'Influencer',
-          id: d.influencerId,
-          name: influencerName,
-          handle: influencerHandle,
-          provider: influencerProvider,
-        };
-      } else if (raisedByRole === 'Influencer') {
-        d.raisedBy = {
-          role: 'Influencer',
-          id: d.influencerId,
-          name: influencerName,
-          handle: influencerHandle,
-          provider: influencerProvider,
-        };
-        d.raisedAgainst = {
-          role: 'Brand',
-          id: d.brandId,
-          name: brand.name || null,
-        };
-      } else {
-        d.raisedBy = null;
-        d.raisedAgainst = null;
-      }
-
-      d.raisedByRole = raisedByRole;
-      d.raisedById = d.createdBy?.id || null;
-      d.viewerIsRaiser = raisedByRole === 'Brand';
-    } catch (e) {
-      console.error('Error enriching brandGetById:', e);
-      d.campaignName = d.campaignName || null;
-      d.influencerName = d.influencerName || null;
-      d.influencerHandle = d.influencerHandle || null;
-      d.influencerProvider = d.influencerProvider || null;
+    const dispute = await Dispute.findOne({ disputeId: id }).lean();
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
     }
 
-    return res.status(200).json({ dispute: d });
+    if (String(dispute.brandId) !== String(brand._id || brandId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const enrichedDispute = await enrichDisputeForResponse(dispute, {
+      viewerRole: "Brand",
+    });
+
+    return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
-    console.error('Error in brandGetById:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in brandGetById:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Brand add comment (multi-image attachments supported)
 exports.brandAddComment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1862,165 +1891,99 @@ exports.influencerList = async (req, res) => {
       limit = 10,
       status,
       search,
-      appliedBy, // "brand" | "influencer" optional
+      appliedBy,
     } = req.body || {};
 
     if (!influencerId) {
-      return res.status(400).json({ message: 'influencerId is required' });
+      return res.status(400).json({ message: "influencerId is required" });
     }
 
-    const influencer = await Influencer.findOne({ _id: String(influencerId) }).lean();
+    const influencer = await Influencer.findOne(
+      buildInfluencerLookupForProfile(influencerId)
+    ).lean();
+
     if (!influencer) {
-      return res.status(404).json({ message: 'Influencer not found' });
+      return res.status(404).json({ message: "Influencer not found" });
     }
 
     const p = Math.max(1, parseInt(page, 10) || 1);
     const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
 
+    const normalizeSearchValue = (value = "") =>
+      String(value).trim().toLowerCase().replace(/^#+/, "");
+
     const filter = {
-      influencerId: String(influencerId),
+      influencerId: String(influencer._id || influencerId),
     };
 
-    // numeric / string status support (0 = all)
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
-    if (normalizedStatus && normalizedStatus !== '__ALL__') {
+    if (normalizedStatus && normalizedStatus !== "__ALL__") {
       filter.status = normalizedStatus;
     }
 
-    // backend search: subject / description / disputeId
-    const searchTerm = typeof search === 'string' ? search.trim() : '';
-    if (searchTerm) {
-      const pattern = escapeRegex(searchTerm);
-      const re = new RegExp(pattern, 'i');
-      filter.$or = [{ subject: re }, { description: re }, { disputeId: re }];
-    }
-
-    // who raised it (direction filter)
-    if (appliedBy && typeof appliedBy === 'string') {
+    if (appliedBy && typeof appliedBy === "string") {
       const role = String(appliedBy).toLowerCase();
-      if (role === 'brand') filter['createdBy.role'] = 'Brand';
-      if (role === 'influencer') filter['createdBy.role'] = 'Influencer';
+      if (role === "brand") filter["createdBy.role"] = "Brand";
+      if (role === "influencer") filter["createdBy.role"] = "Influencer";
     }
 
-    const total = await Dispute.countDocuments(filter);
     const rows = await Dispute.find(filter)
       .select(
-        'disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy'
+        "disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments evidence comments createdAt updatedAt createdBy"
       )
       .sort({ createdAt: -1 })
-      .skip((p - 1) * l)
-      .limit(l)
       .lean();
 
-    // Add quick "who raised it" info
-    const rowsWithRole = rows.map((r) => ({
-      ...r,
-      raisedByRole: r.createdBy?.role || null,
-      raisedById: r.createdBy?.id || null,
-    }));
+    const enriched = await enrichDisputesForResponse(rows, {
+      viewerRole: "Influencer",
+    });
 
-    // Enrich with brand name + campaign name + raisedBy/raisedAgainst
-    try {
-      const brandIds = Array.from(
-        new Set(rowsWithRole.map((r) => r.brandId).filter(Boolean))
-      ).map(String);
+    const searchTerm = normalizeSearchValue(search);
 
-      const campaignIds = Array.from(
-        new Set(rowsWithRole.map((r) => r.campaignId).filter(Boolean))
-      ).map(String);
+    const filtered = searchTerm
+      ? enriched.filter((r) => {
+          const searchableText = [
+            r.subject,
+            r.description,
+            r.otherIssueDescription,
+            r.disputeId,
+            r.disputeId ? `#${r.disputeId}` : "",
+            r.campaignName,
+            r.brandName,
+            r.influencerName,
+            r.influencerHandle,
+            r.raisedBy?.name,
+            r.raisedBy?.handle,
+            r.raisedAgainst?.name,
+            r.raisedAgainst?.handle,
+            r.status,
+            ...(Array.isArray(r.issueType) ? r.issueType : []),
+          ]
+            .filter(Boolean)
+            .map((item) => normalizeSearchValue(item))
+            .join(" ");
 
-      const [brands, campaigns] = await Promise.all([
-        brandIds.length
-          ? Brand.find({ _id: { $in: brandIds } })
-            .select('_id name')
-            .lean()
-          : [],
-        campaignIds.length
-          ? Campaign.find({ _id: { $in: campaignIds } })
-            .select('_id campaignTitle')
-            .lean()
-          : [],
-      ]);
+          return searchableText.includes(searchTerm);
+        })
+      : enriched;
 
-      const brandMap = new Map(
-        (brands || []).map((b) => [String(b._id), b.name])
-      );
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / l) || 1;
+    const disputes = filtered.slice((p - 1) * l, p * l);
 
-      const cmap = new Map(
-        (campaigns || []).map((c) => [String(c._id), c.campaignTitle])
-      );
-
-      const enriched = rowsWithRole.map((r) => {
-        const campaignName = r.campaignId
-          ? cmap.get(String(r.campaignId)) || null
-          : null;
-
-        const role = r.raisedByRole;
-        let raisedBy = null;
-        let raisedAgainst = null;
-
-        if (role === 'Influencer') {
-          // Influencer (viewer) raised it
-          raisedBy = {
-            role: 'Influencer',
-            id: r.influencerId,
-            name: influencer.name || null,
-          };
-          raisedAgainst = {
-            role: 'Brand',
-            id: r.brandId,
-            name: brandMap.get(String(r.brandId)) || null,
-          };
-        } else if (role === 'Brand') {
-          // Brand raised it against this influencer
-          raisedBy = {
-            role: 'Brand',
-            id: r.brandId,
-            name: brandMap.get(String(r.brandId)) || null,
-          };
-          raisedAgainst = {
-            role: 'Influencer',
-            id: r.influencerId,
-            name: influencer.name || null,
-          };
-        }
-
-        const viewerIsRaiser = role === 'Influencer';
-
-        return {
-          ...r,
-          campaignName,
-          raisedBy,
-          raisedAgainst,
-          viewerIsRaiser,
-        };
-      });
-
-      return res.status(200).json({
-        page: p,
-        limit: l,
-        total,
-        totalPages: Math.ceil(total / l),
-        disputes: enriched,
-      });
-    } catch (e) {
-      console.error('Error enriching influencerList:', e);
-      // Fallback: still return raisedByRole info
-      return res.status(200).json({
-        page: p,
-        limit: l,
-        total,
-        totalPages: Math.ceil(total / l),
-        disputes: rowsWithRole,
-      });
-    }
+    return res.status(200).json({
+      page: p,
+      limit: l,
+      total,
+      totalPages,
+      disputes,
+    });
   } catch (err) {
-    console.error('Error in influencerList:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in influencerList:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Influencer get dispute-by-id (must match influencerId)
 exports.influencerGetById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -2028,84 +1991,42 @@ exports.influencerGetById = async (req, res) => {
       (req.query && req.query.influencerId) ||
       (req.body && req.body.influencerId);
 
-    if (!id) return res.status(400).json({ message: 'Dispute id is required' });
+    if (!id) {
+      return res.status(400).json({ message: "Dispute id is required" });
+    }
+
     if (!influencerId) {
-      return res.status(400).json({ message: 'influencerId is required' });
+      return res.status(400).json({ message: "influencerId is required" });
     }
 
-    const influencer = await Influencer.findOne({ _id: String(influencerId) }).lean();
-    if (!influencer) return res.status(404).json({ message: 'Influencer not found' });
+    const influencer = await Influencer.findOne(
+      buildInfluencerLookupForProfile(influencerId)
+    ).lean();
 
-    const d = await Dispute.findOne({ disputeId: id }).lean();
-    if (!d) return res.status(404).json({ message: 'Dispute not found' });
-
-    if (d.influencerId !== String(influencerId)) {
-      return res.status(403).json({ message: 'Forbidden' });
+    if (!influencer) {
+      return res.status(404).json({ message: "Influencer not found" });
     }
 
-    // Enrich with campaign name + who raised against whom
-    try {
-      const [campaign, brand] = await Promise.all([
-        d.campaignId
-          ? Campaign.findOne({ campaignsId: d.campaignId })
-            .select('campaignsId campaignTitle')
-            .lean()
-          : null,
-        d.brandId
-          ? Brand.findOne({ _id: d.brandId })
-            .select('_id name')
-            .lean()
-          : null,
-      ]);
-
-      d.campaignName = campaign?.campaignTitle || null;
-
-      const brandName = brand?.name || null;
-      const raisedByRole = d.createdBy?.role || null;
-
-      if (raisedByRole === 'Influencer') {
-        d.raisedBy = {
-          role: 'Influencer',
-          id: d.influencerId,
-          name: influencer.name || null,
-        };
-        d.raisedAgainst = {
-          role: 'Brand',
-          id: d.brandId,
-          name: brandName,
-        };
-      } else if (raisedByRole === 'Brand') {
-        d.raisedBy = {
-          role: 'Brand',
-          id: d.brandId,
-          name: brandName,
-        };
-        d.raisedAgainst = {
-          role: 'Influencer',
-          id: d.influencerId,
-          name: influencer.name || null,
-        };
-      } else {
-        d.raisedBy = null;
-        d.raisedAgainst = null;
-      }
-
-      d.raisedByRole = raisedByRole;
-      d.raisedById = d.createdBy?.id || null;
-      d.viewerIsRaiser = raisedByRole === 'Influencer';
-    } catch (e) {
-      console.error('Error enriching influencerGetById:', e);
-      d.campaignName = d.campaignName || null;
+    const dispute = await Dispute.findOne({ disputeId: id }).lean();
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
     }
 
-    return res.status(200).json({ dispute: d });
+    if (String(dispute.influencerId) !== String(influencer._id || influencerId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const enrichedDispute = await enrichDisputeForResponse(dispute, {
+      viewerRole: "Influencer",
+    });
+
+    return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
-    console.error('Error in influencerGetById:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in influencerGetById:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Influencer add comment (multi-image attachments supported)
 exports.influencerAddComment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -2481,169 +2402,21 @@ exports.adminGetById = async (req, res) => {
       return res.status(400).json({ message: "Dispute id is required" });
     }
 
-    const d = await Dispute.findOne({ disputeId: id }).lean();
+    const dispute = await Dispute.findOne({ disputeId: id }).lean();
 
-    if (!d) {
+    if (!dispute) {
       return res.status(404).json({ message: "Dispute not found" });
     }
 
-    try {
-      const toObjectIdOrNull = (value) => {
-        if (!value) return null;
-        const str = String(value);
-        return mongoose.Types.ObjectId.isValid(str)
-          ? new mongoose.Types.ObjectId(str)
-          : null;
-      };
+    const enrichedDispute = await enrichDisputeForResponse(dispute);
 
-      const formatSince = (dateValue) => {
-        if (!dateValue) return null;
-        const date = new Date(dateValue);
-        if (Number.isNaN(date.getTime())) return null;
-
-        return date.toLocaleString("en-US", {
-          month: "short",
-          year: "numeric",
-        });
-      };
-
-      const brandObjectId = toObjectIdOrNull(d.brandId);
-      const influencerObjectId = toObjectIdOrNull(d.influencerId);
-      const campaignObjectId = toObjectIdOrNull(d.campaignId);
-
-      const [b, inf, camp, modash] = await Promise.all([
-        brandObjectId
-          ? Brand.findOne({ _id: brandObjectId })
-            .select("_id name email createdAt logoUrl brandLogoUrl profileImage profilePic image avatar avatarUrl")
-            .lean()
-          : null,
-
-        influencerObjectId
-          ? Influencer.findOne({ _id: influencerObjectId })
-            .select("_id name email createdAt")
-            .lean()
-          : null,
-
-        campaignObjectId
-          ? Campaign.findOne({ _id: campaignObjectId })
-            .select("_id campaignTitle")
-            .lean()
-          : null,
-
-        d.influencerId
-          ? Modash.findOne({
-            $or: [
-              { influencerId: String(d.influencerId) },
-              { influencer: influencerObjectId || d.influencerId },
-            ],
-          })
-            .select("picture handle username provider updatedAt")
-            .sort({ updatedAt: -1 })
-            .lean()
-          : null,
-      ]);
-
-      const brandImage =
-        b?.logoUrl ||
-        b?.brandLogoUrl ||
-        b?.profileImage ||
-        b?.profilePic ||
-        b?.avatarUrl ||
-        b?.avatar ||
-        b?.image ||
-        null;
-
-      const influencerImage = modash?.picture || null;
-
-      const brandSince = formatSince(b?.createdAt);
-      const influencerSince = formatSince(inf?.createdAt);
-
-      d.brandName = b?.name || null;
-      d.influencerName = inf?.name || null;
-      d.campaignName = camp?.campaignTitle || null;
-
-      d.brandEmail = b?.email || null;
-      d.influencerEmail = inf?.email || null;
-
-      d.brandLogoUrl = brandImage;
-      d.influencerProfileImage = influencerImage;
-      d.influencerHandle = modash?.handle || modash?.username || null;
-      d.influencerProvider = modash?.provider || null;
-
-      d.brandSince = brandSince;
-      d.influencerSince = influencerSince;
-
-      const raisedByRole = d.createdBy?.role || null;
-
-      if (raisedByRole === "Brand") {
-        d.raisedBy = {
-          role: "Brand",
-          id: d.brandId,
-          name: b?.name || null,
-          email: b?.email || null,
-          logoUrl: brandImage,
-          since: brandSince,
-        };
-
-        d.raisedAgainst = {
-          role: "Influencer",
-          id: d.influencerId,
-          name: inf?.name || null,
-          email: inf?.email || null,
-          logoUrl: influencerImage,
-          since: influencerSince,
-        };
-      } else if (raisedByRole === "Influencer") {
-        d.raisedBy = {
-          role: "Influencer",
-          id: d.influencerId,
-          name: inf?.name || null,
-          email: inf?.email || null,
-          logoUrl: influencerImage,
-          since: influencerSince,
-        };
-
-        d.raisedAgainst = {
-          role: "Brand",
-          id: d.brandId,
-          name: b?.name || null,
-          email: b?.email || null,
-          logoUrl: brandImage,
-          since: brandSince,
-        };
-      } else {
-        d.raisedBy = null;
-        d.raisedAgainst = null;
-      }
-
-      d.raisedByRole = raisedByRole;
-      d.raisedById = d.createdBy?.id || null;
-    } catch (e) {
-      console.error("Error enriching adminGetById:", e);
-
-      d.brandName = null;
-      d.influencerName = null;
-      d.campaignName = null;
-      d.brandEmail = null;
-      d.influencerEmail = null;
-      d.brandLogoUrl = null;
-      d.influencerProfileImage = null;
-      d.influencerHandle = null;
-      d.influencerProvider = null;
-      d.brandSince = null;
-      d.influencerSince = null;
-      d.raisedBy = null;
-      d.raisedAgainst = null;
-      d.raisedByRole = d.createdBy?.role || null;
-      d.raisedById = d.createdBy?.id || null;
-    }
-
-    return res.status(200).json({ dispute: d });
+    return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
     console.error("Error in adminGetById:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 exports.adminCreateDisputeEvidence = async (req, res) => {
   try {
     const { id } = req.params;
@@ -2895,20 +2668,11 @@ exports.adminList = async (req, res) => {
       adminId,
     } = req.body || {};
 
-    console.log("adminList payload:", {
-      page,
-      limit,
-      status,
-      campaignId,
-      brandId,
-      influencerId,
-      search,
-      appliedBy,
-      adminId,
-    });
-
     const p = Math.max(1, parseInt(page, 10) || 1);
     const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+
+    const normalizeSearchValue = (value = "") =>
+      String(value).trim().toLowerCase().replace(/^#+/, "");
 
     const filter = {};
 
@@ -2919,7 +2683,6 @@ exports.adminList = async (req, res) => {
     }
 
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
-
     if (normalizedStatus && normalizedStatus !== "__ALL__") {
       filter.status = normalizedStatus;
     }
@@ -2928,154 +2691,63 @@ exports.adminList = async (req, res) => {
     if (brandId) filter.brandId = String(brandId);
     if (influencerId) filter.influencerId = String(influencerId);
 
-    const searchTerm = typeof search === "string" ? search.trim() : "";
-
-    if (searchTerm) {
-      const pattern = escapeRegex(searchTerm);
-      const re = new RegExp(pattern, "i");
-      filter.$or = [{ subject: re }, { description: re }, { disputeId: re }];
-    }
-
     if (appliedBy && typeof appliedBy === "string") {
       const role = String(appliedBy).toLowerCase();
-
       if (role === "brand") filter["createdBy.role"] = "Brand";
       if (role === "influencer") filter["createdBy.role"] = "Influencer";
     }
 
-    console.log("adminList Mongo filter:", JSON.stringify(filter, null, 2));
-
-    const hiddenTest = trimmedAdminId
-      ? await Dispute.findOne({
-          disputeId: "ds000029",
-        })
-          .select("disputeId status adminNotInterested")
-          .lean()
-      : null;
-
-    if (hiddenTest) {
-      console.log("ds000029 hidden test:", hiddenTest);
-      console.log("Should hide for this admin:", {
-        adminId: trimmedAdminId,
-        adminNotInterested: hiddenTest.adminNotInterested,
-        includesAdminId: Array.isArray(hiddenTest.adminNotInterested)
-          ? hiddenTest.adminNotInterested.includes(trimmedAdminId)
-          : false,
-      });
-    }
-
-    const total = await Dispute.countDocuments(filter);
-
     const rows = await Dispute.find(filter)
       .sort({ createdAt: -1 })
-      .skip((p - 1) * l)
-      .limit(l)
       .lean();
 
-    try {
-      const uniqueBrandIds = [
-        ...new Set(rows.map((r) => r.brandId).filter(Boolean)),
-      ];
+    const enriched = await enrichDisputesForResponse(rows);
 
-      const uniqueInfluencerIds = [
-        ...new Set(rows.map((r) => r.influencerId).filter(Boolean)),
-      ];
+    const searchTerm = normalizeSearchValue(search);
 
-      const uniqueCampaignIds = [
-        ...new Set(rows.map((r) => r.campaignId).filter(Boolean)),
-      ];
+    const filtered = searchTerm
+      ? enriched.filter((r) => {
+          const searchableText = [
+            r.subject,
+            r.description,
+            r.otherIssueDescription,
+            r.disputeId,
+            r.disputeId ? `#${r.disputeId}` : "",
+            r.campaignName,
+            r.brandName,
+            r.influencerName,
+            r.influencerHandle,
+            r.raisedBy?.name,
+            r.raisedBy?.handle,
+            r.raisedAgainst?.name,
+            r.raisedAgainst?.handle,
+            r.status,
+            ...(Array.isArray(r.issueType) ? r.issueType : []),
+          ]
+            .filter(Boolean)
+            .map((item) => normalizeSearchValue(item))
+            .join(" ");
 
-      const toObjectIds = (ids = []) =>
-        ids
-          .map((id) => String(id))
-          .filter((id) => mongoose.Types.ObjectId.isValid(id))
-          .map((id) => new mongoose.Types.ObjectId(id));
+          return searchableText.includes(searchTerm);
+        })
+      : enriched;
 
-      const brandObjectIds = toObjectIds(uniqueBrandIds);
-      const influencerObjectIds = toObjectIds(uniqueInfluencerIds);
-      const campaignObjectIds = toObjectIds(uniqueCampaignIds);
+    const total = filtered.length;
+    const disputes = filtered.slice((p - 1) * l, p * l);
 
-      const [brands, influencers, campaigns] = await Promise.all([
-        brandObjectIds.length
-          ? Brand.find({ _id: { $in: brandObjectIds } })
-              .select("_id name brandName companyName")
-              .lean()
-          : [],
-
-        influencerObjectIds.length
-          ? Influencer.find({ _id: { $in: influencerObjectIds } })
-              .select("_id name fullName influencerName username")
-              .lean()
-          : [],
-
-        campaignObjectIds.length
-          ? Campaign.find({ _id: { $in: campaignObjectIds } })
-              .select("_id campaignTitle title name")
-              .lean()
-          : [],
-      ]);
-
-      const brandMap = new Map(
-        (brands || []).map((b) => [
-          String(b._id),
-          b.name || b.brandName || b.companyName || null,
-        ])
-      );
-
-      const influencerMap = new Map(
-        (influencers || []).map((i) => [
-          String(i._id),
-          i.name || i.fullName || i.influencerName || i.username || null,
-        ])
-      );
-
-      const campaignMap = new Map(
-        (campaigns || []).map((c) => [
-          String(c._id),
-          c.campaignTitle || c.title || c.name || null,
-        ])
-      );
-
-      const enriched = rows.map((r) => {
-        const raisedByRole = r.createdBy?.role || null;
-
-        return {
-          ...r,
-          brandName: brandMap.get(String(r.brandId)) || null,
-          influencerName: influencerMap.get(String(r.influencerId)) || null,
-          campaignName: r.campaignId
-            ? campaignMap.get(String(r.campaignId)) || null
-            : null,
-          raisedByRole,
-          raisedById: r.createdBy?.id || null,
-        };
-      });
-
-      return res.status(200).json({
-        page: p,
-        limit: l,
-        total,
-        totalPages: Math.ceil(total / l),
-        disputes: enriched,
-      });
-    } catch (e) {
-      console.error("Error enriching adminList:", e);
-
-      return res.status(200).json({
-        page: p,
-        limit: l,
-        total,
-        totalPages: Math.ceil(total / l),
-        disputes: rows,
-      });
-    }
+    return res.status(200).json({
+      page: p,
+      limit: l,
+      total,
+      totalPages: Math.ceil(total / l) || 1,
+      disputes,
+    });
   } catch (err) {
     console.error("Error in adminList:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Admin update status
 exports.adminUpdateStatus = async (req, res) => {
   try {
     const { disputeId, status, resolution, adminId } = req.body || {};

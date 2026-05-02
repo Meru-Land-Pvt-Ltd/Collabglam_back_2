@@ -12,7 +12,6 @@ const { startSubscriptionEmailJobs } = require("./jobs/subscriptionEmailJobs");
 
 // sockets
 const sockets = require("./sockets");
-
 // routes
 const influencerRoutes = require("./routes/influencerRoutes");
 const countryRoutes = require("./routes/countryRoutes");

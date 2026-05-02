@@ -3,7 +3,7 @@ const { Types } = require("mongoose");
 const multer = require("multer");
 const OpenAI = require("openai");
 const { DateTime } = require("luxon");
-const { normalizeAndUploadProductImages,uploadMultipleFilesToS3 } = require("../utils/uploadBase64ImagesToS3.js");
+const { normalizeAndUploadProductImages, uploadMultipleFilesToS3 } = require("../utils/uploadBase64ImagesToS3.js");
 
 const Campaign = require("../models/campaign");
 const Brand = require("../models/brand");
@@ -35,6 +35,82 @@ const { HttpStatus } = require("../core/http/HttpStatus.js");
 // ===============================
 // helpers
 // ===============================
+
+const getSafeObjectId = (value) => {
+  const id = String(value || "").trim();
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return null;
+  }
+
+  return new mongoose.Types.ObjectId(id);
+};
+
+const getCampaignIdMatchFilterForDispute = (campaignId) => {
+  const id = String(campaignId || "").trim();
+  const objectId = getSafeObjectId(id);
+
+  const or = [
+    { campaignsId: id },
+    { campaignId: id },
+  ];
+
+  if (objectId) {
+    or.push({ _id: objectId });
+  }
+
+  return { $or: or };
+};
+
+const mapCampaignForDisputeDropdown = (campaign) => {
+  return {
+    _id: String(campaign._id),
+    campaignId: String(campaign._id),
+    campaignsId: campaign.campaignsId ? String(campaign.campaignsId) : undefined,
+
+    campaignTitle: campaign.campaignTitle || campaign.productOrServiceName || "",
+    productOrServiceName: campaign.productOrServiceName || "",
+
+    status: campaign.status,
+    brandId: campaign.brandId ? String(campaign.brandId) : "",
+    brandName: campaign.brandName || "",
+
+    createdAt: campaign.createdAt,
+    updatedAt: campaign.updatedAt,
+    publishedAt: campaign.publishedAt,
+    scheduledAt: campaign.scheduledAt,
+    startAt: campaign.startAt,
+    endAt: campaign.endAt,
+
+    category: campaign.category || null,
+    numberOfInfluencers: campaign.numberOfInfluencers,
+    campaignBudget: campaign.campaignBudget,
+    budget: campaign.budget,
+    applicantCount: campaign.applicantCount,
+
+    platformSelection: campaign.platformSelection || [],
+    productImages: campaign.productImages || [],
+
+    byAi: campaign.byAi,
+    isActive: campaign.isActive,
+    isDraft: campaign.isDraft,
+  };
+};
+
+const buildDisputeCampaignSearchOr = (search) => {
+  const term = String(search || "").trim();
+
+  if (!term) return [];
+
+  return [
+    { campaignTitle: { $regex: term, $options: "i" } },
+    { productOrServiceName: { $regex: term, $options: "i" } },
+    { brandName: { $regex: term, $options: "i" } },
+    { campaignType: { $regex: term, $options: "i" } },
+    { campaignCategory: { $regex: term, $options: "i" } },
+    { campaignSubcategory: { $regex: term, $options: "i" } },
+  ];
+};
 
 const escapeRegex = (s = "") =>
   String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1626,8 +1702,8 @@ exports.createCampaign = async (req, res) => {
       mode === "draft"
         ? "draft"
         : mode === "schedule"
-        ? "scheduled"
-        : "active";
+          ? "scheduled"
+          : "active";
 
     let timing = {};
 
@@ -2162,12 +2238,12 @@ exports.getAllCampaigns = async (req, res) => {
 // ===============================
 exports.getCampaignById = async (req, res) => {
 
-  
+
   try {
-    
+
     const campaignId = clean(req.params.campaignId);
 
-   
+
 
     if (!campaignId || !isOid(campaignId)) {
       return res.status(400).json({ message: "Valid campaignId is required." });
@@ -4500,569 +4576,251 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
 };
 
 exports.getCampaignsByBrandId = async (req, res) => {
-  const requestId = getRequestId(req);
-
   try {
-    const brandId = clean(req.body.brandId);
-    if (!brandId || !isOid(brandId)) {
-      return fail(res, 400, "VALIDATION_ERROR", "Valid brandId is required", requestId);
+    const {
+      brandId,
+      page = 1,
+      limit = 1000,
+      search = "",
+      status = "active",
+    } = req.body || {};
+
+    if (!brandId) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId is required.",
+      });
     }
 
-    const tz = getCampaignTimezone(req.body);
-    const nowUtc = DateTime.utc();
+    const brandObjectId = getSafeObjectId(brandId);
 
-    await Campaign.updateMany(
-      {
-        brandId: toObjectId(brandId),
-        status: "scheduled",
-        scheduledAt: { $lte: nowUtc.toJSDate() },
-      },
-      {
-        $set: {
-          status: "active",
-          isActive: 1,
-          publishedAt: nowUtc.toJSDate(),
-        },
-      }
-    );
-
-    const page = clampInt(req.body.page, 1, 1, 1000000);
-    const limit = clampInt(req.body.limit, 20, 1, 200);
-    const skip = (page - 1) * limit;
-
-    // ---------------- helpers ----------------
-    const escapeRegexLocal = (s = "") =>
-      String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-    const normalizeDateField = (value) => {
-      const raw = clean(value);
-      const allowed = ["createdAt", "updatedAt", "scheduledAt", "startAt", "endAt", "publishedAt"];
-      return allowed.includes(raw) ? raw : "createdAt";
-    };
-
-    const normalizeDatePreset = (value) => {
-      const raw = clean(value).toLowerCase().replace(/\s+/g, "");
-      const map = {
-        today: "today",
-        thisweek: "thisWeek",
-        thismonth: "thisMonth",
-        last7days: "last7days",
-        last7day: "last7days",
-        last15days: "last15days",
-        last15day: "last15days",
-        last30days: "last30days",
-        last30day: "last30days",
-        last90days: "last90days",
-        last90day: "last90days",
-        lastmonth: "lastMonth",
-        lastquarter: "lastQuarter",
-        last365days: "last365days",
-        last365day: "last365days",
-        next7days: "next7days",
-        next7day: "next7days",
-        next15days: "next15days",
-        next15day: "next15days",
-        next30days: "next30days",
-        next30day: "next30days",
-        next90days: "next90days",
-        next90day: "next90days",
-        launchingsoon: "launchingSoon",
-        launchsoon: "launchingSoon",
-      };
-      if (!raw || raw === "all" || raw === "alldates") return "";
-      return map[raw] || "";
-    };
-
-    const parseClientDateToUtc = (raw, timezone, boundary = "start") => {
-      const s = clean(raw);
-      if (!s) return null;
-
-      // dd/mm/yyyy
-      const ddmmyyyy = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-      const m = s.match(ddmmyyyy);
-      if (m) {
-        const [, dd, mm, yyyy] = m;
-        const dt = DateTime.fromObject(
-          {
-            year: Number(yyyy),
-            month: Number(mm),
-            day: Number(dd),
-            hour: boundary === "end" ? 23 : 0,
-            minute: boundary === "end" ? 59 : 0,
-            second: boundary === "end" ? 59 : 0,
-            millisecond: boundary === "end" ? 999 : 0,
-          },
-          { zone: timezone }
-        );
-        return dt.isValid ? dt.toUTC().toJSDate() : null;
-      }
-
-      // yyyy-mm-dd
-      const isoDate = /^\d{4}-\d{2}-\d{2}$/;
-      if (isoDate.test(s)) {
-        const dt = DateTime.fromISO(s, { zone: timezone }).set({
-          hour: boundary === "end" ? 23 : 0,
-          minute: boundary === "end" ? 59 : 0,
-          second: boundary === "end" ? 59 : 0,
-          millisecond: boundary === "end" ? 999 : 0,
-        });
-        return dt.isValid ? dt.toUTC().toJSDate() : null;
-      }
-
-      // ISO datetime / absolute
-      const abs = toUtcFromLocalOrAbsolute(s, timezone);
-      if (!abs) return null;
-
-      if (s.length <= 10) {
-        const dt = DateTime.fromJSDate(abs, { zone: timezone }).set({
-          hour: boundary === "end" ? 23 : 0,
-          minute: boundary === "end" ? 59 : 0,
-          second: boundary === "end" ? 59 : 0,
-          millisecond: boundary === "end" ? 999 : 0,
-        });
-        return dt.isValid ? dt.toUTC().toJSDate() : null;
-      }
-
-      return abs;
-    };
-
-    const buildUtcRangeFromPreset = (preset, timezone) => {
-      const nowLocal = DateTime.now().setZone(timezone || "UTC");
-      const startOfToday = nowLocal.startOf("day");
-      const endOfToday = nowLocal.endOf("day");
-
-      const lastNDays = (n) => ({
-        from: nowLocal.minus({ days: n - 1 }).startOf("day").toUTC().toJSDate(),
-        to: endOfToday.toUTC().toJSDate(),
+    if (!brandObjectId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid brandId.",
       });
+    }
 
-      const nextNDays = (n) => ({
-        from: startOfToday.toUTC().toJSDate(),
-        to: nowLocal.plus({ days: n - 1 }).endOf("day").toUTC().toJSDate(),
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
+    const safeLimit = Math.max(parseInt(limit, 10) || 1000, 1);
+    const skip = (safePage - 1) * safeLimit;
+
+    const andFilters = [
+      { brandId: brandObjectId },
+      { isActive: 1 },
+      { isDraft: { $ne: 1 } },
+    ];
+
+    if (status) {
+      andFilters.push({
+        status: String(status).trim().toLowerCase(),
       });
+    }
 
-      if (preset === "today") {
-        return {
-          from: startOfToday.toUTC().toJSDate(),
-          to: endOfToday.toUTC().toJSDate(),
-        };
-      }
+    const searchOr = buildDisputeCampaignSearchOr(search);
 
-      if (preset === "thisWeek") {
-        return {
-          from: nowLocal.startOf("week").toUTC().toJSDate(),
-          to: nowLocal.endOf("week").toUTC().toJSDate(),
-        };
-      }
+    if (searchOr.length) {
+      andFilters.push({ $or: searchOr });
+    }
 
-      if (preset === "thisMonth") {
-        return {
-          from: nowLocal.startOf("month").toUTC().toJSDate(),
-          to: nowLocal.endOf("month").toUTC().toJSDate(),
-        };
-      }
-
-      if (preset === "last7days") return lastNDays(7);
-      if (preset === "last15days") return lastNDays(15);
-      if (preset === "last30days") return lastNDays(30);
-      if (preset === "last90days") return lastNDays(90);
-      if (preset === "last365days") return lastNDays(365);
-
-      if (preset === "lastMonth") {
-        const m = nowLocal.minus({ months: 1 });
-        return {
-          from: m.startOf("month").toUTC().toJSDate(),
-          to: m.endOf("month").toUTC().toJSDate(),
-        };
-      }
-
-      if (preset === "lastQuarter") {
-        const q = Math.ceil(nowLocal.month / 3);
-        const prevQ = q === 1 ? 4 : q - 1;
-        const year = q === 1 ? nowLocal.year - 1 : nowLocal.year;
-        const startMonth = (prevQ - 1) * 3 + 1;
-
-        const start = DateTime.fromObject(
-          { year, month: startMonth, day: 1 },
-          { zone: timezone }
-        ).startOf("day");
-
-        const end = start.plus({ months: 3 }).minus({ days: 1 }).endOf("day");
-
-        return { from: start.toUTC().toJSDate(), to: end.toUTC().toJSDate() };
-      }
-
-      if (preset === "next7days") return nextNDays(7);
-      if (preset === "next15days") return nextNDays(15);
-      if (preset === "next30days") return nextNDays(30);
-      if (preset === "next90days") return nextNDays(90);
-
-      return null;
-    };
-
-    const buildSort = (sortByRaw, sortOrderRaw, fallback = { updatedAt: -1 }) => {
-      const allowed = [
-        "createdAt",
-        "updatedAt",
-        "startAt",
-        "endAt",
-        "publishedAt",
-        "campaignTitle",
-        "campaignBudget",
-        "numberOfInfluencers",
-        "status",
-      ];
-
-      const sortBy = clean(sortByRaw);
-      const sortOrder = String(sortOrderRaw || "desc").toLowerCase() === "asc" ? 1 : -1;
-
-      if (!allowed.includes(sortBy)) return fallback;
-      return { [sortBy]: sortOrder };
-    };
-
-    const timeRemaining = (targetDate, now, expiredText = "Expired") => {
-      if (!targetDate) return { unit: null, value: null, text: null };
-
-      const target = DateTime.fromJSDate(new Date(targetDate)).toUTC();
-      if (!target.isValid) return { unit: null, value: null, text: null };
-
-      const diffMs = target.toMillis() - now.toMillis();
-      if (diffMs <= 0) {
-        return { unit: "expired", value: 0, text: expiredText };
-      }
-
-      const totalSeconds = Math.floor(diffMs / 1000);
-      const totalMinutes = Math.floor(diffMs / (1000 * 60));
-      const totalHours = Math.floor(diffMs / (1000 * 60 * 60));
-      const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-      if (totalSeconds < 60) {
-        return {
-          unit: "seconds",
-          value: totalSeconds,
-          text: `${totalSeconds}s left`,
-        };
-      }
-
-      if (totalMinutes < 60) {
-        const seconds = totalSeconds % 60;
-        return {
-          unit: "minutes",
-          value: totalMinutes,
-          text: seconds > 0 ? `${totalMinutes}m ${seconds}s left` : `${totalMinutes}m left`,
-        };
-      }
-
-      if (totalHours < 24) {
-        const minutes = totalMinutes % 60;
-        return {
-          unit: "hours",
-          value: totalHours,
-          text: minutes > 0 ? `${totalHours}h ${minutes}m left` : `${totalHours}h left`,
-        };
-      }
-
-      return {
-        unit: "days",
-        value: totalDays,
-        text: `${totalDays}d left`,
-      };
-    };
-
-    // ---------------- Build filter ----------------
     const filter = {
-      brandId: toObjectId(brandId),
+      $and: andFilters,
     };
 
-    // search
-    const search = clean(req.body.search);
-    if (search) {
-      filter.$or = buildSearchOr(search);
-    }
-
-    // byAi
-    if (req.body.byAi === 0 || req.body.byAi === 1 || req.body.byAi === "0" || req.body.byAi === "1") {
-      filter.byAi = Number(req.body.byAi);
-    }
-
-    // status
-    if (clean(req.body.status)) {
-      filter.status = pickStatus(req.body.status);
-    }
-
-    // campaignType
-    if (clean(req.body.campaignType)) {
-      filter.campaignType = {
-        $regex: new RegExp(escapeRegexLocal(clean(req.body.campaignType)), "i"),
-      };
-    }
-
-    // categoryIds / categoryId
-    const catIds = normalizeObjectIdArray(req.body.categoryIds ?? req.body.categoryId);
-    if (catIds.length) {
-      filter.categoryId = { $in: catIds.map((id) => toObjectId(id)) };
-    }
-
-    // subcategoryIds / subcategoryId
-    const subIds = normalizeObjectIdArray(req.body.subcategoryIds ?? req.body.subcategoryId);
-    if (subIds.length) {
-      filter.subcategoryIds = { $in: subIds.map((id) => toObjectId(id)) };
-    }
-
-    // date filters
-    const dateField = normalizeDateField(req.body.dateField);
-    const preset = normalizeDatePreset(req.body.datePreset);
-
-    if (preset === "launchingSoon") {
-      filter.status = "scheduled";
-      filter.scheduledAt = {
-        $exists: true,
-        $ne: null,
-        $gte: DateTime.utc().toJSDate(),
-      };
-    } else if (preset) {
-      const range = buildUtcRangeFromPreset(preset, tz);
-      if (range) {
-        filter[dateField] = { $gte: range.from, $lte: range.to };
-      }
-    } else {
-      const hasFrom = !!clean(req.body.dateFrom);
-      const hasTo = !!clean(req.body.dateTo);
-
-      const fromUtc = hasFrom ? parseClientDateToUtc(req.body.dateFrom, tz, "start") : null;
-      const toUtc = hasTo ? parseClientDateToUtc(req.body.dateTo, tz, "end") : null;
-
-      if (hasFrom && !fromUtc) {
-        return failField(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "dateFrom",
-          requestId,
-          "Invalid dateFrom. Use dd/mm/yyyy, yyyy-mm-dd, or ISO."
-        );
-      }
-
-      if (hasTo && !toUtc) {
-        return failField(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "dateTo",
-          requestId,
-          "Invalid dateTo. Use dd/mm/yyyy, yyyy-mm-dd, or ISO."
-        );
-      }
-
-      if (fromUtc || toUtc) {
-        if (fromUtc && toUtc && fromUtc.getTime() > toUtc.getTime()) {
-          return fail(res, 400, "VALIDATION_ERROR", "dateFrom must be <= dateTo", requestId);
-        }
-
-        filter[dateField] = {};
-        if (fromUtc) filter[dateField].$gte = fromUtc;
-        if (toUtc) filter[dateField].$lte = toUtc;
-      }
-    }
-
-    const sort = buildSort(req.body.sortBy, req.body.sortOrder, { updatedAt: -1 });
-
-    // ---------------- Fetch campaigns ----------------
     const [items, total] = await Promise.all([
       Campaign.find(filter)
-        .sort(sort)
+        .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit)
-        .select(
-          [
-            "_id",
-            "campaignTitle",
-            "status",
-            "categoryId",
-            "subcategoryIds",
-            "numberOfInfluencers",
-            "platformSelection",
-            "productImages",
-            "createdAt",
-            "updatedAt",
-            "scheduledAt",
-            "startAt",
-            "endAt",
-            "publishedAt",
-            "campaignBudget",
-            "byAi",
-            "isActive",
-            "isDraft",
-            "createdBy",
-          ].join(" ")
-        )
+        .limit(safeLimit)
         .lean(),
+
       Campaign.countDocuments(filter),
     ]);
 
-    // ---------------- Category map ----------------
-    const categoryIds = [
-      ...new Set(
-        items
-          .map((x) => String(x.categoryId || ""))
-          .filter((x) => isOid(x))
-      ),
-    ];
-
-    const cats = categoryIds.length
-      ? await Category.find({
-        _id: { $in: categoryIds.map((id) => toObjectId(id)) },
-      })
-        .select("_id name")
-        .lean()
-      : [];
-
-    const catMap = new Map(cats.map((c) => [String(c._id), c]));
-
-    // ---------------- Contract stats ----------------
-    const campaignIds = items.map((x) => String(x._id)).filter(Boolean);
-
-    const contractStatsRaw = campaignIds.length
-      ? await Contract.aggregate([
-        {
-          $match: {
-            brandId: { $in: [toObjectId(brandId), brandId] },
-            campaignId: { $in: campaignIds },
-          },
-        },
-        {
-          $group: {
-            _id: "$campaignId",
-            contractsCount: { $sum: 1 },
-            applicantCount: { $sum: 1 },
-            acceptedCount: {
-              $sum: {
-                $cond: [{ $eq: ["$isAccepted", 1] }, 1, 0],
-              },
-            },
-            assignedCount: {
-              $sum: {
-                $cond: [{ $eq: ["$isAssigned", 1] }, 1, 0],
-              },
-            },
-          },
-        },
-      ])
-      : [];
-
-    const contractMap = new Map(
-      contractStatsRaw.map((d) => [
-        String(d._id),
-        {
-          contractsCount: Number(d.contractsCount || 0),
-          applicantCount: Number(d.applicantCount || 0),
-          acceptedCount: Number(d.acceptedCount || 0),
-          assignedCount: Number(d.assignedCount || 0),
-        },
-      ])
-    );
-
-    // ---------------- Build response ----------------
-    const out = items
-      .map((c) => {
-        const cid = String(c._id);
-        const cat = isOid(String(c.categoryId || "")) ? catMap.get(String(c.categoryId)) : null;
-        const contractStats = contractMap.get(cid) || {
-          contractsCount: 0,
-          applicantCount: 0,
-          acceptedCount: 0,
-          assignedCount: 0,
-        };
-
-        const expireIn = timeRemaining(c.endAt || null, nowUtc, "Expired");
-        const rawScheduleIn =
-          c.status === "scheduled"
-            ? timeRemaining(c.scheduledAt || null, nowUtc, "Expired")
-            : { unit: null, value: null, text: null };
-
-        const scheduledJustExpired =
-          c.status === "scheduled" &&
-          rawScheduleIn &&
-          rawScheduleIn.unit === "expired" &&
-          Number(rawScheduleIn.value) === 0;
-
-        const effectiveStatus = scheduledJustExpired ? "active" : c.status;
-
-        const scheduleIn = scheduledJustExpired
-          ? { unit: null, value: null, text: null }
-          : rawScheduleIn;
-
-        const startIn = scheduledJustExpired
-          ? { unit: null, value: null, text: null }
-          : timeRemaining(c.startAt || null, nowUtc, "Started");
-
-        return {
-          campaignId: cid,
-          campaignTitle: clean(c.campaignTitle),
-          status: effectiveStatus,
-
-          createdAt: c.createdAt ?? null,
-          updatedAt: c.updatedAt ?? null,
-          publishedAt: scheduledJustExpired
-            ? (c.scheduledAt ?? c.publishedAt ?? null)
-            : (c.publishedAt ?? null),
-          scheduledAt: c.scheduledAt ?? null,
-          startAt: c.startAt ?? null,
-          endAt: c.endAt ?? null,
-          createdBy: c.createdBy ?? null,
-
-          category: cat
-            ? { id: String(cat._id), name: String(cat.name || "") }
-            : null,
-
-          numberOfInfluencers:
-            typeof c.numberOfInfluencers === "number" ? c.numberOfInfluencers : null,
-
-          campaignBudget:
-            typeof c.campaignBudget === "number" ? c.campaignBudget : 0,
-
-          applicantCount: contractStats.applicantCount,
-          acceptedContracts: contractStats.acceptedCount,
-          assignedContracts: contractStats.assignedCount,
-
-          expireIn,
-          scheduleIn,
-          startIn,
-
-          platformSelection: Array.isArray(c.platformSelection) ? c.platformSelection : [],
-          productImages: Array.isArray(c.productImages) ? c.productImages : [],
-
-          byAi: Number(c.byAi || 0),
-          isActive: scheduledJustExpired ? 1 : Number(c.isActive || 0),
-          isDraft: Number(c.isDraft || 0),
-        };
-      })
-      .filter((item) => {
-        const requestedStatus = clean(req.body.status);
-        if (!requestedStatus) return true;
-        return String(item.status) === requestedStatus;
-      });
-
-    return ApiResponse.sendOk(
-      res,
-      200,
-      {
-        items: out,
+    return res.status(200).json({
+      success: true,
+      data: {
+        items: items.map(mapCampaignForDisputeDropdown),
         meta: {
           total,
-          page,
-          limit,
-          totalPages: Math.max(1, Math.ceil(total / limit)),
+          page: safePage,
+          limit: safeLimit,
+          totalPages: Math.ceil(total / safeLimit),
         },
       },
-      requestId
-    );
-  } catch (err) {
-    return sendControllerError(res, requestId, err);
+    });
+  } catch (error) {
+    console.error("getCampaignsByBrandId error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+      error: error.message,
+    });
   }
 };
 
+exports.getCampaignsByInfluencerId = async (req, res) => {
+  try {
+    const {
+      influencerId,
+      page = 1,
+      limit = 1000,
+      search = "",
+      status = "active",
+    } = req.body || {};
 
+    if (!influencerId) {
+      return res.status(400).json({
+        success: false,
+        message: "influencerId is required.",
+      });
+    }
+
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
+    const safeLimit = Math.max(parseInt(limit, 10) || 1000, 1);
+    const skip = (safePage - 1) * safeLimit;
+
+    const influencerIdString = String(influencerId).trim();
+    const influencerObjectId = getSafeObjectId(influencerIdString);
+
+    const influencerLookup = influencerObjectId
+      ? {
+        $or: [
+          { _id: influencerObjectId },
+          { influencerId: influencerIdString },
+          { email: influencerIdString },
+        ],
+      }
+      : {
+        $or: [
+          { influencerId: influencerIdString },
+          { email: influencerIdString },
+        ],
+      };
+
+    const influencer = await Influencer.findOne(
+      influencerLookup,
+      "_id influencerId email name fullName handle"
+    ).lean();
+
+    const possibleInfluencerIds = [
+      influencerIdString,
+      influencer?._id ? String(influencer._id) : "",
+      influencer?.influencerId ? String(influencer.influencerId) : "",
+      influencer?.email ? String(influencer.email) : "",
+    ].filter(Boolean);
+
+    const possibleInfluencerObjectIds = possibleInfluencerIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const appliedDocs = await ApplyCampaign.find(
+      {
+        "applicants.influencerId": { $in: possibleInfluencerIds },
+      },
+      "campaignId applicants"
+    ).lean();
+
+    const contractDocs = await Contract.find(
+      {
+        $or: [
+          { influencerId: { $in: possibleInfluencerIds } },
+          { influencerId: { $in: possibleInfluencerObjectIds } },
+          { "influencer._id": { $in: possibleInfluencerObjectIds } },
+          { "influencer.influencerId": { $in: possibleInfluencerIds } },
+        ],
+      },
+      "campaignId"
+    ).lean();
+
+    const campaignIds = [
+      ...new Set(
+        [...appliedDocs, ...contractDocs]
+          .map((doc) => String(doc.campaignId || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const campaignObjectIds = campaignIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    if (!campaignIds.length && !campaignObjectIds.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          items: [],
+          meta: {
+            total: 0,
+            page: safePage,
+            limit: safeLimit,
+            totalPages: 0,
+          },
+        },
+      });
+    }
+
+    const andFilters = [
+      {
+        $or: [
+          { _id: { $in: campaignObjectIds } },
+          { campaignsId: { $in: campaignIds } },
+          { campaignId: { $in: campaignIds } },
+        ],
+      },
+      { isActive: 1 },
+      { isDraft: { $ne: 1 } },
+    ];
+
+    if (status) {
+      andFilters.push({
+        status: String(status).trim().toLowerCase(),
+      });
+    }
+
+    const searchOr = buildDisputeCampaignSearchOr(search);
+
+    if (searchOr.length) {
+      andFilters.push({ $or: searchOr });
+    }
+
+    const filter = {
+      $and: andFilters,
+    };
+
+    const [items, total] = await Promise.all([
+      Campaign.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+
+      Campaign.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        items: items.map(mapCampaignForDisputeDropdown),
+        meta: {
+          total,
+          page: safePage,
+          limit: safeLimit,
+          totalPages: Math.ceil(total / safeLimit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("getCampaignsByInfluencerId error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+      error: error.message,
+    });
+  }
+};
 //edit draft campaign - only allows updating certain fields, and only if campaign is still in draft mode
 
 exports.editDraftCampaign = async (req, res) => {
@@ -6090,57 +5848,226 @@ exports.getPublicCampaignByToken = async (req, res) => {
 
 exports.getBrandListByCampaignId = async (req, res) => {
   try {
-    const campaignId = String(
-      req.query.campaignId || req.body?.campaignId || req.params?.campaignId || ""
-    ).trim();
+    const { campaignId, influencerId } = req.body || {};
 
     if (!campaignId) {
-      return res.status(400).json({ message: "campaignId is required" });
+      return res.status(400).json({
+        success: false,
+        message: "campaignId is required.",
+      });
     }
 
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(campaignId);
-
-    const campaignFilter = isValidObjectId
-      ? { _id: new mongoose.Types.ObjectId(campaignId) }
-      : { campaignsId: campaignId }; // optional fallback if you also use campaignsId
-
-    const campaign = await Campaign.findOne(campaignFilter)
-      .select("brandId")
-      .populate({
-        path: "brandId",
-        select: "brandName name email industry companySize profilePic proxyEmail createdAt updatedAt",
-      })
-      .lean();
+    const campaign = await Campaign.findOne(
+      getCampaignIdMatchFilterForDispute(campaignId)
+    ).lean();
 
     if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found.",
+      });
     }
 
-    if (!campaign.brandId) {
-      return res.status(404).json({ message: "Brand not found for this campaign" });
-    }
+    const brandIdString = String(campaign.brandId || "").trim();
+    const brandObjectId = getSafeObjectId(brandIdString);
 
-    const brand = campaign.brandId;
+    const brandQuery = brandObjectId
+      ? {
+        $or: [
+          { _id: brandObjectId },
+          { brandId: brandIdString },
+        ],
+      }
+      : {
+        brandId: brandIdString,
+      };
+
+    const brand = await Brand.findOne(brandQuery).lean();
 
     return res.status(200).json({
+      success: true,
       message: "Brand fetched successfully",
       brand: {
-        _id: brand._id,
-        brandId: String(brand._id),
-        brandName: brand.brandName || "",
-        name: brand.name || "",
-        email: brand.email || "",
-        proxyEmail: brand.proxyEmail || "",
-        industry: brand.industry || "",
-        companySize: brand.companySize || "",
-        profilePic: brand.profilePic || "",
-        createdAt: brand.createdAt || null,
-        updatedAt: brand.updatedAt || null,
+        _id: brand?._id ? String(brand._id) : brandIdString,
+        brandId: brand?._id ? String(brand._id) : brandIdString,
+        brandName:
+          brand?.brandName ||
+          brand?.name ||
+          campaign.brandName ||
+          "Brand",
+        name:
+          brand?.name ||
+          brand?.brandName ||
+          campaign.brandName ||
+          "Brand",
+        email: brand?.email || "",
+        proxyEmail: brand?.proxyEmail || "",
+        industry: brand?.industry || "",
+        companySize: brand?.companySize || "",
+        profilePic: brand?.profilePic || "",
+        createdAt: brand?.createdAt,
+        updatedAt: brand?.updatedAt,
       },
     });
   } catch (error) {
     console.error("getBrandListByCampaignId error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+      error: error.message,
+    });
+  }
+};
+
+exports.getInfluencerListByCampaignId = async (req, res) => {
+  try {
+    const { campaignId, brandId } = req.body || {};
+
+    if (!campaignId) {
+      return res.status(400).json({
+        success: false,
+        message: "campaignId is required.",
+      });
+    }
+
+    const campaign = await Campaign.findOne(
+      getCampaignIdMatchFilterForDispute(campaignId)
+    ).lean();
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found.",
+      });
+    }
+
+    if (brandId && String(campaign.brandId) !== String(brandId)) {
+      return res.status(403).json({
+        success: false,
+        message: "This campaign does not belong to this brand.",
+      });
+    }
+
+    const campaignIdValues = [
+      String(campaignId || "").trim(),
+      String(campaign._id),
+      campaign.campaignsId ? String(campaign.campaignsId) : "",
+    ].filter(Boolean);
+
+    const appliedDocs = await ApplyCampaign.find(
+      {
+        campaignId: { $in: campaignIdValues },
+      },
+      "applicants"
+    ).lean();
+
+    const influencerMap = new Map();
+
+    for (const doc of appliedDocs) {
+      for (const applicant of doc.applicants || []) {
+        const id = String(applicant.influencerId || "").trim();
+
+        if (!id) continue;
+
+        influencerMap.set(id, {
+          influencerId: id,
+          name:
+            applicant.name ||
+            applicant.fullName ||
+            applicant.email ||
+            id,
+          handle: applicant.handle || null,
+          status: applicant.status || "",
+        });
+      }
+    }
+
+    const contractDocs = await Contract.find(
+      {
+        campaignId: { $in: campaignIdValues },
+      },
+      "influencerId influencer influencerName name handle status"
+    ).lean();
+
+    for (const contract of contractDocs) {
+      const id = String(
+        contract.influencerId ||
+          contract.influencer?._id ||
+          contract.influencer?.influencerId ||
+          ""
+      ).trim();
+
+      if (!id) continue;
+
+      influencerMap.set(id, {
+        influencerId: id,
+        name:
+          contract.influencerName ||
+          contract.name ||
+          contract.influencer?.name ||
+          contract.influencer?.fullName ||
+          id,
+        handle: contract.handle || contract.influencer?.handle || null,
+        status: contract.status || "",
+      });
+    }
+
+    const influencerIds = Array.from(influencerMap.keys());
+
+    const influencerObjectIds = influencerIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const influencerDocs = await Influencer.find(
+      {
+        $or: [
+          { influencerId: { $in: influencerIds } },
+          { email: { $in: influencerIds } },
+          { _id: { $in: influencerObjectIds } },
+        ],
+      },
+      "_id influencerId name fullName email handle"
+    ).lean();
+
+    for (const influencer of influencerDocs) {
+      const keys = [
+        influencer._id ? String(influencer._id) : "",
+        influencer.influencerId ? String(influencer.influencerId) : "",
+        influencer.email ? String(influencer.email) : "",
+      ].filter(Boolean);
+
+      for (const key of keys) {
+        if (!influencerMap.has(key)) continue;
+
+        influencerMap.set(key, {
+          influencerId: String(influencer.influencerId || influencer._id),
+          name:
+            influencer.name ||
+            influencer.fullName ||
+            influencer.email ||
+            String(influencer.influencerId || influencer._id),
+          handle: influencer.handle || null,
+          email: influencer.email || "",
+          _id: String(influencer._id),
+          status: influencerMap.get(key)?.status || "",
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Influencers fetched successfully",
+      influencers: Array.from(influencerMap.values()),
+    });
+  } catch (error) {
+    console.error("getInfluencerListByCampaignId error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+      error: error.message,
+    });
   }
 };
 
