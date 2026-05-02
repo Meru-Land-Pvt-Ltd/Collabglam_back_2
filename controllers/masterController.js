@@ -3216,3 +3216,87 @@ exports.ListBrand = async (req, res) => {
     });
   }
 };
+
+
+// ======================
+// Update Employee Password
+// ======================
+exports.updateEmployeePassword = async (req, res) => {
+  try {
+    const actor = req.admin;
+
+    if (!actor?.adminId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const employeeId = clean(req.body?.employeeId);
+    const updatedPassword = clean(req.body?.updatedPassword);
+
+    if (!employeeId || !updatedPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "employeeId and updatedPassword are required",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(employeeId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid employeeId",
+      });
+    }
+
+    if (updatedPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    const employee = await AdminModel.findById(employeeId).select("+passwordHash");
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    const allowed = await canManageTarget(
+      { ...actor, _id: actor._id || actor.adminId },
+      employee._id
+    );
+
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to update this employee password",
+      });
+    }
+
+    employee.passwordHash = await bcrypt.hash(updatedPassword, 10);
+
+    // Optional: make account active after password update
+    if (employee.status === "pending") {
+      employee.status = "active";
+    }
+
+    employee.inviteTokenHash = undefined;
+    employee.inviteExpiresAt = undefined;
+
+    await employee.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee password updated successfully",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Internal error",
+    });
+  }
+};

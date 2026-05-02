@@ -4277,3 +4277,200 @@ exports.getBrandAssignedPlanHistoryList = async (req, res) => {
     });
   }
 };
+
+
+exports.adminEditCampaign = async (req, res) => {
+  try {
+    const campaignId = String(
+      req.body?.campaignId || req.body?.id || req.body?._id || ""
+    ).trim();
+
+    const brandId = String(req.body?.brandId || "").trim();
+
+    if (!campaignId) {
+      return res.status(400).json({
+        success: false,
+        message: "campaignId is required",
+      });
+    }
+
+    if (!brandId) {
+      return res.status(400).json({
+        success: false,
+        message: "brandId is required",
+      });
+    }
+
+    const campaignFilter = {
+      $or: [{ campaignsId: campaignId }],
+    };
+
+    if (mongoose.Types.ObjectId.isValid(campaignId)) {
+      campaignFilter.$or.push({
+        _id: new mongoose.Types.ObjectId(campaignId),
+      });
+    }
+
+    const campaign = await Campaign.findOne(campaignFilter);
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: "Campaign not found",
+      });
+    }
+
+    if (String(campaign.brandId) !== String(brandId)) {
+      return res.status(400).json({
+        success: false,
+        message: "This campaign does not belong to the provided brandId",
+      });
+    }
+
+    const set = {};
+
+    const assignIfProvided = (field, value) => {
+      if (value !== undefined) {
+        set[field] = value;
+      }
+    };
+
+    assignIfProvided("campaignTitle", req.body?.campaignTitle);
+    assignIfProvided("description", req.body?.description);
+    assignIfProvided("campaignType", req.body?.campaignType);
+    assignIfProvided("categoryId", req.body?.categoryId);
+    assignIfProvided("subcategoryIds", req.body?.subcategoryIds);
+    assignIfProvided("productLink", req.body?.productLink);
+    assignIfProvided("productImages", req.body?.productImages);
+    assignIfProvided("campaignGoals", req.body?.campaignGoals);
+    assignIfProvided("influencerTierIds", req.body?.influencerTierIds);
+    assignIfProvided("contentFormats", req.body?.contentFormats);
+    assignIfProvided("contentLanguageIds", req.body?.contentLanguageIds);
+    assignIfProvided("platformSelection", req.body?.platformSelection);
+    assignIfProvided("targetCountryIds", req.body?.targetCountryIds);
+    assignIfProvided("targetAgeRanges", req.body?.targetAgeRanges);
+    assignIfProvided("preferredHashtags", req.body?.preferredHashtags);
+    assignIfProvided("paymentType", req.body?.paymentType);
+    assignIfProvided("additionalNotes", req.body?.additionalNotes);
+
+    if (req.body?.numberOfInfluencers !== undefined) {
+      set.numberOfInfluencers = Number(req.body.numberOfInfluencers || 0);
+    }
+
+    if (req.body?.minFollowers !== undefined) {
+      set.minFollowers = Number(req.body.minFollowers || 0);
+    }
+
+    if (req.body?.maxFollowers !== undefined) {
+      set.maxFollowers = Number(req.body.maxFollowers || 0);
+    }
+
+    if (req.body?.campaignBudget !== undefined) {
+      const campaignBudget = Number(req.body.campaignBudget || 0);
+      set.campaignBudget = campaignBudget;
+      set.budget = campaignBudget;
+    }
+
+    if (req.body?.budget !== undefined && req.body?.campaignBudget === undefined) {
+      const budget = Number(req.body.budget || 0);
+      set.budget = budget;
+      set.campaignBudget = budget;
+    }
+
+    if (req.body?.startAt !== undefined) {
+      set.startAt = req.body.startAt || null;
+      set["timeline.startDate"] = req.body.startAt || null;
+    }
+
+    if (req.body?.endAt !== undefined) {
+      set.endAt = req.body.endAt || null;
+      set["timeline.endDate"] = req.body.endAt || null;
+    }
+
+    /*
+      Status is optional.
+      Admin can edit any campaign regardless of current status.
+      Only update status if frontend sends status.
+    */
+    if (req.body?.status !== undefined) {
+      const status = String(req.body.status || "").trim().toLowerCase();
+
+      set.status = status;
+      set.campaignStatus = status;
+
+      if (status === "active") {
+        set.isActive = 1;
+        set.isDraft = 0;
+      }
+
+      if (status === "paused") {
+        set.isActive = 0;
+        set.isDraft = 0;
+      }
+
+      if (status === "completed") {
+        set.isActive = 0;
+        set.isDraft = 0;
+      }
+
+      if (status === "draft") {
+        set.isActive = 0;
+        set.isDraft = 1;
+      }
+    }
+
+    if (!Object.keys(set).length) {
+      return res.status(400).json({
+        success: false,
+        message: "No campaign fields provided for update",
+      });
+    }
+
+    set.updatedByAdmin = {
+      adminId: req.admin?.adminId || req.admin?._id || null,
+      email: req.admin?.email || "",
+      role: req.admin?.role || "",
+      updatedAt: new Date(),
+    };
+
+    const nextMinFollowers =
+      set.minFollowers !== undefined
+        ? Number(set.minFollowers)
+        : Number(campaign.minFollowers || 0);
+
+    const nextMaxFollowers =
+      set.maxFollowers !== undefined
+        ? Number(set.maxFollowers)
+        : Number(campaign.maxFollowers || 0);
+
+    if (
+      nextMinFollowers > 0 &&
+      nextMaxFollowers > 0 &&
+      nextMaxFollowers < nextMinFollowers
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "maxFollowers must be greater than or equal to minFollowers",
+      });
+    }
+
+    campaign.set(set);
+
+    const savedCampaign = await campaign.save();
+
+    const updatedCampaign = savedCampaign.toObject();
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaign updated successfully",
+      data: updatedCampaign,
+    });
+  } catch (error) {
+    console.error("adminEditCampaign error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
+  }
+};

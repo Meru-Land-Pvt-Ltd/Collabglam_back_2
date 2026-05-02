@@ -35,4 +35,10 @@ router.post(
   adminController.sendBulkEmailCsv
 );
 
+router.post(
+  "/update-employee-password",
+  adminAuth,
+  adminController.updateEmployeePassword
+);
+
 module.exports = router;
