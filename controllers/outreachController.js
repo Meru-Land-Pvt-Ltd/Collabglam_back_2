@@ -3345,6 +3345,52 @@ function pickFirstObject(...values) {
   return {};
 }
 
+function safeRate(numerator, denominator) {
+  const top = toSafeNumber(numerator);
+  const bottom = toSafeNumber(denominator);
+
+  if (!bottom || bottom <= 0) return 0;
+
+  const rate = (top / bottom) * 100;
+  return Number(Math.max(0, Math.min(100, rate)).toFixed(2));
+}
+
+function normalizeDailyAnalyticsRowsForCampaign(payload = {}) {
+  return extractAnalyticsRows(payload)
+    .map((row) => {
+      const sent = toSafeNumber(row?.sent, row?.emails_sent_count, row?.total_sent);
+      const opened = toSafeNumber(row?.opened, row?.open_count);
+      const uniqueOpened = toSafeNumber(row?.unique_opened, row?.open_count_unique, opened);
+      const clicks = toSafeNumber(row?.clicks, row?.link_click_count);
+      const uniqueClicks = toSafeNumber(row?.unique_clicks, row?.link_click_count_unique, clicks);
+      const replies = toSafeNumber(row?.replies, row?.reply_count);
+      const uniqueReplies = toSafeNumber(row?.unique_replies, row?.reply_count_unique, replies);
+      const automaticReplies = toSafeNumber(row?.replies_automatic, row?.reply_count_automatic);
+      const opportunities = toSafeNumber(row?.opportunities, row?.unique_opportunities, row?.total_opportunities);
+
+      return {
+        date: String(row?.date || row?.day || row?.label || ""),
+        sent,
+        contacted: toSafeNumber(row?.contacted, row?.contacted_count),
+        newLeadsContacted: toSafeNumber(row?.new_leads_contacted, row?.new_leads_contacted_count),
+        opened,
+        uniqueOpened,
+        replies,
+        uniqueReplies,
+        automaticReplies,
+        clicks,
+        uniqueClicks,
+        opportunities,
+        openRate: safeRate(uniqueOpened || opened, sent),
+        clickRate: safeRate(uniqueClicks || clicks, sent),
+        replyRate: safeRate(uniqueReplies || replies, sent),
+        raw: row,
+      };
+    })
+    .filter((row) => row.date)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
 function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   const root = pickFirstObject(payload, payload?.data, payload?.stats, payload?.result);
 
@@ -3367,20 +3413,24 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   );
 
   const totalOpened = toSafeNumber(
-    root.open_count,
     root.open_count_unique,
+    root.open_count_unique_by_step,
+    root.unique_opened,
     root.total_opened,
     root.totalOpened,
     root.opened,
+    root.open_count,
     campaign?.stats?.totalOpened
   );
 
   const totalClicked = toSafeNumber(
-    root.link_click_count,
     root.link_click_count_unique,
+    root.link_click_count_unique_by_step,
+    root.unique_clicks,
     root.total_clicked,
     root.totalClicked,
     root.clicked,
+    root.link_click_count,
     campaign?.stats?.totalClicked
   );
 
@@ -3427,8 +3477,9 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
     totalAssigned,
     progressPercent,
     sequenceStartedAt: campaign?.launchedAt || null,
-    openRate: totalSent > 0 ? Number(((totalOpened / totalSent) * 100).toFixed(2)) : 0,
-    clickRate: totalSent > 0 ? Number(((totalClicked / totalSent) * 100).toFixed(2)) : 0,
+    openRate: safeRate(totalOpened, totalSent),
+    clickRate: safeRate(totalClicked, totalSent),
+    replyRate: safeRate(totalReplies, totalSent),
     raw: payload,
   };
 }
@@ -3439,6 +3490,7 @@ function buildOverviewFallback(campaign) {
     Array.isArray(campaign?.prospectIds) ? campaign.prospectIds.length : 0
   );
   const totalSent = toSafeNumber(campaign?.stats?.totalSent);
+  const totalOpened = toSafeNumber(campaign?.stats?.totalOpened);
   const totalClicked = toSafeNumber(campaign?.stats?.totalClicked);
   const totalReplies = toSafeNumber(campaign?.stats?.totalReplies);
   const totalOpportunities = toSafeNumber(campaign?.stats?.totalOpportunities);
@@ -3447,6 +3499,7 @@ function buildOverviewFallback(campaign) {
   return {
     totalProspects,
     totalSent,
+    totalOpened,
     totalClicked,
     totalReplies,
     totalOpportunities,
@@ -3454,6 +3507,9 @@ function buildOverviewFallback(campaign) {
     totalAssigned: toSafeNumber(campaign?.stats?.totalAssigned),
     progressPercent:
       totalProspects > 0 ? Math.min(100, Math.round((totalSent / totalProspects) * 100)) : 0,
+    openRate: safeRate(totalOpened, totalSent),
+    clickRate: safeRate(totalClicked, totalSent),
+    replyRate: safeRate(totalReplies, totalSent),
     provider: "local",
     raw: null,
   };
@@ -3551,9 +3607,21 @@ function normalizeStepAnalyticsRows(payload = {}, campaign = null) {
       type: "email",
       subject: row.subject || row.email_subject || variant?.subject || "",
       sent: toSafeNumber(row.sent, row.total_sent),
-      opened: toSafeNumber(row.opened, row.unique_opened, row.total_opened),
-      replied: toSafeNumber(row.replies, row.replied, row.total_replied),
-      clicked: toSafeNumber(row.clicks, row.clicked, row.total_clicked),
+      opened: toSafeNumber(row.unique_opened, row.opened, row.total_opened),
+      replied: toSafeNumber(row.unique_replies, row.replies, row.replied, row.total_replied),
+      clicked: toSafeNumber(row.unique_clicks, row.clicks, row.clicked, row.total_clicked),
+      clickRate: safeRate(
+        toSafeNumber(row.unique_clicks, row.clicks, row.clicked, row.total_clicked),
+        toSafeNumber(row.sent, row.total_sent)
+      ),
+      openRate: safeRate(
+        toSafeNumber(row.unique_opened, row.opened, row.total_opened),
+        toSafeNumber(row.sent, row.total_sent)
+      ),
+      replyRate: safeRate(
+        toSafeNumber(row.unique_replies, row.replies, row.replied, row.total_replied),
+        toSafeNumber(row.sent, row.total_sent)
+      ),
       opportunities: toSafeNumber(
         row.opportunities,
         row.unique_opportunities,
@@ -3621,7 +3689,7 @@ exports.getOutreachCampaignAnalyticsDaily = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: extractAnalyticsRows(providerPayload),
+      data: normalizeDailyAnalyticsRowsForCampaign(providerPayload),
       raw: providerPayload,
     });
   } catch (error) {
