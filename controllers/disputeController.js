@@ -347,6 +347,16 @@ function parseIssueTypePayload(rawIssueType) {
   return ['other'];
 }
 
+function normalizeOtherIssueDescription(issueTypes, rawDescription) {
+  const text = String(rawDescription || "").trim();
+
+  if (!Array.isArray(issueTypes) || !issueTypes.includes("other")) {
+    return "";
+  }
+
+  return text;
+}
+
 function areStringArraysEqual(a = [], b = []) {
   if (a.length !== b.length) return false;
   return a.every((value, index) => String(value) === String(b[index]));
@@ -520,6 +530,7 @@ exports.brandEditDispute = async (req, res) => {
       subject,
       description = '',
       issueType,
+      otherIssueDescription = '',
       attachments = [],
       removedAttachmentUrls = [],
     } = req.body || {};
@@ -626,6 +637,11 @@ exports.brandEditDispute = async (req, res) => {
       });
     }
 
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const parsedRemovedAttachmentUrls =
       parseRemovedAttachmentUrlsPayload(removedAttachmentUrls);
 
@@ -649,6 +665,11 @@ exports.brandEditDispute = async (req, res) => {
     if (!areStringArraysEqual(currentIssueType, parsedIssueType)) {
       dispute.issueType = parsedIssueType;
       changeSummary.push('issue type');
+    }
+
+    if ((dispute.otherIssueDescription || '') !== normalizedOtherIssueDescription) {
+      dispute.otherIssueDescription = normalizedOtherIssueDescription;
+      changeSummary.push('other issue description');
     }
 
     const existingAttachments = Array.isArray(dispute.attachments)
@@ -745,6 +766,7 @@ exports.brandCreateDispute = async (req, res) => {
       attachments = [],
       issueType,
       related,
+      otherIssueDescription = "",
     } = req.body || {};
 
     console.log("brandCreateDispute payload:", {
@@ -755,6 +777,7 @@ exports.brandCreateDispute = async (req, res) => {
       description,
       issueType,
       related,
+      otherIssueDescription,
     });
 
     if (!brandId || !influencerId || !subject) {
@@ -829,6 +852,11 @@ exports.brandCreateDispute = async (req, res) => {
       parsedIssueType = ["other"];
     }
 
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const sanitizedAttachments = await buildAttachmentsFromReq(req, attachments);
 
     const dispute = new Dispute({
@@ -838,6 +866,7 @@ exports.brandCreateDispute = async (req, res) => {
       subject: String(subject).trim(),
       description: String(description || ""),
       issueType: parsedIssueType,
+      otherIssueDescription: normalizedOtherIssueDescription,
       createdBy: { id: String(brandId), role: "Brand" },
       attachments: sanitizedAttachments,
     });
@@ -883,6 +912,7 @@ exports.brandCreateDispute = async (req, res) => {
       message: "Dispute created",
       disputeId: dispute.disputeId,
       issueType: dispute.issueType,
+      otherIssueDescription: dispute.otherIssueDescription,
     });
   } catch (err) {
     console.error("Error in brandCreateDispute:", err);
@@ -939,7 +969,7 @@ exports.brandList = async (req, res) => {
     // Search will be applied AFTER enrichment so campaign/influencer fields work too.
     const rows = await Dispute.find(filter)
       .select(
-        "disputeId subject description issueType status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy"
+        "disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy"
       )
       .sort({ createdAt: -1 })
       .lean();
@@ -1078,6 +1108,7 @@ exports.brandList = async (req, res) => {
             r.raisedAgainst?.name,
             r.raisedAgainst?.handle,
             r.status,
+            r.otherIssueDescription,
             ...(Array.isArray(r.issueType) ? r.issueType : []),
           ]
             .filter(Boolean)
@@ -1719,6 +1750,9 @@ exports.influencerCreateDispute = async (req, res) => {
       subject,
       description = '',
       attachments = [],
+      issueType,
+      related,
+      otherIssueDescription = '',
     } = req.body || {};
 
     if (!influencerId || !brandId || !subject) {
@@ -1747,6 +1781,12 @@ exports.influencerCreateDispute = async (req, res) => {
     }
 
 
+    const parsedIssueType = parseIssueTypePayload(issueType ?? related);
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const sanitizedAttachments = await buildAttachmentsFromReq(req, attachments);
 
     const dispute = new Dispute({
@@ -1755,6 +1795,8 @@ exports.influencerCreateDispute = async (req, res) => {
       influencerId: String(influencerId),
       subject: String(subject).trim(),
       description: String(description || ''),
+      issueType: parsedIssueType,
+      otherIssueDescription: normalizedOtherIssueDescription,
       createdBy: { id: String(influencerId), role: 'Influencer' },
       attachments: sanitizedAttachments,
     });
@@ -1800,7 +1842,12 @@ exports.influencerCreateDispute = async (req, res) => {
 
     return res
       .status(201)
-      .json({ message: 'Dispute created', disputeId: dispute.disputeId });
+      .json({
+        message: 'Dispute created',
+        disputeId: dispute.disputeId,
+        issueType: dispute.issueType,
+        otherIssueDescription: dispute.otherIssueDescription,
+      });
   } catch (err) {
     console.error('Error in influencerCreateDispute:', err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -1858,7 +1905,7 @@ exports.influencerList = async (req, res) => {
     const total = await Dispute.countDocuments(filter);
     const rows = await Dispute.find(filter)
       .select(
-        'disputeId subject description status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy'
+        'disputeId subject description issueType otherIssueDescription status campaignId brandId influencerId assignedTo attachments comments createdAt updatedAt createdBy'
       )
       .sort({ createdAt: -1 })
       .skip((p - 1) * l)
@@ -2231,6 +2278,7 @@ exports.influencerEditDispute = async (req, res) => {
       subject,
       description = "",
       issueType,
+      otherIssueDescription = "",
       attachments = [],
       removedAttachmentUrls = [],
     } = req.body || {};
@@ -2298,6 +2346,11 @@ exports.influencerEditDispute = async (req, res) => {
       });
     }
 
+    const normalizedOtherIssueDescription = normalizeOtherIssueDescription(
+      parsedIssueType,
+      otherIssueDescription
+    );
+
     const parsedRemovedAttachmentUrls =
       parseRemovedAttachmentUrlsPayload(removedAttachmentUrls);
 
@@ -2325,6 +2378,11 @@ exports.influencerEditDispute = async (req, res) => {
     if (!areStringArraysEqual(currentIssueType, parsedIssueType)) {
       dispute.issueType = parsedIssueType;
       changeSummary.push("issue type");
+    }
+
+    if ((dispute.otherIssueDescription || "") !== normalizedOtherIssueDescription) {
+      dispute.otherIssueDescription = normalizedOtherIssueDescription;
+      changeSummary.push("other issue description");
     }
 
     const existingAttachments = Array.isArray(dispute.attachments)
@@ -2834,14 +2892,34 @@ exports.adminList = async (req, res) => {
       influencerId,
       search,
       appliedBy,
+      adminId,
     } = req.body || {};
+
+    console.log("adminList payload:", {
+      page,
+      limit,
+      status,
+      campaignId,
+      brandId,
+      influencerId,
+      search,
+      appliedBy,
+      adminId,
+    });
 
     const p = Math.max(1, parseInt(page, 10) || 1);
     const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
 
     const filter = {};
 
+    const trimmedAdminId = String(adminId || "").trim();
+
+    if (trimmedAdminId) {
+      filter.adminNotInterested = { $ne: trimmedAdminId };
+    }
+
     const normalizedStatus = normalizeStatusInput(status, { allowZeroAll: true });
+
     if (normalizedStatus && normalizedStatus !== "__ALL__") {
       filter.status = normalizedStatus;
     }
@@ -2851,6 +2929,7 @@ exports.adminList = async (req, res) => {
     if (influencerId) filter.influencerId = String(influencerId);
 
     const searchTerm = typeof search === "string" ? search.trim() : "";
+
     if (searchTerm) {
       const pattern = escapeRegex(searchTerm);
       const re = new RegExp(pattern, "i");
@@ -2859,8 +2938,30 @@ exports.adminList = async (req, res) => {
 
     if (appliedBy && typeof appliedBy === "string") {
       const role = String(appliedBy).toLowerCase();
+
       if (role === "brand") filter["createdBy.role"] = "Brand";
       if (role === "influencer") filter["createdBy.role"] = "Influencer";
+    }
+
+    console.log("adminList Mongo filter:", JSON.stringify(filter, null, 2));
+
+    const hiddenTest = trimmedAdminId
+      ? await Dispute.findOne({
+          disputeId: "ds000029",
+        })
+          .select("disputeId status adminNotInterested")
+          .lean()
+      : null;
+
+    if (hiddenTest) {
+      console.log("ds000029 hidden test:", hiddenTest);
+      console.log("Should hide for this admin:", {
+        adminId: trimmedAdminId,
+        adminNotInterested: hiddenTest.adminNotInterested,
+        includesAdminId: Array.isArray(hiddenTest.adminNotInterested)
+          ? hiddenTest.adminNotInterested.includes(trimmedAdminId)
+          : false,
+      });
     }
 
     const total = await Dispute.countDocuments(filter);
@@ -2872,9 +2973,17 @@ exports.adminList = async (req, res) => {
       .lean();
 
     try {
-      const uniqueBrandIds = [...new Set(rows.map((r) => r.brandId).filter(Boolean))];
-      const uniqueInfluencerIds = [...new Set(rows.map((r) => r.influencerId).filter(Boolean))];
-      const uniqueCampaignIds = [...new Set(rows.map((r) => r.campaignId).filter(Boolean))];
+      const uniqueBrandIds = [
+        ...new Set(rows.map((r) => r.brandId).filter(Boolean)),
+      ];
+
+      const uniqueInfluencerIds = [
+        ...new Set(rows.map((r) => r.influencerId).filter(Boolean)),
+      ];
+
+      const uniqueCampaignIds = [
+        ...new Set(rows.map((r) => r.campaignId).filter(Boolean)),
+      ];
 
       const toObjectIds = (ids = []) =>
         ids
@@ -2889,18 +2998,20 @@ exports.adminList = async (req, res) => {
       const [brands, influencers, campaigns] = await Promise.all([
         brandObjectIds.length
           ? Brand.find({ _id: { $in: brandObjectIds } })
-            .select("_id name brandName companyName")
-            .lean()
+              .select("_id name brandName companyName")
+              .lean()
           : [],
+
         influencerObjectIds.length
           ? Influencer.find({ _id: { $in: influencerObjectIds } })
-            .select("_id name fullName influencerName username")
-            .lean()
+              .select("_id name fullName influencerName username")
+              .lean()
           : [],
+
         campaignObjectIds.length
           ? Campaign.find({ _id: { $in: campaignObjectIds } })
-            .select("_id campaignTitle title name")
-            .lean()
+              .select("_id campaignTitle title name")
+              .lean()
           : [],
       ]);
 
@@ -2949,6 +3060,7 @@ exports.adminList = async (req, res) => {
       });
     } catch (e) {
       console.error("Error enriching adminList:", e);
+
       return res.status(200).json({
         page: p,
         limit: l,
@@ -3075,6 +3187,48 @@ exports.adminUpdateStatus = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminUpdateStatus:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.adminMarkNotInterested = async (req, res) => {
+  try {
+    const { disputeId, adminId } = req.body || {};
+
+    const trimmedDisputeId = String(disputeId || "").trim();
+    const trimmedAdminId = String(adminId || "").trim();
+
+    if (!trimmedDisputeId) {
+      return res.status(400).json({ message: "disputeId is required" });
+    }
+
+    if (!trimmedAdminId) {
+      return res.status(400).json({ message: "adminId is required" });
+    }
+
+    const dispute = await Dispute.findOne({ disputeId: trimmedDisputeId });
+
+    if (!dispute) {
+      return res.status(404).json({ message: "Dispute not found" });
+    }
+
+    dispute.adminNotInterested = Array.isArray(dispute.adminNotInterested)
+      ? dispute.adminNotInterested
+      : [];
+
+    if (!dispute.adminNotInterested.includes(trimmedAdminId)) {
+      dispute.adminNotInterested.push(trimmedAdminId);
+    }
+
+    await dispute.save();
+
+    return res.status(200).json({
+      message: "Dispute hidden for this admin",
+      disputeId: dispute.disputeId,
+      adminId: trimmedAdminId,
+      status: dispute.status,
+    });
+  } catch (err) {
+    console.error("Error in adminMarkNotInterested:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

@@ -60,11 +60,6 @@ const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
 const instantlytestRoutes = require("./routes/instantlyTestRoutes");
 const matchedCreatorRoutes = require("./routes/matchedCreatorRoutes");
 
-
-
-
-
-
 const app = express();
 const server = http.createServer(app);
 
@@ -79,10 +74,13 @@ const GRIDFS_BUCKET_NAME = process.env.GRIDFS_BUCKET || "uploads";
 
 const defaultCorsOrigins = [
   "https://collabglam.com",
+  "https://www.collabglam.com",
+
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://192.168.1.23:3000",
+  "http://192.168.1.36:3000",
   "https://mhd.sharemitra.com",
+  "http://192.168.1.31:3000"
 ];
 
 

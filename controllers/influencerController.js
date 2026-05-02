@@ -14,7 +14,7 @@ const bcrypt = require("bcryptjs");
 const BrandModule = require("../models/brand");
 const BrandModel = BrandModule.BrandModel || BrandModule.default || BrandModule;
 const Brand = BrandModel;
-
+const SubscriptionPlan = require("../models/subscription");
 const InfluencerModule = require("../models/influencer");
 const InfluencerModel =
   InfluencerModule.InfluencerModel ||
@@ -1513,7 +1513,47 @@ exports.sendSignupOtpInfluencer = async (req, res) => {
     });
   }
 };
+function buildSubscriptionFromPlan(plan) {
+  return {
+    planId: plan.planId,
+    planName: plan.name,
+    role: plan.role,
+    planRef: plan._id,
 
+    monthlyCost: plan.monthlyCost || 0,
+    annualCost: plan.annualCost || 0,
+    billingCycle: "monthly",
+
+    autoRenew: false,
+    status: "active",
+
+    durationMins: plan.durationMins || 43200,
+    startedAt: new Date(),
+    expiresAt: null,
+
+    features: Array.isArray(plan.features)
+      ? plan.features.map((feature) => ({
+          key: feature.key,
+          value: feature.value ?? null,
+          limit:
+            typeof feature.value === "number"
+              ? feature.value
+              : typeof feature.limit === "number"
+                ? feature.limit
+                : 0,
+          used: 0,
+          note: feature.note || null,
+          resetsEvery: feature.resetsEvery || null,
+          resetsAt: null,
+        }))
+      : [],
+
+    internalCredits: {
+      used: 0,
+      resetsAt: null,
+    },
+  };
+}
 exports.verifyOtpSignUpInfluencer = async (req, res) => {
   try {
     const { email, otp, location } = req.body || {};
@@ -1600,32 +1640,44 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
       });
     }
 
+    const freePlan = await SubscriptionPlan.findOne({
+      role: "Influencer",
+      name: "free",
+      status: "active",
+    });
+
+    if (!freePlan && !existingInfluencer?.subscription?.planId) {
+      return res.status(500).json({
+        message: "Free influencer plan not found",
+      });
+    }
+
     const cleanLanguages = Array.isArray(payload?.languages)
       ? payload.languages
-        .filter(
-          (item) =>
-            item &&
-            typeof item.name === "string" &&
-            item.name.trim().length > 0
-        )
-        .map((item) => ({
-          _id: item._id || undefined,
-          name: String(item.name).trim(),
-        }))
+          .filter(
+            (item) =>
+              item &&
+              typeof item.name === "string" &&
+              item.name.trim().length > 0
+          )
+          .map((item) => ({
+            _id: item._id || undefined,
+            name: String(item.name).trim(),
+          }))
       : [];
 
     const cleanCategories = Array.isArray(payload?.categories)
       ? payload.categories
-        .filter(
-          (item) =>
-            item &&
-            typeof item.name === "string" &&
-            item.name.trim().length > 0
-        )
-        .map((item) => ({
-          _id: item._id || undefined,
-          name: String(item.name).trim(),
-        }))
+          .filter(
+            (item) =>
+              item &&
+              typeof item.name === "string" &&
+              item.name.trim().length > 0
+          )
+          .map((item) => ({
+            _id: item._id || undefined,
+            name: String(item.name).trim(),
+          }))
       : [];
 
     let proxyEmail = existingInfluencer?.proxyEmail || "";
@@ -1664,6 +1716,12 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
           // Keep true for audit history.
           existingInfluencer.isAdminCreated = true;
 
+          if (!existingInfluencer.subscription?.planId && freePlan) {
+            existingInfluencer.subscription = buildSubscriptionFromPlan(freePlan);
+          }
+
+          existingInfluencer.subscriptionExpired = false;
+
           savedInfluencer = await existingInfluencer.save();
         } else {
           savedInfluencer = await InfluencerModel.create({
@@ -1687,6 +1745,9 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
             isAdminCreated: false,
             signupCompleted: true,
             signupCompletedAt: new Date(),
+
+            subscription: buildSubscriptionFromPlan(freePlan),
+            subscriptionExpired: false,
           });
         }
 
@@ -2287,23 +2348,31 @@ exports.getBulkByIds = async (req, res) => {
 
 exports.getLiteById = async (req, res) => {
   try {
-    const id = String(req.query?._id || req.query?.id || "").trim();
+    const influencerId = String(
+      req.query?.influencerId ||
+      req.query?.id ||
+      req.user?._id ||
+      req.user?.id ||
+      req.influencer?._id ||
+      req.influencer?.id ||
+      ""
+    ).trim();
 
-    if (!id) {
+    if (!influencerId) {
       return res.status(400).json({
-        message: 'Query parameter "_id" or "id" is required.',
+        message: 'Query parameter "influencerId" is required.',
       });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(influencerId)) {
       return res.status(400).json({
         message: "Valid influencer _id is required.",
       });
     }
 
-    const doc = await InfluencerModel.findById(id)
+    const doc = await InfluencerModel.findById(influencerId)
       .select(
-        "_id name email primaryPlatform subscription.planId subscription.planName subscription.expiresAt"
+        "_id name email profileImage profilePic profilePicture avatar image photo primaryPlatform subscription.planId subscription.planName subscription.expiresAt"
       )
       .lean();
 
@@ -2313,29 +2382,65 @@ exports.getLiteById = async (req, res) => {
       });
     }
 
-    const socialProfiles = await loadSocialProfilesFromModash(id);
+    let socialProfiles = [];
+
+    try {
+      socialProfiles = await loadSocialProfilesFromModash(influencerId);
+    } catch (err) {
+      console.error("Failed to load social profiles from Modash:", err);
+      socialProfiles = [];
+    }
 
     let primaryProfile = null;
 
-    if (socialProfiles.length) {
+    if (Array.isArray(socialProfiles) && socialProfiles.length) {
       primaryProfile =
         socialProfiles.find((p) => p.provider === doc.primaryPlatform) ||
         socialProfiles
           .slice()
-          .sort((a, b) => (b.followers || 0) - (a.followers || 0))[0];
+          .sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0))[0];
     }
+
+    const pickImage = (value) => {
+      if (!value || typeof value !== "object") return "";
+
+      return (
+        value.profileImage ||
+        value.profilePic ||
+        value.profilePicture ||
+        value.avatar ||
+        value.picture ||
+        value.image ||
+        value.imageUrl ||
+        value.photo ||
+        value.thumbnail ||
+        value.profilePictureUrl ||
+        value.profile_pic_url ||
+        ""
+      );
+    };
+
+    const profileImage =
+      pickImage(doc) ||
+      pickImage(primaryProfile) ||
+      socialProfiles.map(pickImage).find(Boolean) ||
+      "";
 
     return res.status(200).json({
       _id: String(doc._id),
+      influencerId: String(doc._id),
       name: doc.name || "",
       email: doc.email || "",
+      profileImage,
       planId: doc.subscription?.planId || null,
       planName: doc.subscription?.planName || null,
       expiresAt: doc.subscription?.expiresAt || null,
       primaryPlatform: doc.primaryPlatform || null,
       socialProfiles,
       primaryProfile,
-      socialProfilesCount: socialProfiles.length,
+      socialProfilesCount: Array.isArray(socialProfiles)
+        ? socialProfiles.length
+        : 0,
     });
   } catch (err) {
     console.error("Error in getLiteById:", err);

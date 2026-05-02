@@ -113,6 +113,54 @@ function normalizeDailyAnalyticsRows(payload) {
   }));
 }
 
+function normalizeWarmupAnalyticsRows(payload, email = "") {
+  const normalizedEmail = normalizeEmail(email);
+  const emailDateData = payload?.email_date_data || payload?.data?.email_date_data || {};
+  const accountDateData = emailDateData[normalizedEmail] || emailDateData[email] || {};
+
+  return Object.entries(accountDateData).map(([date, item]) => ({
+    date,
+    emailAccount: normalizedEmail,
+    sent: toSafeNumber(item?.sent),
+    received: toSafeNumber(item?.received),
+    savedFromSpam: toSafeNumber(item?.landed_inbox, item?.saved_from_spam),
+    landedInbox: toSafeNumber(item?.landed_inbox),
+    landedSpam: toSafeNumber(item?.landed_spam),
+  }));
+}
+
+function mergeDailyAndWarmupRows(dailyRows = [], warmupRows = []) {
+  const map = new Map();
+
+  dailyRows.forEach((row) => {
+    if (!row?.date) return;
+    map.set(row.date, { ...row });
+  });
+
+  warmupRows.forEach((row) => {
+    if (!row?.date) return;
+
+    const existing = map.get(row.date) || {
+      date: row.date,
+      emailAccount: row.emailAccount || "",
+      sent: 0,
+      received: 0,
+      savedFromSpam: 0,
+    };
+
+    map.set(row.date, {
+      ...existing,
+      sent: toSafeNumber(row.sent, existing.sent),
+      received: toSafeNumber(row.received, existing.received),
+      savedFromSpam: toSafeNumber(row.savedFromSpam, row.landedInbox, existing.savedFromSpam),
+    });
+  });
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()
+  );
+}
+
 function filterDailyRowsByEmail(dailyRows = [], email = "") {
   const normalizedEmail = normalizeEmail(email);
 
@@ -124,6 +172,12 @@ function filterDailyRowsByEmail(dailyRows = [], email = "") {
 
 function getTodayDateString() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function getDateNDaysAgoString(days = 30) {
+  const date = new Date();
+  date.setDate(date.getDate() - Number(days || 0));
+  return date.toISOString().slice(0, 10);
 }
 
 function getDailyRowForDate(dailyRows = [], targetDate = getTodayDateString()) {
@@ -704,27 +758,27 @@ exports.getMyMailboxAccountDetails = async (req, res) => {
     const email = normalizeEmail(req.params.email);
     const assignment = await getOwnedMailbox(req, email);
 
-    const [liveAccount, dailyPayload, campaigns] = await Promise.all([
+    const [liveAccount, dailyPayload, warmupPayload, campaigns] = await Promise.all([
       instantlyService.getAccount(email).catch(() => null),
       instantlyService
         .getAccountDailyAnalytics({
           emails: [email],
-          start_date: getTodayDateString(),
+          start_date: getDateNDaysAgoString(30),
           end_date: getTodayDateString(),
+        })
+        .catch(() => null),
+      instantlyService
+        .getWarmupAnalytics({
+          emails: [email],
         })
         .catch(() => null),
       getCampaignsForMailbox(role, req.admin.adminId, email),
     ]);
 
-    const dailyRows = filterDailyRowsByEmail(
-      normalizeDailyAnalyticsRows(dailyPayload),
-      email
-    )
-      .sort(
-        (a, b) =>
-          new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()
-      )
-      .slice(-7);
+    const dailyRows = mergeDailyAndWarmupRows(
+      filterDailyRowsByEmail(normalizeDailyAnalyticsRows(dailyPayload), email),
+      normalizeWarmupAnalyticsRows(warmupPayload, email)
+    ).slice(-30);
     const warmupSummary = dailyRows.reduce(
       (acc, item) => {
         acc.sent += item.sent;
