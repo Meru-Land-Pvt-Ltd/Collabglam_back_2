@@ -36,9 +36,9 @@ function featureValueToLimit(value) {
 function getUserEmail(user) {
   return String(
     user?.email ||
-      user?.proxyEmail ||
-      user?.contactEmail ||
-      ""
+    user?.proxyEmail ||
+    user?.contactEmail ||
+    ""
   )
     .trim()
     .toLowerCase();
@@ -223,12 +223,136 @@ function getQueryForUser(userType, userId) {
   return userType === "Brand" ? { _id: userId } : { _id: userId };
 }
 
-function buildFeatureSnapshot(plan) {
-  return (plan.features || []).map((f) => ({
-    key: f.key,
-    limit: featureValueToLimit(f.value),
-    used: 0,
-  }));
+function buildFeatureSnapshot(plan, previousFeatures = [], options = {}) {
+  const { preserveUsed = false, capUsedToLimit = false } = options;
+
+  const previousMap = new Map(
+    (Array.isArray(previousFeatures) ? previousFeatures : [])
+      .filter((f) => f && f.key)
+      .map((f) => [f.key, f])
+  );
+
+  return (plan.features || []).map((f) => {
+    const limit = featureValueToLimit(f.value);
+    const oldUsedRaw = previousMap.get(f.key)?.used;
+    const oldUsed = Number(oldUsedRaw);
+
+    let used =
+      preserveUsed && Number.isFinite(oldUsed) && oldUsed > 0 ? oldUsed : 0;
+
+    // On downgrade to free, do not allow used to exceed free limit.
+    // Example: paid used 120, free limit 20 => used becomes 20, remaining = 0.
+    if (capUsedToLimit && limit >= 0) {
+      used = Math.min(used, limit);
+    }
+
+    return {
+      key: f.key,
+      limit,
+      used,
+    };
+  });
+}
+
+function isFreePlanLike(planOrSub = {}) {
+  const name = String(planOrSub?.name || planOrSub?.planName || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    name === "free" ||
+    planOrSub?.monthlyCost === 0 ||
+    planOrSub?.isFree === true ||
+    String(planOrSub?.slug || "").toLowerCase() === "free"
+  );
+}
+
+async function downgradeUserToFreePlan(user, userType, now = new Date(), options = {}) {
+  const freePlan = await subscriptionHelper.getFreePlan(userType);
+
+  const oldSubscription = user.subscription || {};
+  const previousFeatures = Array.isArray(oldSubscription.features)
+    ? oldSubscription.features
+    : [];
+
+  const alreadyFree =
+    String(oldSubscription.planId || "") === String(freePlan.planId || "") ||
+    String(oldSubscription.planName || "").toLowerCase() === "free";
+
+  user.subscription = user.subscription || {};
+
+  // Use actual free planId while degrading.
+  user.subscription.planId = freePlan.planId;
+  user.subscription.planName = freePlan.name || "free";
+  user.subscription.startedAt = alreadyFree
+    ? oldSubscription.startedAt || now
+    : now;
+
+  // Free plan should not expire automatically.
+  user.subscription.expiresAt = null;
+
+  // Do not reload free credits for users already on free.
+  // For paid -> free, preserve used values so credits do not restart from 0.
+  if (
+    !alreadyFree ||
+    options.rebuildFeatures === true ||
+    !Array.isArray(user.subscription.features) ||
+    user.subscription.features.length === 0
+  ) {
+    user.subscription.features = buildFeatureSnapshot(freePlan, previousFeatures, {
+      preserveUsed: true,
+      capUsedToLimit: true,
+    });
+  }
+
+  user.subscription.lastExpiringSoonEmailSentAt = null;
+
+  if (options.markExpiredEmailSent) {
+    user.subscription.lastExpiredEmailSentAt = now;
+  }
+
+  user.subscriptionExpired = false;
+
+  await user.save();
+
+  return freePlan;
+}
+
+async function maybeDowngradeExpiredUser(user, userType, now = new Date()) {
+  const sub = user?.subscription || {};
+
+  if (!sub.planId) {
+    return { downgraded: false, reason: "no_plan" };
+  }
+
+  if (!subscriptionHelper.isExpiredByDate(sub.expiresAt, now)) {
+    return { downgraded: false, reason: "not_expired" };
+  }
+
+  const currentPlan = await SubscriptionPlan.findOne({
+    planId: sub.planId,
+  }).lean();
+
+  if (isFreePlanLike(currentPlan) || isFreePlanLike(sub)) {
+    await downgradeUserToFreePlan(user, userType, now, {
+      rebuildFeatures: false,
+    });
+
+    return {
+      downgraded: false,
+      reason: "already_free",
+      oldPlan: currentPlan,
+    };
+  }
+
+  const freePlan = await downgradeUserToFreePlan(user, userType, now);
+
+  return {
+    downgraded: true,
+    reason: "expired_paid_plan",
+    oldPlan: currentPlan,
+    freePlan,
+  };
 }
 
 function normalizedMonthlyCost(plan) {
@@ -448,15 +572,6 @@ exports.assignPlan = async (req, res) => {
 
     const now = new Date();
 
-    const expire = subscriptionHelper.computeExpiry(plan, {
-      billingCycle: billingCycle || "monthly",
-      durationDays,
-      durationMinutes,
-      durationMins,
-      expiresAt,
-    });
-
-    const featureSnapshot = buildFeatureSnapshot(plan);
     const query = getQueryForUser(userType, userId);
 
     const existingUser = await Model.findOne(query);
@@ -465,6 +580,27 @@ exports.assignPlan = async (req, res) => {
         .status(404)
         .json({ message: `${userType} with ID ${userId} not found` });
     }
+
+    const isFreeAssignment = isFreePlanLike(plan);
+
+    const expire = isFreeAssignment
+      ? null
+      : subscriptionHelper.computeExpiry(plan, {
+        billingCycle: billingCycle || "monthly",
+        durationDays,
+        durationMinutes,
+        durationMins,
+        expiresAt,
+      });
+
+    const featureSnapshot = buildFeatureSnapshot(
+      plan,
+      existingUser?.subscription?.features,
+      {
+        preserveUsed: isFreeAssignment,
+        capUsedToLimit: isFreeAssignment,
+      }
+    );
 
     const oldPlanName = existingUser?.subscription?.planName || "free";
 
@@ -533,16 +669,35 @@ exports.renewPlan = async (req, res) => {
     if (!plan) return res.status(404).json({ message: "Plan not found" });
 
     const now = new Date();
-    const newExpires = subscriptionHelper.computeExpiry(plan, {
-      billingCycle: "monthly",
-      expiresAt: user.subscription.expiresAt,
-    });
+    const isFreeRenewal = isFreePlanLike(plan);
+
+    const currentExpiry = user?.subscription?.expiresAt
+      ? new Date(user.subscription.expiresAt)
+      : null;
+
+    const renewalBase =
+      currentExpiry && !Number.isNaN(currentExpiry.getTime()) && currentExpiry > now
+        ? currentExpiry
+        : now;
+
+    const newExpires = isFreeRenewal
+      ? null
+      : subscriptionHelper.computeExpiry(plan, renewalBase, {
+        billingCycle: "monthly",
+      });
 
     user.subscription.planId = plan.planId;
     user.subscription.planName = plan.name;
     user.subscription.startedAt = now;
     user.subscription.expiresAt = newExpires;
-    user.subscription.features = buildFeatureSnapshot(plan);
+    user.subscription.features = buildFeatureSnapshot(
+      plan,
+      user.subscription.features,
+      {
+        preserveUsed: isFreeRenewal,
+        capUsedToLimit: isFreeRenewal,
+      }
+    );
     user.subscription.lastExpiringSoonEmailSentAt = null;
     user.subscription.lastExpiredEmailSentAt = null;
     user.subscriptionExpired = false;
@@ -567,6 +722,7 @@ exports.renewPlan = async (req, res) => {
 };
 
 // POST /subscription-plans/me
+// POST /subscription-plans/me
 exports.getMyPlan = async (req, res) => {
   try {
     const { userType, userId } = req.body || {};
@@ -582,8 +738,10 @@ exports.getMyPlan = async (req, res) => {
     const Model = userType === "Brand" ? Brand : Influencer;
     const query = getQueryForUser(userType, userId);
 
-    const user = await Model.findOne(query).lean();
+    const user = await Model.findOne(query);
     if (!user) return res.status(404).json({ message: `${userType} not found` });
+
+    await maybeDowngradeExpiredUser(user, userType);
 
     const sub = user.subscription || {};
     const planDoc = sub.planId
@@ -725,21 +883,20 @@ exports.getCurrentBrandPlanLite = async (req, res) => {
       return res.status(400).json({ message: "brandId is required in query" });
     }
 
-    const brand = await Brand.findOne({ _id: brandId }).lean();
+    const brand = await Brand.findOne({ _id: brandId });
     if (!brand) {
       return res.status(404).json({ message: "Brand not found" });
     }
 
+    await maybeDowngradeExpiredUser(brand, "Brand");
+
     const sub = brand.subscription || {};
-    const now = new Date();
 
-    const isExpired =
-      brand.subscriptionExpired === true ||
-      (sub.expiresAt && new Date(sub.expiresAt).getTime() < now.getTime());
+    if (!sub.planId) {
+      const freePlan = await subscriptionHelper.getFreePlan("Brand");
 
-    if (isExpired || !sub.planId) {
       return res.status(200).json({
-        brandPlanId: null,
+        brandPlanId: freePlan.planId,
         brandPlanName: "free",
       });
     }
@@ -751,6 +908,7 @@ exports.getCurrentBrandPlanLite = async (req, res) => {
       const plan = await SubscriptionPlan.findOne({ planId: brandPlanId })
         .select("name")
         .lean();
+
       brandPlanName = plan?.name || null;
     }
 
@@ -777,6 +935,8 @@ exports.sendExpiringSoonEmails = async (req, res) => {
         "subscription.planId": { $exists: true, $ne: null },
         subscriptionExpired: { $ne: true },
         "subscription.expiresAt": { $gt: now, $lte: end },
+
+        // Send expiring soon email only if it was never sent before.
         $or: [
           { "subscription.lastExpiringSoonEmailSentAt": { $exists: false } },
           { "subscription.lastExpiringSoonEmailSentAt": null },
@@ -784,37 +944,62 @@ exports.sendExpiringSoonEmails = async (req, res) => {
       });
 
       let count = 0;
+      let skippedAlreadySent = 0;
 
       for (const user of users) {
+        // Atomic lock: mark as sent before sending email.
+        // This prevents duplicate hourly sends or parallel API calls.
+        const lockedUser = await Model.findOneAndUpdate(
+          {
+            _id: user._id,
+            $or: [
+              { "subscription.lastExpiringSoonEmailSentAt": { $exists: false } },
+              { "subscription.lastExpiringSoonEmailSentAt": null },
+            ],
+          },
+          {
+            $set: {
+              "subscription.lastExpiringSoonEmailSentAt": now,
+            },
+          },
+          { new: true }
+        );
+
+        if (!lockedUser) {
+          skippedAlreadySent += 1;
+          continue;
+        }
+
         const plan = await SubscriptionPlan.findOne({
-          planId: user?.subscription?.planId,
+          planId: lockedUser?.subscription?.planId,
         }).lean();
 
         await sendSubscriptionLifecycleEmail({
           userType,
-          user,
+          user: lockedUser,
           plan,
           eventType: "expiring_soon",
         });
 
-        user.subscription = user.subscription || {};
-        user.subscription.lastExpiringSoonEmailSentAt = new Date();
-        await user.save();
-
         count += 1;
       }
 
-      return count;
+      return {
+        sent: count,
+        skippedAlreadySent,
+      };
     };
 
-    const brandCount = await processUsers(Brand, "Brand");
-    const influencerCount = await processUsers(Influencer, "Influencer");
+    const brandResult = await processUsers(Brand, "Brand");
+    const influencerResult = await processUsers(Influencer, "Influencer");
 
     return res.status(200).json({
-      message: "Expiring soon emails processed",
-      brandCount,
-      influencerCount,
-      total: brandCount + influencerCount,
+      message: "Expiring soon emails processed once only",
+      brand: brandResult,
+      influencer: influencerResult,
+      totalSent: brandResult.sent + influencerResult.sent,
+      totalSkippedAlreadySent:
+        brandResult.skippedAlreadySent + influencerResult.skippedAlreadySent,
     });
   } catch (err) {
     console.error("sendExpiringSoonEmails error:", err);
@@ -825,56 +1010,331 @@ exports.sendExpiringSoonEmails = async (req, res) => {
 exports.sendExpiredSubscriptionEmails = async (req, res) => {
   try {
     const now = new Date();
+    const todayStart = subscriptionHelper.startOfToday(now);
 
     const processUsers = async (Model, userType) => {
       assertValidModel(Model, userType);
 
+      // Only process after expiry date has fully passed.
       const users = await Model.find({
         "subscription.planId": { $exists: true, $ne: null },
-        "subscription.expiresAt": { $lte: now },
-        $or: [
-          { subscriptionExpired: { $ne: true } },
-          { "subscription.lastExpiredEmailSentAt": { $exists: false } },
-          { "subscription.lastExpiredEmailSentAt": null },
-        ],
+        "subscription.expiresAt": {
+          $exists: true,
+          $ne: null,
+          $lt: todayStart,
+        },
       });
 
-      let count = 0;
+      let emailCount = 0;
+      let downgradedCount = 0;
+      let alreadyFreeCount = 0;
+      let skippedEmailAlreadySent = 0;
 
       for (const user of users) {
-        const plan = await SubscriptionPlan.findOne({
+        const currentPlan = await SubscriptionPlan.findOne({
           planId: user?.subscription?.planId,
         }).lean();
 
-        await sendSubscriptionLifecycleEmail({
-          userType,
-          user,
-          plan,
-          eventType: "expired",
+        if (isFreePlanLike(currentPlan) || isFreePlanLike(user?.subscription)) {
+          await downgradeUserToFreePlan(user, userType, now, {
+            rebuildFeatures: false,
+          });
+
+          alreadyFreeCount += 1;
+          continue;
+        }
+
+        let userToDowngrade = user;
+
+        const expiredEmailAlreadySent =
+          !!user?.subscription?.lastExpiredEmailSentAt;
+
+        if (!expiredEmailAlreadySent) {
+          // Atomic lock: mark expired email as sent before sending.
+          // This ensures hourly cron/API cannot send duplicate expired emails.
+          const lockedUser = await Model.findOneAndUpdate(
+            {
+              _id: user._id,
+              $or: [
+                { "subscription.lastExpiredEmailSentAt": { $exists: false } },
+                { "subscription.lastExpiredEmailSentAt": null },
+              ],
+            },
+            {
+              $set: {
+                "subscription.lastExpiredEmailSentAt": now,
+              },
+            },
+            { new: true }
+          );
+
+          if (lockedUser) {
+            userToDowngrade = lockedUser;
+
+            await sendSubscriptionLifecycleEmail({
+              userType,
+              user: lockedUser,
+              plan: currentPlan,
+              eventType: "expired",
+            });
+
+            emailCount += 1;
+          } else {
+            skippedEmailAlreadySent += 1;
+          }
+        } else {
+          skippedEmailAlreadySent += 1;
+        }
+
+        // Always downgrade expired paid user to free,
+        // but do not send email again if already sent.
+        await downgradeUserToFreePlan(userToDowngrade, userType, now, {
+          markExpiredEmailSent: false,
         });
 
-        user.subscriptionExpired = true;
-        user.subscription = user.subscription || {};
-        user.subscription.lastExpiredEmailSentAt = new Date();
-        await user.save();
-
-        count += 1;
+        downgradedCount += 1;
       }
 
-      return count;
+      return {
+        emailCount,
+        downgradedCount,
+        alreadyFreeCount,
+        skippedEmailAlreadySent,
+      };
     };
 
-    const brandCount = await processUsers(Brand, "Brand");
-    const influencerCount = await processUsers(Influencer, "Influencer");
+    const brandResult = await processUsers(Brand, "Brand");
+    const influencerResult = await processUsers(Influencer, "Influencer");
 
     return res.status(200).json({
-      message: "Expired subscription emails processed",
-      brandCount,
-      influencerCount,
-      total: brandCount + influencerCount,
+      message: "Expired subscriptions processed. Emails are sent once only.",
+      brand: brandResult,
+      influencer: influencerResult,
+      totalEmails: brandResult.emailCount + influencerResult.emailCount,
+      totalDowngraded:
+        brandResult.downgradedCount + influencerResult.downgradedCount,
+      totalAlreadyFree:
+        brandResult.alreadyFreeCount + influencerResult.alreadyFreeCount,
+      totalSkippedEmailAlreadySent:
+        brandResult.skippedEmailAlreadySent +
+        influencerResult.skippedEmailAlreadySent,
     });
   } catch (err) {
     console.error("sendExpiredSubscriptionEmails error:", err);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+
+function isFreePlanLike(planOrSub = {}) {
+  const name = String(planOrSub?.name || planOrSub?.planName || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    name === "free" ||
+    planOrSub?.monthlyCost === 0 ||
+    planOrSub?.isFree === true ||
+    String(planOrSub?.slug || "").toLowerCase() === "free"
+  );
+}
+
+function getFeatureLimit(value) {
+  if (typeof value === "number") return value;
+  if (value && typeof value === "object" && value.unlimited === true) return -1;
+  return 0;
+}
+
+function buildFreeFeatureSnapshot(freePlan, previousFeatures = []) {
+  const previousMap = new Map(
+    (Array.isArray(previousFeatures) ? previousFeatures : [])
+      .filter((f) => f && f.key)
+      .map((f) => [f.key, f])
+  );
+
+  return (freePlan.features || []).map((feature) => {
+    const limit = getFeatureLimit(feature.value);
+
+    const previousUsed = Number(previousMap.get(feature.key)?.used || 0);
+    let used = Number.isFinite(previousUsed) && previousUsed > 0 ? previousUsed : 0;
+
+    // Do not reload credits.
+    // If paid used is more than free limit, cap it to free limit.
+    if (limit >= 0) {
+      used = Math.min(used, limit);
+    }
+
+    return {
+      key: feature.key,
+      limit,
+      used,
+    };
+  });
+}
+
+
+// POST /subscription-plans/brand/move-expired-to-free
+// body:
+// {
+//   "brandId": "singleBrandMongoId"
+// }
+//
+// OR
+//
+// {
+//   "brandIds": ["brandMongoId1", "brandMongoId2"]
+// }
+exports.moveExpiredBrandsToFree = async (req, res) => {
+  try {
+    const { brandId, brandIds } = req.body || {};
+
+    const ids = Array.isArray(brandIds)
+      ? brandIds
+      : brandId
+        ? [brandId]
+        : [];
+
+    if (!ids.length) {
+      return res.status(400).json({
+        message: "brandId or brandIds is required in body",
+      });
+    }
+
+    const freePlan = await SubscriptionPlan.findOne({
+      role: "Brand",
+      status: "active",
+      $or: [
+        { name: /^free$/i },
+        { monthlyCost: 0 },
+        { planId: /_free$/i },
+        { name: /free/i },
+        { isFree: true },
+        { slug: "free" },
+      ],
+    }).lean();
+
+    if (!freePlan) {
+      return res.status(404).json({
+        message: "Active Brand free plan not found",
+      });
+    }
+
+    const now = new Date();
+
+    const brands = await Brand.find({
+      _id: { $in: ids },
+    });
+
+    const result = {
+      requested: ids.length,
+      found: brands.length,
+      movedToFree: 0,
+      skippedNotExpired: 0,
+      skippedAlreadyFree: 0,
+      skippedNoSubscription: 0,
+      failed: [],
+      updatedBrands: [],
+    };
+
+    for (const brand of brands) {
+      try {
+        const sub = brand.subscription || {};
+
+        if (!sub.planId) {
+          result.skippedNoSubscription += 1;
+          result.updatedBrands.push({
+            brandId: String(brand._id),
+            status: "skipped_no_subscription",
+          });
+          continue;
+        }
+
+        const currentPlan = await SubscriptionPlan.findOne({
+          planId: sub.planId,
+        }).lean();
+
+        if (isFreePlanLike(currentPlan) || isFreePlanLike(sub)) {
+          result.skippedAlreadyFree += 1;
+          result.updatedBrands.push({
+            brandId: String(brand._id),
+            status: "skipped_already_free",
+            currentPlanId: sub.planId,
+            currentPlanName: sub.planName,
+          });
+          continue;
+        }
+
+        const expiresAt = sub.expiresAt ? new Date(sub.expiresAt) : null;
+
+        if (
+          !expiresAt ||
+          Number.isNaN(expiresAt.getTime()) ||
+          expiresAt.getTime() > now.getTime()
+        ) {
+          result.skippedNotExpired += 1;
+          result.updatedBrands.push({
+            brandId: String(brand._id),
+            status: "skipped_not_expired",
+            currentPlanId: sub.planId,
+            currentPlanName: sub.planName,
+            expiresAt: sub.expiresAt || null,
+          });
+          continue;
+        }
+
+        const oldPlanId = sub.planId;
+        const oldPlanName = sub.planName;
+
+        brand.subscription = brand.subscription || {};
+        brand.subscription.planId = freePlan.planId;
+        brand.subscription.planName = freePlan.name || "free";
+        brand.subscription.startedAt = now;
+
+        // Free plan should not expire.
+        brand.subscription.expiresAt = null;
+
+        // Preserve used credits. Do not restart from 0.
+        brand.subscription.features = buildFreeFeatureSnapshot(
+          freePlan,
+          sub.features
+        );
+
+        brand.subscription.lastExpiringSoonEmailSentAt = null;
+        brand.subscription.lastExpiredEmailSentAt = now;
+
+        // After moving to free, user is no longer in expired state.
+        brand.subscriptionExpired = false;
+
+        await brand.save();
+
+        result.movedToFree += 1;
+        result.updatedBrands.push({
+          brandId: String(brand._id),
+          status: "moved_to_free",
+          oldPlanId,
+          oldPlanName,
+          newPlanId: freePlan.planId,
+          newPlanName: freePlan.name || "free",
+        });
+      } catch (brandErr) {
+        result.failed.push({
+          brandId: String(brand?._id || ""),
+          error: brandErr.message,
+        });
+      }
+    }
+
+    return res.status(200).json({
+      message: "Expired selected brands processed",
+      freePlanId: freePlan.planId,
+      freePlanName: freePlan.name || "free",
+      result,
+    });
+  } catch (err) {
+    console.error("moveExpiredBrandsToFree error:", err);
+    return res.status(500).json({
+      message: "Internal server error while moving brands to free",
+    });
   }
 };
