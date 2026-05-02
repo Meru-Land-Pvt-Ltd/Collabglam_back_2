@@ -135,4 +135,9 @@ router.post("/mailboxes/my-accounts/:email/resume", adminAuth, outreachMailboxCo
 router.post("/mailboxes/my-accounts/:email/warmup/enable", adminAuth, outreachMailboxController.enableMyMailboxWarmup);
 router.post("/mailboxes/my-accounts/:email/warmup/disable", adminAuth, outreachMailboxController.disableMyMailboxWarmup);
 
+router.post(
+  "/campaigns/:id/sequence-preview", adminAuth,
+  outreachController.previewCampaignSequence
+);
+
 module.exports = router;

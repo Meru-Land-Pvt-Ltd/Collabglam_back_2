@@ -77,7 +77,10 @@ exports.listPendingReplies = async (req, res) => {
       filter.campaignId = String(req.query.campaignId).trim();
     }
 
-    if (normalizeRole(req.admin?.role) === "super_admin" && String(req.query?.RHId || "").trim()) {
+    if (
+      normalizeRole(req.admin?.role) === "super_admin" &&
+      String(req.query?.RHId || "").trim()
+    ) {
       filter.RHId = String(req.query.RHId).trim();
     }
 
@@ -95,16 +98,60 @@ exports.listPendingReplies = async (req, res) => {
       .populate("sdrId", "name email role")
       .populate("RHId", "name email role")
       .populate("assignedBmeId", "name email role")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const rowsWithFallbackCampaign = await Promise.all(
+      rows.map(async (item) => {
+        if (item?.campaignId?._id || !item?.prospectId?._id) {
+          return item;
+        }
+
+        const thread = await ConversationThread.findOne({
+          prospectId: item.prospectId._id,
+        })
+          .populate("campaignId", "name")
+          .lean();
+
+        if (thread?.campaignId?._id) {
+          item.campaignId = {
+            _id: thread.campaignId._id,
+            name: thread.campaignId.name || "Unnamed Campaign",
+          };
+        }
+
+        return item;
+      })
+    );
+
+    const shouldHideBrandEmail = normalizeRole(req.admin?.role) !== "super_admin";
+
+    const sanitizedRows = rowsWithFallbackCampaign.map((item) => {
+      const primaryContact = item?.prospectId?.primaryContact || {};
+
+      return {
+        ...item,
+        prospectId: item.prospectId
+          ? {
+              ...item.prospectId,
+              primaryContact: {
+                ...primaryContact,
+                email: shouldHideBrandEmail ? "" : primaryContact.email || "",
+              },
+            }
+          : null,
+      };
+    });
 
     const search = String(req.query?.search || "").trim().toLowerCase();
+
     const data = search
-      ? rows.filter((item) => {
+      ? sanitizedRows.filter((item) => {
           const haystack = [
             item?.campaignId?.name,
             item?.prospectId?.companyName,
             item?.prospectId?.primaryContact?.name,
-            item?.prospectId?.primaryContact?.email,
+            shouldHideBrandEmail ? "" : item?.prospectId?.primaryContact?.email,
             item?.latestReplySubject,
             item?.latestReplySnippet,
             item?.prospectId?.stage,
@@ -121,7 +168,7 @@ exports.listPendingReplies = async (req, res) => {
 
           return haystack.includes(search);
         })
-      : rows;
+      : sanitizedRows;
 
     return res.status(200).json({
       success: true,

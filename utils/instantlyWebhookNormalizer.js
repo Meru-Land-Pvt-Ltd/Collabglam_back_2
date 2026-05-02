@@ -11,6 +11,9 @@ function normalizeInstantlyWebhook(body = {}) {
     body.contact_email ||
     body.data?.email ||
     body.data?.lead_email ||
+    body.data?.contact_email ||
+    body.data?.lead?.email ||
+    body.lead?.email ||
     "";
 
   const threadId =
@@ -54,8 +57,11 @@ function normalizeInstantlyWebhook(body = {}) {
     body.body_text ||
     body.text ||
     body.data?.reply_text ||
+    body.data?.email_text ||
     body.data?.body_text ||
     body.data?.text ||
+    body.data?.email?.body_text ||
+    body.email?.body_text ||
     "";
 
   const campaignId =

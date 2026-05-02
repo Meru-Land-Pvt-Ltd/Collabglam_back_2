@@ -220,10 +220,23 @@ function normalizeSequenceStep(step = {}, index = 0) {
       .trim()
       .toLowerCase(),
     variants: variantsInput
-      .map((variant) => ({
-        subject: String(variant?.subject || "").trim(),
-        body: String(variant?.body || variant?.bodyText || "").trim(),
-      }))
+      .map((variant) => {
+        const body = String(
+          variant?.body ||
+          variant?.bodyHtml ||
+          variant?.body_html ||
+          variant?.bodyText ||
+          variant?.body_text ||
+          ""
+        ).trim();
+
+        return {
+          subject: String(variant?.subject || "").trim(),
+          body,
+          preheaderText: String(variant?.preheaderText || variant?.preheader_text || "").trim(),
+          signatureHtml: String(variant?.signatureHtml || variant?.signature_html || "").trim(),
+        };
+      })
       .filter((variant) => variant.subject || variant.body),
   };
 }
@@ -310,21 +323,129 @@ function buildInstantlyCampaignSchedule(schedule = {}) {
   };
 }
 
+function decodeHtmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function htmlToSequencePlainText(value = "") {
+  return decodeHtmlEntities(
+    String(value || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(div|p|li|tr|h1|h2|h3|h4|h5|h6)>/gi, "\n")
+      .replace(
+        /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)<\/a>/gi,
+        (_, href, text) => {
+          const label = String(text || "").replace(/<[^>]*>/g, "").trim();
+          const url = String(href || "").trim();
+
+          if (!url) return label;
+          if (!label || label === url) return url;
+
+          return `${label}: ${url}`;
+        }
+      )
+      .replace(/<[^>]*>/g, "")
+  )
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function escapeSequenceHtml(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function sequenceTextToHtml(value = "") {
+  return htmlToSequencePlainText(value)
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeSequenceHtml(paragraph).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+}
+
+function normalizeSequenceBodyForInstantly(value = "") {
+  const plainText = htmlToSequencePlainText(value);
+
+  if (!plainText) return "";
+
+  /*
+    Keep campaign sequence payload plain text by default.
+    Some Instantly workspaces save subject but blank the body when rich HTML is sent in
+    sequences[].steps[].variants[].body.
+  */
+  return plainText;
+}
+
 function buildInstantlySequences(sequences = []) {
   const normalized = normalizeCampaignSequences(sequences);
 
   return [
     {
-      steps: normalized.map((step) => ({
-        type: step.type,
-        delay: step.delay,
-        delay_unit: step.delayUnit,
-        pre_delay: step.preDelay,
-        pre_delay_unit: step.preDelayUnit,
-        variants: step.variants.map((variant) => ({
-          subject: String(variant.subject || "").trim(),
-          body: htmlToPlainText(variant.body),
-        })),
+      steps: normalized.map((step, stepIndex) => ({
+        type: "email",
+        delay: Number(step.delay || 0),
+        delay_unit: String(step.delayUnit || step.delay_unit || "days")
+          .trim()
+          .toLowerCase(),
+        pre_delay: Number(step.preDelay || step.pre_delay || 0),
+        pre_delay_unit: String(step.preDelayUnit || step.pre_delay_unit || "days")
+          .trim()
+          .toLowerCase(),
+
+        variants: step.variants.map((variant, variantIndex) => {
+          const subject = String(variant.subject || "").trim();
+
+          const rawBody = String(
+            variant.body ||
+              variant.bodyHtml ||
+              variant.body_html ||
+              variant.bodyText ||
+              variant.body_text ||
+              ""
+          ).trim();
+
+          const body = normalizeSequenceBodyForInstantly(rawBody);
+          const bodyText = htmlToSequencePlainText(body);
+
+          console.log("Instantly sequence payload debug", {
+            step: stepIndex + 1,
+            variant: variantIndex + 1,
+            subject,
+            rawBodyLength: rawBody.length,
+            bodyLength: body.length,
+            bodyTextLength: bodyText.length,
+            bodyPreview: bodyText.slice(0, 160),
+            bodyContainsHtml: /<\/?[a-z][\s\S]*>/i.test(body),
+          });
+
+          if (!bodyText) {
+            const error = new Error(
+              `Step ${stepIndex + 1}, Variant ${variantIndex + 1}: email body is empty before Instantly sync`
+            );
+            error.statusCode = 400;
+            throw error;
+          }
+
+          return {
+            subject,
+            body,
+            v_disabled: false,
+          };
+        }),
       })),
     },
   ];
@@ -344,6 +465,11 @@ function buildCampaignCreatePayload({
   const sendingOptions = normalizeSendingOptions(normalizedConfiguration.sendingOptions);
   const rawPayload = { ...(rawCampaignPayload || {}) };
 
+  delete rawPayload.id;
+  delete rawPayload._id;
+  delete rawPayload.status;
+  delete rawPayload.timestamp_created;
+  delete rawPayload.timestamp_updated;
   delete rawPayload.name;
   delete rawPayload.email_list;
   delete rawPayload.campaign_schedule;
@@ -363,8 +489,12 @@ function buildCampaignCreatePayload({
     stop_on_auto_reply: sendingOptions.stopOnAutoReply,
     link_tracking: sendingOptions.linkTracking,
     open_tracking: sendingOptions.openTracking,
-    text_only: sendingOptions.textOnly,
-    first_email_text_only: sendingOptions.firstEmailTextOnly,
+
+    // Force rich-text related flags off while sequence body delivery is being stabilized.
+    // The body is already normalized above.
+    text_only: false,
+    first_email_text_only: false,
+
     is_evergreen: sendingOptions.isEvergreen,
     prioritize_new_leads: sendingOptions.prioritizeNewLeads,
     match_lead_esp: sendingOptions.matchLeadEsp,
@@ -627,11 +757,19 @@ async function getManagedCampaign(req, campaignId) {
   throw error;
 }
 
+function idsEqual(a, b) {
+  return String(a || "") === String(b || "");
+}
+
+function getAdminIdFromDoc(value) {
+  return String(value?._id || value || "");
+}
+
 async function getAccessibleCampaign(req, campaignId) {
   const campaign = await OutreachCampaign.findById(campaignId)
-    .populate("sdrId", "name email role")
-    .populate("RHId", "name email role")
-    .populate("IMEId", "name email role");
+    .populate("sdrId", "name email role parentAdmin rootAdmin")
+    .populate("RHId", "name email role parentAdmin rootAdmin")
+    .populate("IMEId", "name email role parentAdmin rootAdmin");
 
   if (!campaign) {
     const error = new Error("Campaign not found");
@@ -639,33 +777,84 @@ async function getAccessibleCampaign(req, campaignId) {
     throw error;
   }
 
-  const adminId = String(req.admin?.adminId || req.admin?._id || "");
-  const role = String(req.admin?.role || "").trim().toLowerCase();
+  const adminId = String(
+    req.admin?.adminId ||
+    req.admin?._id ||
+    req.admin?.id ||
+    ""
+  ).trim();
 
-  if (role === "super_admin") return campaign;
+  const role = String(req.admin?.role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 
-  if (
-    role === "sdr" &&
-    String(campaign.sdrId?._id || campaign.sdrId) === adminId
-  ) {
+  if (!adminId) {
+    const error = new Error("Unauthorized");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (role === "super_admin" || role === "superadmin") {
     return campaign;
   }
 
-  if (
-    role === "ime" &&
-    String(campaign.IMEId?._id || campaign.IMEId) === adminId
-  ) {
+  const campaignSdrId = getAdminIdFromDoc(campaign.sdrId);
+  const campaignRhId = getAdminIdFromDoc(campaign.RHId);
+  const campaignImeId = getAdminIdFromDoc(campaign.IMEId);
+
+  const sdrParentAdmin = getAdminIdFromDoc(campaign.sdrId?.parentAdmin);
+  const sdrRootAdmin = getAdminIdFromDoc(campaign.sdrId?.rootAdmin);
+
+  const imeParentAdmin = getAdminIdFromDoc(campaign.IMEId?.parentAdmin);
+  const imeRootAdmin = getAdminIdFromDoc(campaign.IMEId?.rootAdmin);
+
+  if (role === "sdr" && idsEqual(campaignSdrId, adminId)) {
+    return campaign;
+  }
+
+  if (role === "ime" && idsEqual(campaignImeId, adminId)) {
     return campaign;
   }
 
   if (role === "revenue_head" || role === "rh") {
-    const isOwnedRh =
-      String(campaign.RHId?._id || campaign.RHId) === adminId;
+    const isDirectRh = idsEqual(campaignRhId, adminId);
+
+    const isParentOfSdr =
+      idsEqual(sdrParentAdmin, adminId) ||
+      idsEqual(sdrRootAdmin, adminId);
+
+    const isParentOfIme =
+      idsEqual(imeParentAdmin, adminId) ||
+      idsEqual(imeRootAdmin, adminId);
 
     const isImeCampaign =
       String(campaign.flowType || "").trim().toLowerCase() === "ime_influencer";
 
-    if (isOwnedRh || isImeCampaign) {
+    if (isDirectRh || isParentOfSdr || isParentOfIme || isImeCampaign) {
+      return campaign;
+    }
+  }
+
+  if (role === "bme") {
+    const bme = await AdminModel.findById(adminId)
+      .select("_id parentAdmin rootAdmin")
+      .lean();
+
+    const bmeParentAdmin = getAdminIdFromDoc(bme?.parentAdmin);
+    const bmeRootAdmin = getAdminIdFromDoc(bme?.rootAdmin);
+
+    const sameRhAsCampaign =
+      idsEqual(campaignRhId, bmeParentAdmin) ||
+      idsEqual(campaignRhId, bmeRootAdmin);
+
+    const sameRhAsCampaignSdr =
+      idsEqual(sdrParentAdmin, bmeParentAdmin) ||
+      idsEqual(sdrParentAdmin, bmeRootAdmin) ||
+      idsEqual(sdrRootAdmin, bmeParentAdmin) ||
+      idsEqual(sdrRootAdmin, bmeRootAdmin);
+
+    if (sameRhAsCampaign || sameRhAsCampaignSdr) {
       return campaign;
     }
   }
@@ -1002,6 +1191,57 @@ function extractAnalyticsRows(payload) {
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.rows)) return payload.rows;
   return payload ? [payload] : [];
+}
+
+function getAnalyticsDateRange(range = "last_4_weeks") {
+  const end = new Date();
+  const start = new Date(end);
+
+  const value = String(range || "").trim();
+
+  if (value === "last_7_days") {
+    start.setDate(end.getDate() - 6);
+  } else if (value === "last_3_months") {
+    start.setMonth(end.getMonth() - 3);
+  } else {
+    // default: last_4_weeks
+    start.setDate(end.getDate() - 27);
+  }
+
+  return {
+    start_date: formatDateOnly(start),
+    end_date: formatDateOnly(end),
+  };
+}
+
+function buildAnalyticsParams(query = {}, campaignId = "", mode = "overview") {
+  const {
+    range,
+    _ts,
+    campaign_id,
+    id,
+    ids,
+    ...rest
+  } = query || {};
+
+  const dateRange = getAnalyticsDateRange(range);
+
+  const params = {
+    ...rest,
+    ...dateRange,
+  };
+
+  if (mode === "overview") {
+    params.id = campaignId;
+  } else {
+    params.campaign_id = campaignId;
+  }
+
+  if (mode === "steps") {
+    params.include_opportunities_count = true;
+  }
+
+  return params;
 }
 
 exports.createOutreachCampaign = async (req, res) => {
@@ -1604,7 +1844,10 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
         rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
       });
 
-      await instantlyService.updateCampaign(campaign.instantly.campaignId, updatePayload);
+      await forceSyncInstantlyCampaignBeforeActivation({
+        instantlyCampaignId: campaign.instantly.campaignId,
+        createCampaignPayload: updatePayload,
+      });
 
       campaign.configuration.lastSyncedAt = new Date();
       campaign.configuration.lastSyncedBy = req.admin.adminId;
@@ -1710,10 +1953,10 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
       rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
     });
 
-    const syncResult = await instantlyService.updateCampaign(
-      campaign.instantly.campaignId,
-      updatePayload
-    );
+    const syncResult = await forceSyncInstantlyCampaignBeforeActivation({
+      instantlyCampaignId: campaign.instantly.campaignId,
+      createCampaignPayload: updatePayload,
+    });
 
     campaign.instantly.accountEmails = senderEmails;
     campaign.instantly.senderAccountEmail = primarySenderEmail;
@@ -1792,6 +2035,197 @@ function buildPreviewVariablesFromProspect(prospect = {}, extra = {}) {
   return vars;
 }
 
+function stripHtmlToText(value = "") {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|tr|h1|h2|h3|h4|h5|h6)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function renderSequencePreviewContent(variant = {}, previewVars = {}) {
+  const renderedSubject = renderTemplate(String(variant.subject || ""), previewVars);
+
+  const renderedBodySource = renderTemplate(String(variant.body || ""), previewVars);
+  const renderedPreheader = renderTemplate(
+    String(variant.preheaderText || ""),
+    previewVars
+  );
+  const renderedSignatureHtml = renderTemplate(
+    String(variant.signatureHtml || ""),
+    previewVars
+  );
+
+  const bodyHasHtml = /<\/?[a-z][\s\S]*>/i.test(renderedBodySource);
+
+  const bodyHtml = bodyHasHtml
+    ? renderedBodySource
+    : textToHtml(renderedBodySource);
+
+  const bodyText = bodyHasHtml
+    ? stripHtmlToText(renderedBodySource)
+    : String(renderedBodySource || "").trim();
+
+  const preheaderHtml = renderedPreheader
+    ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(
+      renderedPreheader
+    )}</div>`
+    : "";
+
+  const signatureHtml = renderedSignatureHtml
+    ? `<div style="margin-top:16px;">${renderedSignatureHtml}</div>`
+    : "";
+
+  return {
+    subject: renderedSubject,
+    bodyText,
+    bodyHtml: `${preheaderHtml}${bodyHtml}${signatureHtml}`,
+    preheaderText: renderedPreheader,
+    signatureHtml: renderedSignatureHtml,
+  };
+}
+
+exports.previewCampaignSequence = async (req, res) => {
+  try {
+
+    ensureRole(req.admin, ["sdr", "ime", "bme", "revenue_head", "rh", "super_admin"]);
+
+    const campaign = await getAccessibleCampaign(req, req.params.id);
+
+    const stepOrder = Number(req.body?.stepOrder || 1);
+    const variantIndex = Math.max(0, Number(req.body?.variantIndex || 0));
+
+    const steps = Array.isArray(campaign?.configuration?.sequences)
+      ? campaign.configuration.sequences
+      : [];
+
+    const step =
+      steps.find((item) => Number(item?.stepOrder) === stepOrder) || steps[0];
+
+    if (!step) {
+      return res.status(400).json({
+        success: false,
+        message: "No sequence step found",
+      });
+    }
+
+    const selectedVariant =
+      step?.variants?.[variantIndex] ||
+      step?.variants?.[0] || {
+        subject: "",
+        body: "",
+        preheaderText: "",
+        signatureHtml: "",
+      };
+
+    const variantOverride = req.body?.variantOverride || {};
+
+    const variant = {
+      subject:
+        variantOverride.subject !== undefined
+          ? variantOverride.subject
+          : selectedVariant.subject,
+      body:
+        variantOverride.body !== undefined
+          ? variantOverride.body
+          : selectedVariant.body,
+      preheaderText:
+        variantOverride.preheaderText !== undefined
+          ? variantOverride.preheaderText
+          : selectedVariant.preheaderText,
+      signatureHtml:
+        variantOverride.signatureHtml !== undefined
+          ? variantOverride.signatureHtml
+          : selectedVariant.signatureHtml,
+    };
+
+    let previewProspect = null;
+
+    if (req.body?.prospectId) {
+      const allowedProspectIds = new Set(
+        (campaign.prospectIds || []).map((item) => String(item))
+      );
+
+      if (!allowedProspectIds.has(String(req.body.prospectId))) {
+        return res.status(403).json({
+          success: false,
+          message: "This lead does not belong to this campaign",
+          details: null,
+        });
+      }
+
+      previewProspect = await ProspectBrand.findById(req.body.prospectId).lean();
+    }
+
+    if (
+      !previewProspect &&
+      Array.isArray(campaign?.prospectIds) &&
+      campaign.prospectIds.length
+    ) {
+      previewProspect = await ProspectBrand.findById(campaign.prospectIds[0]).lean();
+    }
+
+    const previewVars = buildPreviewVariablesFromProspect(
+      previewProspect || {},
+      req.body?.previewVars || {}
+    );
+
+    const rendered = renderSequencePreviewContent(variant, previewVars);
+
+    const leadName =
+      previewProspect?.companyName ||
+      previewVars.companyName ||
+      "Lead Unknown";
+
+    const contactName =
+      previewProspect?.primaryContact?.name ||
+      previewVars.fullName ||
+      previewVars.firstName ||
+      "Contact Unknown";
+
+    const contactEmail =
+      previewProspect?.primaryContact?.email ||
+      previewVars.email ||
+      "";
+
+    return res.status(200).json({
+      success: true,
+      message: "Sequence preview generated successfully",
+      data: {
+        stepOrder,
+        variantIndex,
+        lead: previewProspect
+          ? {
+            _id: String(previewProspect._id),
+            leadName,
+            contactName,
+            email: contactEmail,
+          }
+          : null,
+        subject: rendered.subject,
+        bodyText: rendered.bodyText,
+        bodyHtml: rendered.bodyHtml,
+        preheaderText: rendered.preheaderText,
+        signatureHtml: rendered.signatureHtml,
+        previewVars,
+      },
+    });
+  } catch (error) {
+    const payload = getAxiosErrorPayload(error, "Failed to preview sequence");
+    return res.status(payload.statusCode).json({
+      success: false,
+      ...payload,
+    });
+  }
+};
+
 exports.sendCampaignTestEmail = async (req, res) => {
   try {
     const campaign = await getManagedCampaign(req, req.params.id);
@@ -1856,36 +2290,15 @@ exports.sendCampaignTestEmail = async (req, res) => {
       req.body?.previewVars || {}
     );
 
-    const renderedSubject = renderTemplate(String(variant.subject || ""), previewVars);
-    const renderedBodyText = renderTemplate(String(variant.body || ""), previewVars);
-    const renderedPreheader = renderTemplate(
-      String(variant.preheaderText || ""),
-      previewVars
-    );
-    const renderedSignatureHtml = renderTemplate(
-      String(variant.signatureHtml || ""),
-      previewVars
-    );
-
-    const preheaderHtml = renderedPreheader
-      ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(
-        renderedPreheader
-      )}</div>`
-      : "";
-
-    const signatureHtml = renderedSignatureHtml
-      ? `<div style="margin-top:16px;">${renderedSignatureHtml}</div>`
-      : "";
-
-    const html = `${preheaderHtml}${textToHtml(renderedBodyText)}${signatureHtml}`;
+    const rendered = renderSequencePreviewContent(variant, previewVars);
 
     const result = await instantlyService.sendTestEmail({
       eaccount: accountEmail,
       to_address_email_list: toEmail,
-      subject: renderedSubject,
+      subject: rendered.subject,
       body: {
-        text: renderedBodyText,
-        html,
+        text: rendered.bodyText,
+        html: rendered.bodyHtml,
       },
     });
 
@@ -2336,6 +2749,224 @@ exports.downloadOutreachCampaignAnalyticsCsv = async (req, res) => {
   }
 };
 
+function sleep(ms = 500) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getInstantlyCampaignObject(payload = {}) {
+  return payload?.data || payload?.campaign || payload;
+}
+
+function getInstantlySequencesFromPayload(payload = {}) {
+  const campaign = getInstantlyCampaignObject(payload);
+  return Array.isArray(campaign?.sequences) ? campaign.sequences : [];
+}
+
+function getInstantlyVariantBody(variant = {}) {
+  return String(
+    variant.body ||
+      variant.bodyText ||
+      variant.body_text ||
+      variant.bodyHtml ||
+      variant.body_html ||
+      variant.email_body ||
+      variant.emailBody ||
+      variant.content ||
+      ""
+  );
+}
+
+function getInstantlySequenceBodyDebug(payload = {}) {
+  const sequences = getInstantlySequencesFromPayload(payload);
+
+  return sequences.map((sequence, sequenceIndex) => ({
+    sequence: sequenceIndex + 1,
+    steps: (sequence.steps || []).map((step, stepIndex) => ({
+      step: stepIndex + 1,
+      variants: (step.variants || []).map((variant, variantIndex) => {
+        const body = getInstantlyVariantBody(variant);
+        const bodyText = htmlToSequencePlainText(body);
+
+        return {
+          variant: variantIndex + 1,
+          subject: variant.subject || "",
+          bodyTextLength: bodyText.length,
+          bodyPreview: bodyText.slice(0, 160),
+          rawBodyLength: String(body || "").length,
+          variantKeys: Object.keys(variant || {}),
+        };
+      }),
+    })),
+  }));
+}
+
+function getFirstInstantlySequenceBodyLength(payload = {}) {
+  const sequences = getInstantlySequencesFromPayload(payload);
+  const variant = sequences?.[0]?.steps?.[0]?.variants?.[0] || {};
+  const body = getInstantlyVariantBody(variant);
+
+  return htmlToSequencePlainText(body).length;
+}
+
+function getLocalSequenceBodyDebug(createCampaignPayload = {}) {
+  return createCampaignPayload?.sequences?.[0]?.steps?.map((step, stepIndex) => ({
+    step: stepIndex + 1,
+    variants: (step.variants || []).map((variant, variantIndex) => {
+      const bodyText = htmlToSequencePlainText(variant.body || "");
+
+      return {
+        variant: variantIndex + 1,
+        subject: variant.subject || "",
+        bodyTextLength: bodyText.length,
+        bodyPreview: bodyText.slice(0, 160),
+        rawBodyLength: String(variant.body || "").length,
+        bodyContainsHtml: /<\/?[a-z][\s\S]*>/i.test(variant.body || ""),
+      };
+    }),
+  }));
+}
+
+function buildSequenceStepsForSync(createCampaignPayload = {}, mode = "plain") {
+  return (createCampaignPayload?.sequences?.[0]?.steps || []).map((step) => ({
+    type: "email",
+    delay: Number(step.delay || 0),
+    delay_unit: String(step.delay_unit || "days").trim().toLowerCase(),
+    pre_delay: Number(step.pre_delay || 0),
+    pre_delay_unit: String(step.pre_delay_unit || "days").trim().toLowerCase(),
+    variants: (step.variants || []).map((variant) => {
+      const plainBody = htmlToSequencePlainText(variant.body || "");
+      const finalBody = mode === "html" ? sequenceTextToHtml(plainBody) : plainBody;
+
+      return {
+        subject: String(variant.subject || "").trim(),
+        body: finalBody,
+        v_disabled: Boolean(variant.v_disabled),
+      };
+    }),
+  }));
+}
+
+function cloneCampaignPayloadWithSequenceMode(createCampaignPayload = {}, mode = "plain") {
+  return {
+    ...createCampaignPayload,
+    sequences: [
+      {
+        steps: buildSequenceStepsForSync(createCampaignPayload, mode),
+      },
+    ],
+  };
+}
+
+function buildSequenceOnlyPayload(createCampaignPayload = {}, mode = "plain") {
+  return {
+    sequences: [
+      {
+        steps: buildSequenceStepsForSync(createCampaignPayload, mode),
+      },
+    ],
+  };
+}
+
+function buildInstantlySequenceSyncCandidates(createCampaignPayload = {}) {
+  return [
+    {
+      name: "full_payload_plain_body",
+      payload: cloneCampaignPayloadWithSequenceMode(createCampaignPayload, "plain"),
+    },
+    {
+      name: "sequence_only_plain_body",
+      payload: buildSequenceOnlyPayload(createCampaignPayload, "plain"),
+    },
+    {
+      name: "full_payload_html_body",
+      payload: cloneCampaignPayloadWithSequenceMode(createCampaignPayload, "html"),
+    },
+    {
+      name: "sequence_only_html_body",
+      payload: buildSequenceOnlyPayload(createCampaignPayload, "html"),
+    },
+  ];
+}
+
+async function exportInstantlyCampaignForSequenceVerification(instantlyCampaignId) {
+  if (typeof instantlyService.exportCampaign === "function") {
+    return instantlyService.exportCampaign(instantlyCampaignId);
+  }
+
+  if (typeof instantlyService.getCampaign === "function") {
+    return instantlyService.getCampaign(instantlyCampaignId);
+  }
+
+  const error = new Error(
+    "Neither instantlyService.exportCampaign nor instantlyService.getCampaign is defined."
+  );
+  error.statusCode = 500;
+  throw error;
+}
+
+async function forceSyncInstantlyCampaignBeforeActivation({
+  instantlyCampaignId,
+  createCampaignPayload,
+}) {
+  const candidates = buildInstantlySequenceSyncCandidates(createCampaignPayload);
+  const attempts = [];
+
+  for (const candidate of candidates) {
+    try {
+      await instantlyService.updateCampaign(instantlyCampaignId, candidate.payload);
+      await sleep(1200);
+
+      const exportedCampaign = await exportInstantlyCampaignForSequenceVerification(
+        instantlyCampaignId
+      );
+
+      const remoteDebug = getInstantlySequenceBodyDebug(exportedCampaign);
+      const remoteBodyLength = getFirstInstantlySequenceBodyLength(exportedCampaign);
+
+      const attempt = {
+        name: candidate.name,
+        remoteBodyLength,
+        remoteDebug,
+        localDebug: getLocalSequenceBodyDebug(candidate.payload),
+      };
+
+      attempts.push(attempt);
+
+      console.log(
+        `Instantly exported campaign sequence debug (${candidate.name})`,
+        JSON.stringify(remoteDebug, null, 2)
+      );
+
+      if (remoteBodyLength > 0) {
+        return {
+          verified: true,
+          bodyTextLength: remoteBodyLength,
+          debug: remoteDebug,
+          successfulPayloadMode: candidate.name,
+          attempts,
+        };
+      }
+    } catch (error) {
+      attempts.push({
+        name: candidate.name,
+        error: error?.response?.data || error?.message || String(error),
+      });
+    }
+  }
+
+  const error = new Error(
+    "Instantly campaign was created/updated, but exported campaign sequence body is still empty after trying all supported payload formats. Campaign was not activated."
+  );
+
+  error.statusCode = 500;
+  error.details = {
+    attempts,
+    localSequenceDebug: getLocalSequenceBodyDebug(createCampaignPayload),
+  };
+
+  throw error;
+}
+
 exports.launchOutreachCampaign = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "super_admin"]);
@@ -2345,12 +2976,9 @@ exports.launchOutreachCampaign = async (req, res) => {
 
     assertCampaignSequencesAreSendable(configuration);
 
-    const imeFlow = isImeFlow(campaign);
-
     let senderAssignments = [];
     let senderEmails = [];
     let primarySenderEmail = campaign.instantly?.senderAccountEmail || "";
-    let createCampaignPayload = null;
 
     if (isImeFlow(campaign)) {
       senderAssignments = await getActiveImeSenders(campaign.IMEId);
@@ -2405,35 +3033,81 @@ exports.launchOutreachCampaign = async (req, res) => {
         rhMailbox?.email || campaign.teamMailboxes?.RHEmail || "";
     }
 
-    createCampaignPayload = buildCampaignCreatePayload({
+    const createCampaignPayload = buildCampaignCreatePayload({
       campaignName: campaign.name,
       senderEmails,
       configuration,
       rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
     });
 
+    const localSequenceDebug = getLocalSequenceBodyDebug(createCampaignPayload);
+    const firstLocalBodyLength =
+      localSequenceDebug?.[0]?.variants?.[0]?.bodyTextLength || 0;
+
+    console.log(
+      "Instantly create/update campaign payload final",
+      JSON.stringify(
+        {
+          campaignId: String(campaign._id),
+          instantlyCampaignId: campaign.instantly?.campaignId || "",
+          name: createCampaignPayload.name,
+          email_list: createCampaignPayload.email_list,
+          sequenceBodies: localSequenceDebug,
+        },
+        null,
+        2
+      )
+    );
+
+    if (!firstLocalBodyLength) {
+      return res.status(400).json({
+        success: false,
+        step: "validate_sequence_payload",
+        message: "Sequence body is empty before sending to Instantly",
+        debug: {
+          sequenceBodies: localSequenceDebug,
+        },
+      });
+    }
+
     if (
       campaign.status === OUTREACH_CAMPAIGN_STATUS.PAUSED &&
       campaign.instantly?.campaignId
     ) {
       try {
-        await instantlyService.updateCampaign(campaign.instantly.campaignId, createCampaignPayload);
+        await forceSyncInstantlyCampaignBeforeActivation({
+          instantlyCampaignId: campaign.instantly.campaignId,
+          createCampaignPayload,
+        });
+
         await instantlyService.activateCampaign(campaign.instantly.campaignId);
       } catch (error) {
         campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
         campaign.sync.providerStatus = "error";
-        campaign.sync.lastErrorCode = String(error?.response?.status || "");
+        campaign.sync.lastErrorCode = String(
+          error?.response?.status || error?.statusCode || ""
+        );
         campaign.sync.lastErrorMessage =
           error?.response?.data?.message ||
           error?.response?.data?.error ||
           error?.message ||
           "Failed to resume campaign in Instantly";
+
         await campaign.save();
 
-        const payload = getAxiosErrorPayload(error, "Failed to resume campaign in Instantly");
+        const payload = getAxiosErrorPayload(
+          error,
+          "Failed to resume campaign in Instantly"
+        );
+
         return res.status(payload.statusCode).json({
           success: false,
           step: "activate_paused_campaign",
+          debug: {
+            instantlyCampaignId: campaign.instantly.campaignId,
+            sequenceBodies: localSequenceDebug,
+            errorDetails: error?.details || null,
+          },
           ...payload,
         });
       }
@@ -2448,6 +3122,7 @@ exports.launchOutreachCampaign = async (req, res) => {
       campaign.sync.lastSyncedAt = new Date();
       campaign.status = OUTREACH_CAMPAIGN_STATUS.LAUNCHED;
       campaign.pausedAt = null;
+
       await campaign.save();
 
       return res.status(200).json({
@@ -2456,6 +3131,8 @@ exports.launchOutreachCampaign = async (req, res) => {
         data: {
           campaignId: campaign._id,
           instantlyCampaignId: campaign.instantly.campaignId,
+          senderAccountEmail: campaign.instantly.senderAccountEmail,
+          accountEmails: senderEmails,
         },
       });
     }
@@ -2472,50 +3149,63 @@ exports.launchOutreachCampaign = async (req, res) => {
       });
     }
 
-    let instantlyCampaign;
+    let instantlyCampaign = null;
+    let instantlyCampaignId = "";
+
     try {
       instantlyCampaign = await instantlyService.createCampaign(createCampaignPayload);
+      instantlyCampaignId = readExternalId(instantlyCampaign);
+
+      if (!instantlyCampaignId) {
+        const error = new Error("Instantly campaign created but no campaignId was returned");
+        error.statusCode = 400;
+        error.details = instantlyCampaign || null;
+        throw error;
+      }
+
+      await forceSyncInstantlyCampaignBeforeActivation({
+        instantlyCampaignId,
+        createCampaignPayload,
+      });
     } catch (error) {
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
       campaign.sync.providerStatus = "error";
-      campaign.sync.lastErrorCode = String(error?.response?.status || "");
+      campaign.sync.lastErrorCode = String(
+        error?.response?.status || error?.statusCode || ""
+      );
       campaign.sync.lastErrorMessage =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
         error?.message ||
-        "Failed to create campaign in Instantly";
+        "Failed to create or verify campaign in Instantly";
+
+      if (instantlyCampaignId) {
+        campaign.instantly.campaignId = instantlyCampaignId;
+      }
+
       await campaign.save();
 
-      const payload = getAxiosErrorPayload(error, "Failed to create campaign in Instantly");
+      const payload = getAxiosErrorPayload(
+        error,
+        "Failed to create or verify campaign in Instantly"
+      );
+
       return res.status(payload.statusCode).json({
         success: false,
-        step: "create_campaign",
+        step: "create_or_verify_instantly_campaign",
         debug: {
           campaignName: campaign.name,
           senderEmails,
-          createCampaignPayload,
+          instantlyCampaignId,
+          sequenceBodies: localSequenceDebug,
+          errorDetails: error?.details || null,
         },
         ...payload,
       });
     }
 
-    const instantlyCampaignId = readExternalId(instantlyCampaign);
-    if (!instantlyCampaignId) {
-      campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
-      campaign.sync.providerStatus = "error";
-      campaign.sync.lastErrorCode = "missing_campaign_id";
-      campaign.sync.lastErrorMessage = "Instantly campaign created but no campaignId was returned";
-      await campaign.save();
+    let addLeadsResult = null;
 
-      return res.status(400).json({
-        success: false,
-        step: "create_campaign",
-        message: "Instantly campaign created but no campaignId was returned",
-        details: instantlyCampaign || null,
-      });
-    }
-
-    let addLeadsResult;
     try {
       addLeadsResult = await instantlyService.addLeads({
         campaign_id: instantlyCampaignId,
@@ -2531,9 +3221,14 @@ exports.launchOutreachCampaign = async (req, res) => {
         error?.message ||
         "Failed to add leads to Instantly campaign";
       campaign.instantly.campaignId = instantlyCampaignId;
+
       await campaign.save();
 
-      const payload = getAxiosErrorPayload(error, "Failed to add leads to Instantly campaign");
+      const payload = getAxiosErrorPayload(
+        error,
+        "Failed to add leads to Instantly campaign"
+      );
+
       return res.status(payload.statusCode).json({
         success: false,
         step: "add_leads",
@@ -2546,25 +3241,39 @@ exports.launchOutreachCampaign = async (req, res) => {
     }
 
     try {
+      await forceSyncInstantlyCampaignBeforeActivation({
+        instantlyCampaignId,
+        createCampaignPayload,
+      });
+
       await instantlyService.activateCampaign(instantlyCampaignId);
     } catch (error) {
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
       campaign.sync.providerStatus = "error";
-      campaign.sync.lastErrorCode = String(error?.response?.status || "");
+      campaign.sync.lastErrorCode = String(
+        error?.response?.status || error?.statusCode || ""
+      );
       campaign.sync.lastErrorMessage =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
         error?.message ||
         "Failed to activate campaign in Instantly";
       campaign.instantly.campaignId = instantlyCampaignId;
+
       await campaign.save();
 
-      const payload = getAxiosErrorPayload(error, "Failed to activate campaign in Instantly");
+      const payload = getAxiosErrorPayload(
+        error,
+        "Failed to activate campaign in Instantly"
+      );
+
       return res.status(payload.statusCode).json({
         success: false,
         step: "activate_campaign",
         debug: {
           instantlyCampaignId,
+          sequenceBodies: localSequenceDebug,
+          errorDetails: error?.details || null,
         },
         ...payload,
       });
@@ -2585,6 +3294,7 @@ exports.launchOutreachCampaign = async (req, res) => {
     campaign.launchedAt = new Date();
     campaign.pausedAt = null;
     campaign.stats.progressPercent = 0;
+
     await campaign.save();
 
     await ProspectBrand.updateMany(
@@ -2607,6 +3317,7 @@ exports.launchOutreachCampaign = async (req, res) => {
     });
   } catch (error) {
     const payload = getAxiosErrorPayload(error, "Internal error");
+
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -2690,7 +3401,17 @@ function pickFirstObject(...values) {
 function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   const root = pickFirstObject(payload, payload?.data, payload?.stats, payload?.result);
 
+  const totalProspects = toSafeNumber(
+    root.leads_count,
+    root.total_leads,
+    root.totalProspects,
+    root.leads,
+    campaign?.stats?.totalProspects,
+    Array.isArray(campaign?.prospectIds) ? campaign.prospectIds.length : 0
+  );
+
   const totalSent = toSafeNumber(
+    root.emails_sent_count,
     root.total_sent,
     root.totalSent,
     root.sent,
@@ -2698,7 +3419,18 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
     campaign?.stats?.totalSent
   );
 
+  const totalOpened = toSafeNumber(
+    root.open_count,
+    root.open_count_unique,
+    root.total_opened,
+    root.totalOpened,
+    root.opened,
+    campaign?.stats?.totalOpened
+  );
+
   const totalClicked = toSafeNumber(
+    root.link_click_count,
+    root.link_click_count_unique,
     root.total_clicked,
     root.totalClicked,
     root.clicked,
@@ -2706,6 +3438,9 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   );
 
   const totalReplies = toSafeNumber(
+    root.reply_count,
+    root.reply_count_unique,
+    root.total_replies,
     root.total_replied,
     root.totalReplies,
     root.replied,
@@ -2720,32 +3455,33 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   );
 
   const totalQualified = toSafeNumber(
+    root.total_closed,
     root.total_conversions,
     root.totalQualified,
     root.qualified,
     campaign?.stats?.totalQualified
   );
 
-  const totalProspects = toSafeNumber(
-    root.total_leads,
-    root.totalProspects,
-    root.leads,
-    campaign?.stats?.totalProspects,
-    Array.isArray(campaign?.prospectIds) ? campaign.prospectIds.length : 0
-  );
+  const totalAssigned = toSafeNumber(campaign?.stats?.totalAssigned);
 
   const progressPercent =
-    totalProspects > 0 ? Math.min(100, Math.round((totalSent / totalProspects) * 100)) : 0;
+    totalProspects > 0
+      ? Math.min(100, Math.round((totalSent / totalProspects) * 100))
+      : 0;
 
   return {
     totalProspects,
     totalSent,
+    totalOpened,
     totalClicked,
     totalReplies,
     totalOpportunities,
     totalQualified,
-    totalAssigned: toSafeNumber(campaign?.stats?.totalAssigned),
+    totalAssigned,
     progressPercent,
+    sequenceStartedAt: campaign?.launchedAt || null,
+    openRate: totalSent > 0 ? Number(((totalOpened / totalSent) * 100).toFixed(2)) : 0,
+    clickRate: totalSent > 0 ? Number(((totalClicked / totalSent) * 100).toFixed(2)) : 0,
     raw: payload,
   };
 }
@@ -2805,6 +3541,10 @@ async function persistOverviewStats(campaign, overview) {
     overview?.totalSent,
     campaign.stats?.totalSent
   );
+  campaign.stats.totalOpened = toSafeNumber(
+    overview?.totalOpened,
+    campaign.stats?.totalOpened
+  );
   campaign.stats.totalClicked = toSafeNumber(
     overview?.totalClicked,
     campaign.stats?.totalClicked
@@ -2830,6 +3570,54 @@ async function persistOverviewStats(campaign, overview) {
   await campaign.save();
 }
 
+function normalizeStepAnalyticsRows(payload = {}, campaign = null) {
+  const rows = extractAnalyticsRows(payload);
+
+  if (!rows.length) {
+    return buildStepsFallback(campaign);
+  }
+
+  const sequences = normalizeCampaignSequences(campaign?.configuration?.sequences || []);
+
+  return rows.map((row, index) => {
+    const stepOrder = toSafeNumber(
+      row.stepOrder,
+      row.step_order,
+      row.step,
+      index + 1
+    );
+
+    const variantIndex = Math.max(
+      0,
+      toSafeNumber(row.variant, row.variant_index, 0)
+    );
+
+    const sequenceStep = sequences[Math.max(0, stepOrder - 1)];
+    const variant =
+      sequenceStep?.variants?.[variantIndex] ||
+      sequenceStep?.variants?.[0] ||
+      null;
+
+    return {
+      stepOrder,
+      label: `Step ${stepOrder}`,
+      type: "email",
+      subject: row.subject || row.email_subject || variant?.subject || "",
+      sent: toSafeNumber(row.sent, row.total_sent),
+      opened: toSafeNumber(row.opened, row.unique_opened, row.total_opened),
+      replied: toSafeNumber(row.replies, row.replied, row.total_replied),
+      clicked: toSafeNumber(row.clicks, row.clicked, row.total_clicked),
+      opportunities: toSafeNumber(
+        row.opportunities,
+        row.unique_opportunities,
+        row.total_opportunities
+      ),
+      variant: variantIndex,
+      raw: row,
+    };
+  });
+}
+
 exports.getOutreachCampaignAnalyticsOverview = async (req, res) => {
   try {
     ensureRole(req.admin, ["sdr", "ime", "revenue_head", "super_admin"]);
@@ -2842,10 +3630,9 @@ exports.getOutreachCampaignAnalyticsOverview = async (req, res) => {
       });
     }
 
-    const providerPayload = await instantlyService.getCampaignAnalyticsOverview({
-      campaign_id: campaign.instantly.campaignId,
-      ...(req.query || {}),
-    });
+    const providerPayload = await instantlyService.getCampaignAnalyticsOverview(
+      buildAnalyticsParams(req.query, campaign.instantly.campaignId, "overview")
+    );
 
     const normalized = normalizeOverviewAnalyticsPayload(providerPayload, campaign);
     await persistOverviewStats(campaign, normalized);
@@ -2875,10 +3662,9 @@ exports.getOutreachCampaignAnalyticsDaily = async (req, res) => {
       });
     }
 
-    const providerPayload = await instantlyService.getCampaignAnalyticsDaily({
-      campaign_id: campaign.instantly.campaignId,
-      ...(req.query || {}),
-    });
+    const providerPayload = await instantlyService.getCampaignAnalyticsDaily(
+      buildAnalyticsParams(req.query, campaign.instantly.campaignId, "daily")
+    );
 
     await OutreachCampaign.findByIdAndUpdate(campaign._id, {
       $set: {
@@ -2912,10 +3698,9 @@ exports.getOutreachCampaignAnalyticsSteps = async (req, res) => {
       });
     }
 
-    const providerPayload = await instantlyService.getCampaignAnalyticsSteps({
-      campaign_id: campaign.instantly.campaignId,
-      ...(req.query || {}),
-    });
+    const providerPayload = await instantlyService.getCampaignAnalyticsSteps(
+      buildAnalyticsParams(req.query, campaign.instantly.campaignId, "steps")
+    );
 
     await OutreachCampaign.findByIdAndUpdate(campaign._id, {
       $set: {
@@ -2925,13 +3710,7 @@ exports.getOutreachCampaignAnalyticsSteps = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: Array.isArray(providerPayload?.data)
-        ? providerPayload.data
-        : Array.isArray(providerPayload?.rows)
-          ? providerPayload.rows
-          : Array.isArray(providerPayload)
-            ? providerPayload
-            : buildStepsFallback(campaign),
+      data: normalizeStepAnalyticsRows(providerPayload, campaign),
       raw: providerPayload,
     });
   } catch (error) {
