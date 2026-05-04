@@ -73,13 +73,11 @@ const GRIDFS_BUCKET_NAME = process.env.GRIDFS_BUCKET || "uploads";
 
 const defaultCorsOrigins = [
   "https://collabglam.com",
-  "https://www.collabglam.com",
-
+  "https://collabglam.cloud/api",
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://192.168.1.36:3000",
+  "http://192.168.1.4:3000",
   "https://mhd.sharemitra.com",
-  "http://192.168.1.31:3000"
 ];
 
 
