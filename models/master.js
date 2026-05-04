@@ -67,9 +67,9 @@ const AdminSchema = new Schema(
     inviteTokenHash: { type: String, select: false },
     inviteExpiresAt: { type: Date },
 
-createdBy: { type: Schema.Types.ObjectId, ref: "Master", default: null },
-parentAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
-rootAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    createdBy: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    parentAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
+    rootAdmin: { type: Schema.Types.ObjectId, ref: "Master", default: null },
 
     teamType: {
       type: String,

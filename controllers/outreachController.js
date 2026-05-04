@@ -390,7 +390,7 @@ function normalizeSequenceBodyForInstantly(value = "") {
   return plainText;
 }
 
-function buildInstantlySequences(sequences = []) {
+function buildInstantlySequences(sequences = [], templateVariables = []) {
   const normalized = normalizeCampaignSequences(sequences);
 
   return [
@@ -407,9 +407,9 @@ function buildInstantlySequences(sequences = []) {
           .toLowerCase(),
 
         variants: step.variants.map((variant, variantIndex) => {
-          const subject = String(variant.subject || "").trim();
+          const subject = normalizeTemplateVariablesInContent(String(variant.subject || "").trim(), templateVariables);
 
-          const rawBody = String(
+          const rawBodySource = String(
             variant.body ||
               variant.bodyHtml ||
               variant.body_html ||
@@ -418,6 +418,8 @@ function buildInstantlySequences(sequences = []) {
               ""
           ).trim();
 
+          const rawBody = normalizeTemplateVariablesInContent(rawBodySource, templateVariables).trim();
+
           const body = normalizeSequenceBodyForInstantly(rawBody);
           const bodyText = htmlToSequencePlainText(body);
 
@@ -425,7 +427,7 @@ function buildInstantlySequences(sequences = []) {
             step: stepIndex + 1,
             variant: variantIndex + 1,
             subject,
-            rawBodyLength: rawBody.length,
+            rawBodyLength: rawBodySource.length,
             bodyLength: body.length,
             bodyTextLength: bodyText.length,
             bodyPreview: bodyText.slice(0, 160),
@@ -460,6 +462,7 @@ function buildCampaignCreatePayload({
   senderEmails,
   configuration,
   rawCampaignPayload,
+  templateVariables = [],
 }) {
   const normalizedConfiguration = normalizeCampaignConfiguration(configuration || {});
   const sendingOptions = normalizeSendingOptions(normalizedConfiguration.sendingOptions);
@@ -479,7 +482,7 @@ function buildCampaignCreatePayload({
     ...rawPayload,
     name: campaignName,
     campaign_schedule: buildInstantlyCampaignSchedule(normalizedConfiguration.schedule),
-    sequences: buildInstantlySequences(normalizedConfiguration.sequences),
+    sequences: buildInstantlySequences(normalizedConfiguration.sequences, templateVariables),
     email_list: Array.isArray(senderEmails) ? senderEmails : [],
     daily_limit: sendingOptions.dailyLimit,
     daily_max_leads: sendingOptions.dailyMaxLeads,
@@ -1070,7 +1073,7 @@ async function attachProspectsToCampaign(campaign, prospectDocs = []) {
 
     addLeadsResult = await instantlyService.addLeads({
       campaign_id: campaign.instantly.campaignId,
-      leads: newDocs.map(buildInstantlyLeadFromProspect),
+      leads: newDocs.map((doc) => buildInstantlyLeadFromProspect(doc, getCampaignMappedTemplateVariables(campaign))),
     });
 
     instantlySynced = true;
@@ -1445,10 +1448,7 @@ exports.getOutreachCampaignById = async (req, res) => {
       campaign.configuration = normalizeCampaignConfiguration({});
     }
 
-    const templateVariables =
-      Array.isArray(campaign.templateVariables) && campaign.templateVariables.length
-        ? campaign.templateVariables
-        : buildTemplateVariableList(campaign.csvSchema?.columns || []);
+    const templateVariables = getCampaignMappedTemplateVariables(campaign);
 
     const availableAccountEmails = await getAvailableSenderEmailsForCampaign(campaign);
 
@@ -1592,100 +1592,44 @@ function cleanVariableValue(value) {
   return String(value ?? "").trim();
 }
 
-function buildInstantlyLeadFromProspect(prospect = {}) {
-  const templateVariables = prospect.templateVariables || {};
+function buildInstantlyLeadFromProspect(prospect = {}, templateVariablesForCampaign = []) {
+  const storedTemplateVariables = prospect.templateVariables || {};
   const primaryContact = prospect.primaryContact || {};
+  const allowedVariables = getTemplateVariableKeySet(templateVariablesForCampaign);
+  const exactTemplateVariables = filterVariablesToAllowed(
+    storedTemplateVariables,
+    templateVariablesForCampaign
+  );
 
   const email = normalizeEmail(
     primaryContact.email ||
-    templateVariables.email ||
-    ""
+    storedTemplateVariables.email ||
+    exactTemplateVariables.email ||
+    ''
   );
 
-  const fullName = cleanVariableValue(
-    templateVariables.fullName ||
-    primaryContact.name ||
-    ""
-  );
-
+  const fullName = cleanVariableValue(exactTemplateVariables.fullName || '');
   const nameParts = splitFullName(fullName);
 
-  const firstName = cleanVariableValue(
-    templateVariables.firstName ||
-    nameParts.firstName ||
-    fullName
-  );
+  const firstName = allowedVariables.has('firstName')
+    ? cleanVariableValue(exactTemplateVariables.firstName || '')
+    : '';
 
-  const lastName = cleanVariableValue(
-    templateVariables.lastName ||
-    nameParts.lastName
-  );
+  const lastName = allowedVariables.has('lastName')
+    ? cleanVariableValue(exactTemplateVariables.lastName || '')
+    : '';
 
-  const companyName = cleanVariableValue(
-    templateVariables.companyName ||
-    prospect.companyName ||
-    ""
-  );
-
-  const website = cleanVariableValue(
-    templateVariables.website ||
-    prospect.website ||
-    ""
-  );
-
-  const jobTitle = cleanVariableValue(
-    templateVariables.jobTitle ||
-    primaryContact.title ||
-    ""
-  );
-
-  const phone = cleanVariableValue(
-    templateVariables.phone ||
-    primaryContact.phone ||
-    ""
-  );
-
-  const linkedinUrl = cleanVariableValue(
-    templateVariables.linkedinUrl ||
-    primaryContact.linkedinUrl ||
-    ""
-  );
+  const companyName = allowedVariables.has('companyName')
+    ? cleanVariableValue(exactTemplateVariables.companyName || '')
+    : '';
 
   const customVariables = {};
 
-  Object.entries(templateVariables || {}).forEach(([key, value]) => {
-    const cleanKey = String(key || "").trim();
-    const cleanValue = cleanVariableValue(value);
-
-    if (!cleanKey || !cleanValue) return;
-
-    // Avoid duplicate alias conflicts in Instantly custom_variables.
-    // Keep camelCase only.
-    if (
-      [
-        "first_name",
-        "last_name",
-        "full_name",
-        "company_name",
-        "job_title",
-        "linkedin_url",
-      ].includes(cleanKey)
-    ) {
-      return;
-    }
-
-    customVariables[cleanKey] = cleanValue;
+  allowedVariables.forEach((key) => {
+    const value = cleanVariableValue(exactTemplateVariables[key]);
+    if (!value) return;
+    customVariables[key] = value;
   });
-
-  customVariables.email = email;
-  customVariables.firstName = firstName;
-  customVariables.lastName = lastName;
-  customVariables.fullName = fullName;
-  customVariables.companyName = companyName;
-  customVariables.website = website;
-  customVariables.jobTitle = jobTitle;
-  customVariables.phone = phone;
-  customVariables.linkedinUrl = linkedinUrl;
 
   Object.keys(customVariables).forEach((key) => {
     if (!cleanVariableValue(customVariables[key])) {
@@ -1696,15 +1640,14 @@ function buildInstantlyLeadFromProspect(prospect = {}) {
   return {
     email,
 
-    // Native Instantly lead fields.
+    // Native Instantly fields are also strict: only filled if that exact CSV mapping exists.
     first_name: firstName,
-    last_name: lastName,
+    last_name: lastName || nameParts.lastName || '',
     company_name: companyName,
 
-    // Custom variables used in email templates like {{firstName}}, {{companyName}}, {{jobTitle}}.
+    // Only CSV-mapped variables are sent. Unmapped tokens in templates are blanked earlier.
     custom_variables: customVariables,
 
-    // Instantly expects personalization to be string or null, not object.
     personalization: null,
   };
 }
@@ -1842,6 +1785,7 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
         senderEmails: campaign.instantly.accountEmails || [],
         configuration: campaign.configuration,
         rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
+        templateVariables: getCampaignMappedTemplateVariables(campaign),
       });
 
       await forceSyncInstantlyCampaignBeforeActivation({
@@ -1951,6 +1895,7 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
       senderEmails,
       configuration: getCampaignConfigurationFromDocument(campaign),
       rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
+      templateVariables: getCampaignMappedTemplateVariables(campaign),
     });
 
     const syncResult = await forceSyncInstantlyCampaignBeforeActivation({
@@ -1987,8 +1932,22 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
 };
 
 function renderTemplate(template = "", variables = {}) {
+  const lookup = new Map();
+
+  Object.entries(variables || {}).forEach(([key, value]) => {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) return;
+
+    lookup.set(normalizedKey, value);
+    lookup.set(normalizedKey.toLowerCase(), value);
+  });
+
   return String(template || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
-    const value = variables[key];
+    const cleanKey = String(key || "").trim();
+    const value = lookup.has(cleanKey)
+      ? lookup.get(cleanKey)
+      : lookup.get(cleanKey.toLowerCase());
+
     return value === undefined || value === null ? "" : String(value);
   });
 }
@@ -2006,33 +1965,14 @@ function textToHtml(value = "") {
   return escapeHtml(value).replace(/\n/g, "<br/>");
 }
 
-function buildPreviewVariablesFromProspect(prospect = {}, extra = {}) {
-  const vars = {
-    ...(prospect?.templateVariables || {}),
-    ...(extra || {}),
-  };
-
-  if (!vars.firstName) {
-    vars.firstName = prospect?.primaryContact?.name || "";
-  }
-
-  if (!vars.fullName) {
-    vars.fullName = prospect?.primaryContact?.name || "";
-  }
-
-  if (!vars.email) {
-    vars.email = prospect?.primaryContact?.email || "";
-  }
-
-  if (!vars.companyName) {
-    vars.companyName = prospect?.companyName || "";
-  }
-
-  if (!vars.website) {
-    vars.website = prospect?.website || "";
-  }
-
-  return vars;
+function buildPreviewVariablesFromProspect(prospect = {}, extra = {}, templateVariables = []) {
+  return filterVariablesToAllowed(
+    {
+      ...(prospect?.templateVariables || {}),
+      ...(extra || {}),
+    },
+    templateVariables
+  );
 }
 
 function stripHtmlToText(value = "") {
@@ -2172,9 +2112,12 @@ exports.previewCampaignSequence = async (req, res) => {
       previewProspect = await ProspectBrand.findById(campaign.prospectIds[0]).lean();
     }
 
+    const allowedTemplateVariables = getCampaignMappedTemplateVariables(campaign);
+
     const previewVars = buildPreviewVariablesFromProspect(
       previewProspect || {},
-      req.body?.previewVars || {}
+      req.body?.previewVars || {},
+      allowedTemplateVariables
     );
 
     const rendered = renderSequencePreviewContent(variant, previewVars);
@@ -2285,9 +2228,12 @@ exports.sendCampaignTestEmail = async (req, res) => {
       previewProspect = await ProspectBrand.findById(campaign.prospectIds[0]).lean();
     }
 
+    const allowedTemplateVariables = getCampaignMappedTemplateVariables(campaign);
+
     const previewVars = buildPreviewVariablesFromProspect(
       previewProspect || {},
-      req.body?.previewVars || {}
+      req.body?.previewVars || {},
+      allowedTemplateVariables
     );
 
     const rendered = renderSequencePreviewContent(variant, previewVars);
@@ -3038,6 +2984,7 @@ exports.launchOutreachCampaign = async (req, res) => {
       senderEmails,
       configuration,
       rawCampaignPayload: campaign.instantly?.rawCampaignPayload || null,
+      templateVariables: getCampaignMappedTemplateVariables(campaign),
     });
 
     const localSequenceDebug = getLocalSequenceBodyDebug(createCampaignPayload);
@@ -3209,7 +3156,7 @@ exports.launchOutreachCampaign = async (req, res) => {
     try {
       addLeadsResult = await instantlyService.addLeads({
         campaign_id: instantlyCampaignId,
-        leads: prospects.map(buildInstantlyLeadFromProspect),
+        leads: prospects.map((prospect) => buildInstantlyLeadFromProspect(prospect, getCampaignMappedTemplateVariables(campaign))),
       });
     } catch (error) {
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
@@ -3398,6 +3345,52 @@ function pickFirstObject(...values) {
   return {};
 }
 
+function safeRate(numerator, denominator) {
+  const top = toSafeNumber(numerator);
+  const bottom = toSafeNumber(denominator);
+
+  if (!bottom || bottom <= 0) return 0;
+
+  const rate = (top / bottom) * 100;
+  return Number(Math.max(0, Math.min(100, rate)).toFixed(2));
+}
+
+function normalizeDailyAnalyticsRowsForCampaign(payload = {}) {
+  return extractAnalyticsRows(payload)
+    .map((row) => {
+      const sent = toSafeNumber(row?.sent, row?.emails_sent_count, row?.total_sent);
+      const opened = toSafeNumber(row?.opened, row?.open_count);
+      const uniqueOpened = toSafeNumber(row?.unique_opened, row?.open_count_unique, opened);
+      const clicks = toSafeNumber(row?.clicks, row?.link_click_count);
+      const uniqueClicks = toSafeNumber(row?.unique_clicks, row?.link_click_count_unique, clicks);
+      const replies = toSafeNumber(row?.replies, row?.reply_count);
+      const uniqueReplies = toSafeNumber(row?.unique_replies, row?.reply_count_unique, replies);
+      const automaticReplies = toSafeNumber(row?.replies_automatic, row?.reply_count_automatic);
+      const opportunities = toSafeNumber(row?.opportunities, row?.unique_opportunities, row?.total_opportunities);
+
+      return {
+        date: String(row?.date || row?.day || row?.label || ""),
+        sent,
+        contacted: toSafeNumber(row?.contacted, row?.contacted_count),
+        newLeadsContacted: toSafeNumber(row?.new_leads_contacted, row?.new_leads_contacted_count),
+        opened,
+        uniqueOpened,
+        replies,
+        uniqueReplies,
+        automaticReplies,
+        clicks,
+        uniqueClicks,
+        opportunities,
+        openRate: safeRate(uniqueOpened || opened, sent),
+        clickRate: safeRate(uniqueClicks || clicks, sent),
+        replyRate: safeRate(uniqueReplies || replies, sent),
+        raw: row,
+      };
+    })
+    .filter((row) => row.date)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
 function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   const root = pickFirstObject(payload, payload?.data, payload?.stats, payload?.result);
 
@@ -3420,20 +3413,24 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
   );
 
   const totalOpened = toSafeNumber(
-    root.open_count,
     root.open_count_unique,
+    root.open_count_unique_by_step,
+    root.unique_opened,
     root.total_opened,
     root.totalOpened,
     root.opened,
+    root.open_count,
     campaign?.stats?.totalOpened
   );
 
   const totalClicked = toSafeNumber(
-    root.link_click_count,
     root.link_click_count_unique,
+    root.link_click_count_unique_by_step,
+    root.unique_clicks,
     root.total_clicked,
     root.totalClicked,
     root.clicked,
+    root.link_click_count,
     campaign?.stats?.totalClicked
   );
 
@@ -3480,8 +3477,9 @@ function normalizeOverviewAnalyticsPayload(payload = {}, campaign = null) {
     totalAssigned,
     progressPercent,
     sequenceStartedAt: campaign?.launchedAt || null,
-    openRate: totalSent > 0 ? Number(((totalOpened / totalSent) * 100).toFixed(2)) : 0,
-    clickRate: totalSent > 0 ? Number(((totalClicked / totalSent) * 100).toFixed(2)) : 0,
+    openRate: safeRate(totalOpened, totalSent),
+    clickRate: safeRate(totalClicked, totalSent),
+    replyRate: safeRate(totalReplies, totalSent),
     raw: payload,
   };
 }
@@ -3492,6 +3490,7 @@ function buildOverviewFallback(campaign) {
     Array.isArray(campaign?.prospectIds) ? campaign.prospectIds.length : 0
   );
   const totalSent = toSafeNumber(campaign?.stats?.totalSent);
+  const totalOpened = toSafeNumber(campaign?.stats?.totalOpened);
   const totalClicked = toSafeNumber(campaign?.stats?.totalClicked);
   const totalReplies = toSafeNumber(campaign?.stats?.totalReplies);
   const totalOpportunities = toSafeNumber(campaign?.stats?.totalOpportunities);
@@ -3500,6 +3499,7 @@ function buildOverviewFallback(campaign) {
   return {
     totalProspects,
     totalSent,
+    totalOpened,
     totalClicked,
     totalReplies,
     totalOpportunities,
@@ -3507,6 +3507,9 @@ function buildOverviewFallback(campaign) {
     totalAssigned: toSafeNumber(campaign?.stats?.totalAssigned),
     progressPercent:
       totalProspects > 0 ? Math.min(100, Math.round((totalSent / totalProspects) * 100)) : 0,
+    openRate: safeRate(totalOpened, totalSent),
+    clickRate: safeRate(totalClicked, totalSent),
+    replyRate: safeRate(totalReplies, totalSent),
     provider: "local",
     raw: null,
   };
@@ -3604,9 +3607,21 @@ function normalizeStepAnalyticsRows(payload = {}, campaign = null) {
       type: "email",
       subject: row.subject || row.email_subject || variant?.subject || "",
       sent: toSafeNumber(row.sent, row.total_sent),
-      opened: toSafeNumber(row.opened, row.unique_opened, row.total_opened),
-      replied: toSafeNumber(row.replies, row.replied, row.total_replied),
-      clicked: toSafeNumber(row.clicks, row.clicked, row.total_clicked),
+      opened: toSafeNumber(row.unique_opened, row.opened, row.total_opened),
+      replied: toSafeNumber(row.unique_replies, row.replies, row.replied, row.total_replied),
+      clicked: toSafeNumber(row.unique_clicks, row.clicks, row.clicked, row.total_clicked),
+      clickRate: safeRate(
+        toSafeNumber(row.unique_clicks, row.clicks, row.clicked, row.total_clicked),
+        toSafeNumber(row.sent, row.total_sent)
+      ),
+      openRate: safeRate(
+        toSafeNumber(row.unique_opened, row.opened, row.total_opened),
+        toSafeNumber(row.sent, row.total_sent)
+      ),
+      replyRate: safeRate(
+        toSafeNumber(row.unique_replies, row.replies, row.replied, row.total_replied),
+        toSafeNumber(row.sent, row.total_sent)
+      ),
       opportunities: toSafeNumber(
         row.opportunities,
         row.unique_opportunities,
@@ -3674,7 +3689,7 @@ exports.getOutreachCampaignAnalyticsDaily = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: extractAnalyticsRows(providerPayload),
+      data: normalizeDailyAnalyticsRowsForCampaign(providerPayload),
       raw: providerPayload,
     });
   } catch (error) {
@@ -3923,20 +3938,74 @@ const CSV_COLUMN_TYPE = {
 };
 
 function normalizeTemplateVariableKey(value = "") {
-  const cleaned = String(value)
+  const cleaned = String(value || "")
+    .replace(/[{}]/g, "")
     .trim()
-    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, " ")
     .trim();
 
   if (!cleaned) return "field";
 
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  const [first, ...rest] = words;
+  return cleaned.split(/\s+/).filter(Boolean).join("");
+}
 
-  return [
-    first.toLowerCase(),
-    ...rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()),
-  ].join("");
+const CSV_STANDARD_VARIABLE_BY_TYPE = {
+  [CSV_COLUMN_TYPE.FIRST_NAME]: "firstName",
+  [CSV_COLUMN_TYPE.LAST_NAME]: "lastName",
+  [CSV_COLUMN_TYPE.FULL_NAME]: "fullName",
+  [CSV_COLUMN_TYPE.EMAIL]: "email",
+  [CSV_COLUMN_TYPE.COMPANY_NAME]: "companyName",
+  [CSV_COLUMN_TYPE.JOB_TITLE]: "jobTitle",
+  [CSV_COLUMN_TYPE.WEBSITE]: "website",
+  [CSV_COLUMN_TYPE.PHONE]: "phone",
+  [CSV_COLUMN_TYPE.LINKEDIN_URL]: "linkedinUrl",
+};
+
+function normalizeTemplateVariableToken(value = "") {
+  return String(value || "")
+    .replace(/[{}]/g, "")
+    .trim();
+}
+
+function getTemplateVariableKeyForColumn(column = {}) {
+  const selectedType = String(column?.selectedType || "").trim().toLowerCase();
+
+  if (!selectedType || selectedType === CSV_COLUMN_TYPE.IGNORE) {
+    return "";
+  }
+
+  if (selectedType === CSV_COLUMN_TYPE.CUSTOM) {
+    return normalizeTemplateVariableKey(column?.variableKey || column?.header || "");
+  }
+
+  return CSV_STANDARD_VARIABLE_BY_TYPE[selectedType] || "";
+}
+
+function toTemplateVariableToken(key = "") {
+  const normalized = normalizeTemplateVariableToken(key);
+  return normalized ? `{{${normalized}}}` : "";
+}
+
+function buildAllowedVariableLookup(templateVariables = []) {
+  const lookup = new Map();
+
+  (Array.isArray(templateVariables) ? templateVariables : []).forEach((item) => {
+    const key = normalizeTemplateVariableToken(item);
+    if (!key) return;
+    lookup.set(key.toLowerCase(), key);
+  });
+
+  return lookup;
+}
+
+function normalizeTemplateVariablesInContent(content = "", templateVariables = []) {
+  const allowedLookup = buildAllowedVariableLookup(templateVariables);
+
+  return String(content || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    const canonicalKey = allowedLookup.get(String(key || "").trim().toLowerCase());
+    return canonicalKey ? `{{${canonicalKey}}}` : "";
+  });
 }
 
 function inferCsvColumnType(header = "", samples = []) {
@@ -4030,22 +4099,62 @@ function normalizeIncomingColumnMappings(inputColumns = [], rows = []) {
 function buildTemplateVariableList(columns = []) {
   const vars = new Set();
 
-  columns.forEach((column) => {
-    if (!column?.variableKey) return;
-    vars.add(`{{${column.variableKey}}}`);
+  (Array.isArray(columns) ? columns : []).forEach((column) => {
+    const variableKey = getTemplateVariableKeyForColumn(column);
+    const variable = toTemplateVariableToken(variableKey);
 
-    if (column.selectedType === CSV_COLUMN_TYPE.FIRST_NAME) vars.add("{{firstName}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.LAST_NAME) vars.add("{{lastName}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.FULL_NAME) vars.add("{{fullName}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.EMAIL) vars.add("{{email}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.COMPANY_NAME) vars.add("{{companyName}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.WEBSITE) vars.add("{{website}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.JOB_TITLE) vars.add("{{jobTitle}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.PHONE) vars.add("{{phone}}");
-    if (column.selectedType === CSV_COLUMN_TYPE.LINKEDIN_URL) vars.add("{{linkedinUrl}}");
+    if (variable) vars.add(variable);
   });
 
   return [...vars];
+}
+
+function getCampaignMappedTemplateVariables(campaign = {}) {
+  const columns = Array.isArray(campaign?.csvSchema?.columns)
+    ? campaign.csvSchema.columns
+    : [];
+
+  const csvVariables = buildTemplateVariableList(columns);
+
+  if (columns.length) {
+    return csvVariables;
+  }
+
+  return Array.isArray(campaign?.templateVariables) ? campaign.templateVariables : [];
+}
+
+function getTemplateVariableKeySet(templateVariables = []) {
+  const keys = new Set();
+
+  (Array.isArray(templateVariables) ? templateVariables : []).forEach((item) => {
+    const key = normalizeTemplateVariableToken(item);
+    if (!key) return;
+    keys.add(key);
+  });
+
+  return keys;
+}
+
+function filterVariablesToAllowed(input = {}, templateVariables = []) {
+  const allowedKeys = getTemplateVariableKeySet(templateVariables);
+  const output = {};
+
+  allowedKeys.forEach((key) => {
+    const exactValue = input?.[key];
+
+    if (exactValue !== undefined && exactValue !== null) {
+      output[key] = String(exactValue);
+      return;
+    }
+
+    const matchedKey = Object.keys(input || {}).find(
+      (candidate) => String(candidate || '').toLowerCase() === key.toLowerCase()
+    );
+
+    output[key] = matchedKey ? String(input[matchedKey] ?? '') : '';
+  });
+
+  return output;
 }
 
 function getMappedCellValue(row = {}, columns = [], type) {
@@ -4057,21 +4166,17 @@ function getMappedCellValue(row = {}, columns = [], type) {
 function buildTemplateVariableMapFromRow(row = {}, columns = []) {
   const variables = {};
 
-  columns.forEach((column) => {
+  (Array.isArray(columns) ? columns : []).forEach((column) => {
+    const selectedType = String(column?.selectedType || "").trim().toLowerCase();
+    if (!selectedType || selectedType === CSV_COLUMN_TYPE.IGNORE) return;
+
+    const variableKey = getTemplateVariableKeyForColumn(column);
+    if (!variableKey) return;
+
     const rawValue = row?.[column.header];
     const stringValue = String(rawValue ?? "").trim();
 
-    variables[column.variableKey] = stringValue;
-
-    if (column.selectedType === CSV_COLUMN_TYPE.FIRST_NAME) variables.firstName = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.LAST_NAME) variables.lastName = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.FULL_NAME) variables.fullName = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.EMAIL) variables.email = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.COMPANY_NAME) variables.companyName = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.WEBSITE) variables.website = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.JOB_TITLE) variables.jobTitle = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.PHONE) variables.phone = stringValue;
-    if (column.selectedType === CSV_COLUMN_TYPE.LINKEDIN_URL) variables.linkedinUrl = stringValue;
+    variables[variableKey] = stringValue;
   });
 
   return variables;
@@ -4119,18 +4224,7 @@ async function upsertProspectsFromMappedRows(rows = [], columns = [], sourceFile
       emailFallbackName ||
       resolvedCompanyName;
 
-    const nextTemplateVariables = {
-      ...templateVariables,
-      email,
-      firstName: templateVariables.firstName || firstName || emailFallbackName,
-      lastName: templateVariables.lastName || lastName || "",
-      fullName: templateVariables.fullName || fullName || resolvedContactName,
-      companyName: templateVariables.companyName || resolvedCompanyName,
-      website: templateVariables.website || website || "",
-      jobTitle: templateVariables.jobTitle || title || "",
-      phone: templateVariables.phone || phone || "",
-      linkedinUrl: templateVariables.linkedinUrl || linkedinUrl || "",
-    };
+    const nextTemplateVariables = { ...templateVariables };
 
     const doc = await ProspectBrand.findOneAndUpdate(
       { "primaryContact.email": email },
@@ -4265,10 +4359,7 @@ exports.getCampaignTemplateVariables = async (req, res) => {
     const campaign = await getAccessibleCampaign(req, req.params.id);
 
     const columns = Array.isArray(campaign.csvSchema?.columns) ? campaign.csvSchema.columns : [];
-    const templateVariables =
-      Array.isArray(campaign.templateVariables) && campaign.templateVariables.length
-        ? campaign.templateVariables
-        : buildTemplateVariableList(columns);
+    const templateVariables = getCampaignMappedTemplateVariables(campaign);
 
     return res.status(200).json({
       success: true,

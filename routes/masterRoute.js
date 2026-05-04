@@ -27,12 +27,24 @@ router.post('/brand-info', adminAuth, adminController.BrandInformation);
 router.post('/brand-coupon', adminAuth, adminController.CreateBrandCoupon);
 router.get('/subscription-list', adminController.subscriptionList);
 router.get('/brand-list', adminAuth, adminController.ListBrand);
+router.post(
+  "/assign-campaign-ime",
+  adminAuth,
+  superOrRevenueHead,
+  adminController.assignCampaignIme
+);
 
 router.post(
   "/send-bulk-csv",
   adminAuth,
   upload.single("file"),
   adminController.sendBulkEmailCsv
+);
+
+router.post(
+  "/update-employee-password",
+  adminAuth,
+  adminController.updateEmployeePassword
 );
 
 module.exports = router;

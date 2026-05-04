@@ -59,11 +59,6 @@ const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
 const instantlytestRoutes = require("./routes/instantlyTestRoutes");
 const matchedCreatorRoutes = require("./routes/matchedCreatorRoutes");
 
-
-
-
-
-
 const app = express();
 const server = http.createServer(app);
 
@@ -80,14 +75,9 @@ const defaultCorsOrigins = [
   "https://collabglam.com",
   "https://www.collabglam.com",
 
-  "https://collabglam.cloud",
-  "https://www.collabglam.cloud",
-
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://localhost:4000",
-  "http://192.168.1.4:3000",
-
+  "http://192.168.1.36:3000",
   "https://mhd.sharemitra.com",
   "http://192.168.1.31:3000"
 ];

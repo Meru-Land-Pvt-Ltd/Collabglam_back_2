@@ -28,6 +28,7 @@ const {
   adminCreateBrand,
   adminCreateInfluencer,
   getBrandAssignedPlanHistoryList,
+  adminEditCampaign,
 } = require("../controllers/adminController");
 
 const { adminAuth } = require("../middlewares/adminAuth");
@@ -82,5 +83,6 @@ router.post("/brand/create", adminAuth, adminCreateBrand);
 router.post("/influencer/create", adminAuth, adminCreateInfluencer);
 
 router.post("/assigned-plan-history", adminAuth, getBrandAssignedPlanHistoryList);
+router.post("/campaign/edit", adminAuth, adminEditCampaign);
 
 module.exports = router;
