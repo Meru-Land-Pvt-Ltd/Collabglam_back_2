@@ -81,7 +81,7 @@ const mapCampaignForDisputeDropdown = (campaign) => {
     scheduledAt: campaign.scheduledAt,
     startAt: campaign.startAt,
     endAt: campaign.endAt,
-
+    createdBy: campaign.createdBy || null,
     category: campaign.category || null,
     numberOfInfluencers: campaign.numberOfInfluencers,
     campaignBudget: campaign.campaignBudget,
