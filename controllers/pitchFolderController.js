@@ -498,6 +498,396 @@ function normalizeMediaKitLink(input, actorId, currentMediaKitLink = null) {
   };
 }
 
+function escapeRegexValue(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function exactRegex(value = '') {
+  const cleaned = cleanStr(value);
+  return cleaned ? new RegExp(`^${escapeRegexValue(cleaned)}$`, 'i') : null;
+}
+
+function normalizeLookupUsername(value) {
+  const raw = cleanStr(value).trim();
+
+  if (!raw) return '';
+
+  return raw
+    .replace(/^@+/, '')
+    .replace(/^\/+/, '')
+    .split('?')[0]
+    .split('#')[0]
+    .split('/')[0]
+    .trim();
+}
+
+function normalizeLookupHandle(value) {
+  const username = normalizeLookupUsername(value);
+  return username ? `@${username.toLowerCase()}` : '';
+}
+
+function extractUsernameFromProfileUrl(url, provider = '') {
+  const value = cleanStr(url);
+
+  if (!value) return '';
+
+  const absoluteUrl = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+
+  try {
+    const parsed = new URL(absoluteUrl);
+    const host = parsed.hostname.toLowerCase();
+    const parts = parsed.pathname
+      .split('/')
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (!parts.length) return '';
+
+    const normalizedProvider = normalizeProvider(provider);
+
+    if (normalizedProvider === 'instagram' || host.includes('instagram.com')) {
+      return normalizeLookupUsername(parts[0]);
+    }
+
+    if (normalizedProvider === 'tiktok' || host.includes('tiktok.com')) {
+      return normalizeLookupUsername(parts[0]);
+    }
+
+    if (
+      normalizedProvider === 'youtube' ||
+      host.includes('youtube.com') ||
+      host.includes('youtu.be')
+    ) {
+      const atPart = parts.find((part) => part.startsWith('@'));
+
+      if (atPart) {
+        return normalizeLookupUsername(atPart);
+      }
+
+      const channelIndex = parts.findIndex((part) =>
+        ['channel', 'c', 'user'].includes(part.toLowerCase())
+      );
+
+      if (channelIndex >= 0 && parts[channelIndex + 1]) {
+        return cleanStr(parts[channelIndex + 1]);
+      }
+
+      return normalizeLookupUsername(parts[0]);
+    }
+
+    return normalizeLookupUsername(parts[0]);
+  } catch {
+    return '';
+  }
+}
+
+function getProviderUsernameLookupCandidates(source = {}) {
+  const provider = normalizeProvider(source.provider || source.platform);
+
+  const primaryLink = cleanStr(source.primaryLink || source.url || source.profileUrl || source.link);
+
+  const rawLinks = Array.isArray(source.links)
+    ? source.links
+    : primaryLink
+      ? [primaryLink]
+      : [];
+
+  const usernameCandidates = uniqStrings([
+    normalizeLookupUsername(source.username),
+    normalizeLookupUsername(source.handle),
+    normalizeLookupUsername(source.handleId),
+    normalizeLookupUsername(source.channelHandle),
+    extractUsernameFromProfileUrl(primaryLink, provider),
+    ...rawLinks.map((link) => extractUsernameFromProfileUrl(link, provider)),
+  ]).filter(Boolean);
+
+  const handleCandidates = uniqStrings(
+    usernameCandidates.map((username) => normalizeLookupHandle(username))
+  ).filter(Boolean);
+
+  const idCandidates = uniqStrings([
+    cleanStr(source.channelId),
+    cleanStr(source.userId),
+    cleanStr(source.sourceRefId),
+    cleanStr(source.modashUserId),
+  ]).filter(Boolean);
+
+  const emailCandidates = uniqStrings([
+    cleanStr(source.email).toLowerCase(),
+    cleanStr(source.proxyEmail).toLowerCase(),
+  ]).filter(Boolean);
+
+  return {
+    provider,
+    usernameCandidates,
+    handleCandidates,
+    idCandidates,
+    emailCandidates,
+  };
+}
+
+function namedRefNames(values = []) {
+  if (!Array.isArray(values)) return [];
+
+  return uniqStrings(
+    values
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        return item?.name || item?.title || item?.label || '';
+      })
+      .filter(Boolean)
+  );
+}
+
+function getSignedUpInfluencerEmail(influencer = {}) {
+  if (!influencer || typeof influencer !== 'object') return '';
+
+  return cleanStr(
+    influencer.email ||
+      influencer.proxyEmail ||
+      influencer.emailTo ||
+      ''
+  ).toLowerCase();
+}
+
+function getEmailFromInfluencerProfile(profile = {}) {
+  if (!profile || typeof profile !== 'object') return '';
+
+  return cleanStr(
+    profile.email ||
+      profile.businessEmail ||
+      profile.contactEmail ||
+      profile.publicEmail ||
+      profile.profileEmail ||
+      profile.emailTo ||
+      ''
+  ).toLowerCase();
+}
+
+function buildPageIdentityOr({ usernameCandidates = [], handleCandidates = [], idCandidates = [] }) {
+  const identityOr = [];
+
+  for (const username of usernameCandidates) {
+    const rx = exactRegex(username);
+    if (!rx) continue;
+
+    identityOr.push({ username: rx });
+    identityOr.push({ handle: rx });
+    identityOr.push({ channelHandle: rx });
+  }
+
+  for (const handle of handleCandidates) {
+    const rx = exactRegex(handle);
+    if (!rx) continue;
+
+    identityOr.push({ handle: rx });
+    identityOr.push({ channelHandle: rx });
+  }
+
+  for (const id of idCandidates) {
+    const rx = exactRegex(id);
+    if (!rx) continue;
+
+    identityOr.push({ channelId: rx });
+    identityOr.push({ userId: rx });
+    identityOr.push({ sourceRefId: rx });
+    identityOr.push({ modashUserId: rx });
+  }
+
+  return identityOr;
+}
+
+function buildSignedUpInfluencerLookupQuery(source = {}) {
+  const {
+    provider,
+    usernameCandidates,
+    handleCandidates,
+    idCandidates,
+    emailCandidates,
+  } = getProviderUsernameLookupCandidates(source);
+
+  const or = [];
+
+  for (const email of emailCandidates) {
+    const rx = exactRegex(email);
+    if (!rx) continue;
+
+    or.push({ email: rx });
+    or.push({ proxyEmail: rx });
+  }
+
+  const identityOr = buildPageIdentityOr({
+    usernameCandidates,
+    handleCandidates,
+    idCandidates,
+  });
+
+  if (identityOr.length) {
+    const pagePlatformOr = [
+      { platform: provider },
+      { provider },
+    ];
+
+    for (const pageField of ['page1', 'page2', 'page3']) {
+      or.push({
+        [pageField]: {
+          $elemMatch: {
+            $and: [
+              { $or: pagePlatformOr },
+              { $or: identityOr },
+            ],
+          },
+        },
+      });
+
+      or.push({
+        $and: [
+          { primaryPlatform: provider },
+          {
+            [pageField]: {
+              $elemMatch: {
+                $or: identityOr,
+              },
+            },
+          },
+        ],
+      });
+    }
+  }
+
+  if (!or.length) return null;
+
+  return { $or: or };
+}
+
+async function findSignedUpInfluencerForSource(source = {}) {
+  const query = buildSignedUpInfluencerLookupQuery(source);
+
+  if (!query) return null;
+
+  return InfluencerModel.findOne(query)
+    .select(
+      '_id name email proxyEmail countryName country location categories languages primaryPlatform page1 page2 page3 isAdminCreated signupCompleted'
+    )
+    .lean();
+}
+
+async function findSavedInfluencerProfileEmail(source = {}) {
+  const { provider, usernameCandidates, handleCandidates, idCandidates } =
+    getProviderUsernameLookupCandidates(source);
+
+  const lookupOr = [];
+
+  for (const username of usernameCandidates) {
+    const rx = exactRegex(username);
+    if (!rx) continue;
+
+    lookupOr.push({ username: rx });
+    lookupOr.push({ handle: rx });
+  }
+
+  for (const handle of handleCandidates) {
+    const rx = exactRegex(handle);
+    if (!rx) continue;
+
+    lookupOr.push({ handle: rx });
+  }
+
+  for (const id of idCandidates) {
+    const rx = exactRegex(id);
+    if (!rx) continue;
+
+    lookupOr.push({ channelId: rx });
+    lookupOr.push({ userId: rx });
+    lookupOr.push({ sourceRefId: rx });
+    lookupOr.push({ modashUserId: rx });
+  }
+
+  if (!lookupOr.length) return '';
+
+  const profile = await InfluencerProfile.findOne({
+    $and: [
+      {
+        $or: [
+          { platform: provider },
+          { provider },
+        ],
+      },
+      {
+        $or: lookupOr,
+      },
+    ],
+  })
+    .select(
+      'platform provider username handle channelId userId sourceRefId modashUserId email businessEmail contactEmail publicEmail profileEmail emailTo'
+    )
+    .lean();
+
+  if (!profile) return '';
+
+  return getEmailFromInfluencerProfile(profile);
+}
+
+async function enrichPitchFolderItemBodyWithProfileEmail(body = {}, fallback = {}) {
+  const source = {
+    ...fallback,
+    ...body,
+  };
+
+  const existingEmail = cleanStr(
+    hasOwn(body, 'email') ? body.email : fallback.email
+  ).toLowerCase();
+
+  const signedUpInfluencer = await findSignedUpInfluencerForSource({
+    ...source,
+    email: existingEmail || source.email,
+  });
+
+  const signedUpEmail = getSignedUpInfluencerEmail(signedUpInfluencer);
+
+  const profileEmail =
+    !existingEmail && !signedUpEmail
+      ? await findSavedInfluencerProfileEmail(source)
+      : '';
+
+  const resolvedEmail = existingEmail || signedUpEmail || profileEmail || '';
+
+  const nextBody = {
+    ...body,
+    email: resolvedEmail,
+  };
+
+  if (signedUpInfluencer?._id) {
+    if (!cleanStr(nextBody.name)) {
+      nextBody.name = cleanStr(signedUpInfluencer.name);
+    }
+
+    if (!cleanStr(nextBody.country)) {
+      nextBody.country = cleanStr(
+        signedUpInfluencer.countryName ||
+          signedUpInfluencer.country ||
+          signedUpInfluencer.location
+      );
+    }
+
+    const existingNiche = Array.isArray(nextBody.niche)
+      ? nextBody.niche
+      : uniqStrings(String(nextBody.niche || '').split(','));
+
+    if (!existingNiche.length) {
+      nextBody.niche = namedRefNames(signedUpInfluencer.categories);
+    }
+
+    if (!cleanStr(nextBody.provider)) {
+      nextBody.provider = normalizeProvider(signedUpInfluencer.primaryPlatform);
+    }
+
+    nextBody.signedUpInfluencerId = String(signedUpInfluencer._id);
+    nextBody.isSignedUpInfluencer = true;
+  }
+
+  return nextBody;
+}
 function normalizeMediaKit(input, actorId, currentMediaKit = null) {
   if (input === null) {
     return {
@@ -1147,43 +1537,43 @@ function serializeFolderItemForAdmin(item) {
 
     mediaKitLink: item.mediaKitLink
       ? {
-          url: item.mediaKitLink.url || '',
-          generatedAt: item.mediaKitLink.generatedAt || null,
-          showToBrand: !!item.mediaKitLink.showToBrand,
-          requestStatus: item.mediaKitLink.requestStatus || 'none',
-          requestedAt: item.mediaKitLink.requestedAt || null,
-          reviewedAt: item.mediaKitLink.reviewedAt || null,
-        }
+        url: item.mediaKitLink.url || '',
+        generatedAt: item.mediaKitLink.generatedAt || null,
+        showToBrand: !!item.mediaKitLink.showToBrand,
+        requestStatus: item.mediaKitLink.requestStatus || 'none',
+        requestedAt: item.mediaKitLink.requestedAt || null,
+        reviewedAt: item.mediaKitLink.reviewedAt || null,
+      }
       : null,
 
     mediaKit: item.mediaKit
       ? {
-          s3Key: item.mediaKit.s3Key || '',
-          fileName: item.mediaKit.fileName || '',
-          mimeType: item.mediaKit.mimeType || 'application/pdf',
-          size: item.mediaKit.size,
-          uploadedAt: item.mediaKit.uploadedAt || null,
-          showToBrand: !!item.mediaKit.showToBrand,
-          requestStatus: item.mediaKit.requestStatus || 'none',
-          requestedAt: item.mediaKit.requestedAt || null,
-          reviewedAt: item.mediaKit.reviewedAt || null,
-        }
+        s3Key: item.mediaKit.s3Key || '',
+        fileName: item.mediaKit.fileName || '',
+        mimeType: item.mediaKit.mimeType || 'application/pdf',
+        size: item.mediaKit.size,
+        uploadedAt: item.mediaKit.uploadedAt || null,
+        showToBrand: !!item.mediaKit.showToBrand,
+        requestStatus: item.mediaKit.requestStatus || 'none',
+        requestedAt: item.mediaKit.requestedAt || null,
+        reviewedAt: item.mediaKit.reviewedAt || null,
+      }
       : null,
 
     campaignActivation: serializeCampaignActivation(item.campaignActivation),
 
     rateCardHistory: Array.isArray(item.rateCardHistory)
       ? item.rateCardHistory
-          .slice()
-          .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
-          .map((entry) => ({
-            _id: entry._id,
-            field: entry.field,
-            previousValue: entry.previousValue || '',
-            newValue: entry.newValue || '',
-            changedAt: entry.changedAt || null,
-            changedByAdminId: entry.changedByAdminId ? String(entry.changedByAdminId) : null,
-          }))
+        .slice()
+        .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
+        .map((entry) => ({
+          _id: entry._id,
+          field: entry.field,
+          previousValue: entry.previousValue || '',
+          newValue: entry.newValue || '',
+          changedAt: entry.changedAt || null,
+          changedByAdminId: entry.changedByAdminId ? String(entry.changedByAdminId) : null,
+        }))
       : [],
     sourcePipelineId: item.sourcePipelineId || null,
     createdAt: item.createdAt || null,
@@ -1858,28 +2248,59 @@ exports.archiveFolder = async (req, res) => {
 exports.addFolderItem = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {
-      return res.status(403).json({ error: 'You are not allowed to update pitch folders' });
+      return res.status(403).json({
+        error: 'You are not allowed to update pitch folders',
+      });
     }
 
     const actorId = getActorAdminId(req.admin);
     const folderId = cleanStr(req.params.id);
 
     if (!mongoose.Types.ObjectId.isValid(folderId)) {
-      return res.status(400).json({ error: 'Valid folder id is required' });
+      return res.status(400).json({
+        error: 'Valid folder id is required',
+      });
     }
 
     const doc = await findAccessibleFolder(folderId, req.admin);
+
     if (!doc) {
-      return res.status(404).json({ error: 'Pitch folder not found' });
+      return res.status(404).json({
+        error: 'Pitch folder not found',
+      });
     }
 
+    const enrichedBody = await enrichPitchFolderItemBodyWithProfileEmail(
+      req.body || {}
+    );
+
     const item = {
-      ...normalizeItem(req.body || {}, actorId),
+      ...normalizeItem(enrichedBody, actorId),
       createdByAdmin: actorId || null,
     };
 
     if (!item.name) {
-      return res.status(400).json({ error: 'Influencer name is required' });
+      return res.status(400).json({
+        error: 'Influencer name is required',
+      });
+    }
+
+    if (!item.email) {
+      const provider = normalizeProvider(enrichedBody.provider);
+      const username =
+        normalizeLookupUsername(enrichedBody.username) ||
+        normalizeLookupUsername(enrichedBody.handle) ||
+        extractUsernameFromProfileUrl(enrichedBody.primaryLink, provider);
+
+      return res.status(400).json({
+        success: false,
+        error:
+          'Email not found for this provider and username. Save the creator email first or enter the email manually.',
+        data: {
+          provider,
+          username,
+        },
+      });
     }
 
     if (folderHasDuplicateItem(doc, item)) {
@@ -1900,43 +2321,87 @@ exports.addFolderItem = async (req, res) => {
     });
   } catch (err) {
     console.error('[addFolderItem] Error:', err);
-    return res.status(500).json({ error: err?.message || 'Internal error' });
+    return res.status(500).json({
+      error: err?.message || 'Internal error',
+    });
   }
 };
 
 exports.updateFolderItem = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {
-      return res.status(403).json({ error: 'You are not allowed to update pitch folders' });
+      return res.status(403).json({
+        error: 'You are not allowed to update pitch folders',
+      });
     }
 
     const actorId = getActorAdminId(req.admin);
     const folderId = cleanStr(req.body?.folderId);
     const itemId = cleanStr(req.body?.itemId);
 
-    if (!mongoose.Types.ObjectId.isValid(folderId) || !mongoose.Types.ObjectId.isValid(itemId)) {
-      return res.status(400).json({ error: 'Valid folderId and itemId are required' });
+    if (
+      !mongoose.Types.ObjectId.isValid(folderId) ||
+      !mongoose.Types.ObjectId.isValid(itemId)
+    ) {
+      return res.status(400).json({
+        error: 'Valid folderId and itemId are required',
+      });
     }
 
     const doc = await findAccessibleFolder(folderId, req.admin);
+
     if (!doc) {
-      return res.status(404).json({ error: 'Pitch folder not found' });
+      return res.status(404).json({
+        error: 'Pitch folder not found',
+      });
     }
 
     const item = doc.items.id(itemId);
+
     if (!item) {
-      return res.status(404).json({ error: 'Folder item not found' });
+      return res.status(404).json({
+        error: 'Folder item not found',
+      });
     }
 
-    applyItemMutations(item, req.body || {}, actorId);
+    const currentItem =
+      typeof item.toObject === 'function' ? item.toObject() : item;
+
+    const enrichedBody = await enrichPitchFolderItemBodyWithProfileEmail(
+      req.body || {},
+      currentItem || {}
+    );
+
+    applyItemMutations(item, enrichedBody || {}, actorId);
 
     if (!cleanStr(item.name)) {
-      return res.status(400).json({ error: 'Influencer name is required' });
+      return res.status(400).json({
+        error: 'Influencer name is required',
+      });
+    }
+
+    if (!cleanStr(item.email)) {
+      const provider = normalizeProvider(item.provider);
+      const username =
+        normalizeLookupUsername(item.username) ||
+        normalizeLookupUsername(item.handle) ||
+        extractUsernameFromProfileUrl(item.primaryLink, provider);
+
+      return res.status(400).json({
+        success: false,
+        error:
+          'Email not found for this provider and username. Save the creator email first or enter the email manually.',
+        data: {
+          provider,
+          username,
+        },
+      });
     }
 
     if (folderHasDuplicateItem(doc, item, itemId)) {
       return res.status(409).json({
-        error: 'Another influencer with the same handle/link/email already exists in this pitch folder',
+        error:
+          'Another influencer with the same handle/link/email already exists in this pitch folder',
       });
     }
 
@@ -1951,7 +2416,9 @@ exports.updateFolderItem = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolderItem] Error:', err);
-    return res.status(500).json({ error: err?.message || 'Internal error' });
+    return res.status(500).json({
+      error: err?.message || 'Internal error',
+    });
   }
 };
 
@@ -2387,7 +2854,9 @@ exports.getSharedFolder = async (req, res) => {
 exports.bulkImportYoutubeToFolder = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {
-      return res.status(403).json({ error: 'You are not allowed to update pitch folders' });
+      return res.status(403).json({
+        error: 'You are not allowed to update pitch folders',
+      });
     }
 
     const actorId = getActorAdminId(req.admin);
@@ -2395,112 +2864,183 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
     const rawUsers = Array.isArray(req.body?.rawUsers) ? req.body.rawUsers : [];
 
     if (!mongoose.Types.ObjectId.isValid(folderId)) {
-      return res.status(400).json({ error: 'Valid folder id is required' });
+      return res.status(400).json({
+        error: 'Valid folder id is required',
+      });
     }
 
     if (!rawUsers.length) {
-      return res.status(400).json({ error: 'rawUsers are required' });
+      return res.status(400).json({
+        error: 'rawUsers are required',
+      });
     }
 
     const folder = await findAccessibleFolder(folderId, req.admin);
+
     if (!folder) {
-      return res.status(404).json({ error: 'Pitch folder not found' });
+      return res.status(404).json({
+        error: 'Pitch folder not found',
+      });
     }
 
     const existingKeys = new Set(
-      (folder.items || []).map((item) => buildFolderItemDedupeKey(item)).filter(Boolean)
+      (folder.items || [])
+        .map((item) => buildFolderItemDedupeKey(item))
+        .filter(Boolean)
     );
-
-    const importHandles = [];
-    const importChannelIds = [];
-
-    for (const user of rawUsers) {
-      const handle = cleanStr(user.handle || user.username).replace(/^@/, '');
-      const normalizedHandle = handle ? `@${handle}`.toLowerCase() : '';
-      const channelId = cleanStr(user.channelId || user.userId);
-
-      if (normalizedHandle) importHandles.push(normalizedHandle);
-      if (channelId) importChannelIds.push(channelId);
-    }
-
-    const profileOr = [];
-    if (importHandles.length) {
-      profileOr.push({ handle: { $in: uniqStrings(importHandles) } });
-    }
-    if (importChannelIds.length) {
-      profileOr.push({ channelId: { $in: uniqStrings(importChannelIds) } });
-    }
-
-    const savedProfiles = profileOr.length
-      ? await InfluencerProfile.find({
-        platform: 'youtube',
-        $or: profileOr,
-      })
-        .select('handle channelId email')
-        .lean()
-      : [];
-
-    const savedByHandle = new Map();
-    const savedByChannelId = new Map();
-
-    for (const profile of savedProfiles) {
-      const handleKey = cleanStr(profile.handle).toLowerCase();
-      const channelKey = cleanStr(profile.channelId);
-
-      if (handleKey) savedByHandle.set(handleKey, profile);
-      if (channelKey) savedByChannelId.set(channelKey, profile);
-    }
 
     let added = 0;
     let skipped = 0;
+
     const alreadyAdded = [];
+    const missingEmailUsers = [];
+    const skippedInvalidUsers = [];
+    const signedUpMatchedUsers = [];
 
     for (const user of rawUsers) {
-      const handle = cleanStr(user.handle || user.username).replace(/^@/, '');
-      const normalizedHandle = handle ? `@${handle}` : '';
-      const handleLookupKey = normalizedHandle.toLowerCase();
-      const channelId = cleanStr(user.channelId || user.userId);
+      const provider = normalizeProvider(user.platform || user.provider || 'youtube');
 
-      const savedProfile =
-        (handleLookupKey && savedByHandle.get(handleLookupKey)) ||
-        (channelId && savedByChannelId.get(channelId)) ||
-        null;
+      const rawHandle = cleanStr(
+        user.handle ||
+          user.username ||
+          user.handleId ||
+          user.channelHandle ||
+          ''
+      ).replace(/^@+/, '');
 
-      const resolvedEmail = cleanStr(user.email || savedProfile?.email).toLowerCase();
+      const normalizedHandle = rawHandle ? `@${rawHandle}` : '';
+
+      const channelId = cleanStr(
+        user.channelId ||
+          user.userId ||
+          user.sourceRefId ||
+          user.modashUserId ||
+          ''
+      );
+
+      const profileUrl = cleanStr(
+        user.url ||
+          user.profileUrl ||
+          user.primaryLink ||
+          user.link ||
+          ''
+      );
+
+      const rawLinks = Array.isArray(user.links)
+        ? user.links
+        : profileUrl
+          ? [profileUrl]
+          : [];
+
+      const categories = Array.isArray(user.categories)
+        ? user.categories
+        : Array.isArray(user.niche)
+          ? user.niche
+          : [];
+
+      const baseBody = {
+        provider,
+        platform: provider,
+
+        name: cleanStr(
+          user.fullname ||
+            user.fullName ||
+            user.name ||
+            user.title ||
+            normalizedHandle
+        ),
+
+        handle: normalizedHandle,
+        username: rawHandle,
+        channelHandle: normalizedHandle,
+
+        channelId,
+        userId: cleanStr(user.userId || channelId),
+        sourceRefId: cleanStr(user.sourceRefId || channelId),
+        modashUserId: cleanStr(user.modashUserId || ''),
+
+        followers: toNullableNumber(
+          user.followers ||
+            user.followersCount ||
+            user.subscribers ||
+            user.subscriberCount
+        ),
+
+        primaryLink: profileUrl,
+        links: uniqStrings(rawLinks),
+
+        niche: uniqStrings(categories),
+        country: cleanStr(user.country || user.countryName || ''),
+        email: cleanStr(user.email || '').toLowerCase(),
+
+        selectionReason: cleanStr(user.selectionReason || ''),
+        goodFit: !!user.goodFit,
+
+        influencerRateCard: cleanStr(user.influencerRateCard || ''),
+        platformRateCard: cleanStr(user.platformRateCard || ''),
+        rateCardCurrency: cleanStr(user.rateCardCurrency || 'USD').toUpperCase(),
+        ourFeePct: toNullableNumber(user.ourFeePct),
+        shippingAddress: cleanStr(user.shippingAddress || user.comments || ''),
+      };
+
+      const enrichedBody = await enrichPitchFolderItemBodyWithProfileEmail(baseBody);
 
       const item = {
-        provider: normalizeProvider(user.platform || 'youtube'),
-        name: cleanStr(user.fullname || user.name),
-        handle: normalizedHandle,
-        followers: toNullableNumber(user.followers),
-        primaryLink: cleanStr(user.url),
-        links: uniqStrings([user.url]),
-        niche: Array.isArray(user.categories) ? uniqStrings(user.categories) : [],
-        email: resolvedEmail,
-        country: cleanStr(user.country),
-        selectionReason: '',
-        goodFit: false,
-        influencerRateCard: '',
-        platformRateCard: '',
-        rateCardCurrency: 'USD',
-        ourFeePct: null,
-        shippingAddress: '',
-        mediaKit: normalizeMediaKit(null, actorId),
-        mediaKitLink: normalizeMediaKitLink(null, actorId),
+        ...normalizeItem(enrichedBody, actorId),
         createdByAdmin: actorId || null,
         updatedByAdmin: actorId || null,
       };
 
-      if (!item.name) continue;
+      if (!item.name) {
+        skipped += 1;
+        skippedInvalidUsers.push({
+          handle: normalizedHandle,
+          channelId,
+          reason: 'Influencer name is missing',
+        });
+        continue;
+      }
+
+      if (!item.email) {
+        skipped += 1;
+        missingEmailUsers.push({
+          name: item.name,
+          handle: normalizedHandle,
+          channelId,
+          provider,
+          reason:
+            'Email not found in signed-up influencer or saved creator profile. Ask creator to sign up or add email manually.',
+        });
+        continue;
+      }
 
       const dedupeKey = buildFolderItemDedupeKey(item);
 
-      if (!dedupeKey) continue;
+      if (!dedupeKey) {
+        skipped += 1;
+        skippedInvalidUsers.push({
+          name: item.name,
+          handle: normalizedHandle,
+          channelId,
+          reason: 'Could not create duplicate-check key',
+        });
+        continue;
+      }
 
       if (existingKeys.has(dedupeKey)) {
         skipped += 1;
         alreadyAdded.push(item.handle || item.name);
         continue;
+      }
+
+      if (enrichedBody.isSignedUpInfluencer && enrichedBody.signedUpInfluencerId) {
+        signedUpMatchedUsers.push({
+          influencerId: enrichedBody.signedUpInfluencerId,
+          name: item.name,
+          email: item.email,
+          handle: item.handle,
+          provider: item.provider,
+        });
       }
 
       folder.items.push(item);
@@ -2512,24 +3052,34 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
 
     const hydrated = await saveAndHydrateFolder(folder);
 
+    const message =
+      added > 0
+        ? 'Youtube creators imported successfully'
+        : missingEmailUsers.length > 0
+          ? 'No creators imported because email was missing for selected Youtube creators'
+          : alreadyAdded.length > 0
+            ? 'All selected Youtube creators are already added in this folder'
+            : 'No Youtube creators were imported';
+
     return res.json({
       success: true,
-      message:
-        added > 0
-          ? 'Youtube creators imported successfully'
-          : 'All selected Youtube creators are already added in this folder',
+      message,
       added,
       skipped,
       alreadyAdded: uniqStrings(alreadyAdded),
+      missingEmailUsers,
+      skippedInvalidUsers,
+      signedUpMatchedUsers,
       total: hydrated?.items?.length || 0,
       data: serializeFolderDetail(hydrated),
     });
   } catch (err) {
     console.error('[bulkImportYoutubeToFolder] Error:', err);
-    return res.status(500).json({ error: err?.message || 'Internal error' });
+    return res.status(500).json({
+      error: err?.message || 'Internal error',
+    });
   }
 };
-
 exports.updateSharedFolderGoodFit = async (req, res) => {
   try {
     const token = cleanStr(req.params.token);
@@ -2853,46 +3403,8 @@ exports.moveFolderItems = async (req, res) => {
   }
 };
 
-function escapeRegexForExact(value = '') {
-  return String(value).replace(/[.*+?^${}()|[]\]/g, '\$&');
-}
-
-function normalizePitchItemHandle(value) {
-  const raw = cleanStr(value).replace(/^@+/, '');
-  return raw ? `@${raw.toLowerCase()}` : '';
-}
-
 async function findInfluencerForFolderItem(item = {}) {
-  const email = cleanStr(item.email).toLowerCase();
-  const provider = normalizeProvider(item.provider);
-  const handle = normalizePitchItemHandle(item.handle);
-  const username = handle.replace(/^@+/, '');
-
-  const or = [];
-
-  if (email) {
-    const emailRx = new RegExp(`^${escapeRegexForExact(email)}$`, 'i');
-    or.push({ email: emailRx }, { proxyEmail: emailRx });
-  }
-
-  if (provider && username) {
-    or.push({
-      page1: {
-        $elemMatch: {
-          $and: [
-            { $or: [{ platform: provider }, { provider }] },
-            { $or: [{ handle }, { username }] },
-          ],
-        },
-      },
-    });
-  }
-
-  if (!or.length) return null;
-
-  return InfluencerModel.findOne({ $or: or })
-    .select('_id name email proxyEmail primaryPlatform page1')
-    .lean();
+  return findSignedUpInfluencerForSource(item);
 }
 
 function buildActiveApplicantPatch({ influencer, item, folder, actorId, now }) {

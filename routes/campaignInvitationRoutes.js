@@ -6,28 +6,47 @@ const campaignInvitationController = require("../controllers/campaignInvitationC
 const { brandAuth } = require("../auth/brandAuth");
 const { influencerAuth } = require("../auth/influencerAuth");
 
-// create invitation for one influencer on multiple campaigns
 router.post("/create", brandAuth, campaignInvitationController.createInvitation);
-// router.post("/template-preview", brandAuth,
-// campaignInvitationController.getInvitationTemplatePreview);
 
-// general list with filters
-router.get("/list",  campaignInvitationController.getInvitationsList);
+router.post("/admin/create", campaignInvitationController.createInvitationByAdmin);
 
-router.get("/influencer/:influencerId", influencerAuth,campaignInvitationController.getInvitationsByInfluencerId);
-router.get("/influencer/:influencerId/all", influencerAuth,campaignInvitationController.getAllInvitationsByInfluencerId);
+router.get("/list", campaignInvitationController.getInvitationsList);
 
-// get invitations by brandId
-router.get("/brand/:brandId", brandAuth, campaignInvitationController.getInvitationsByBrandId);
+router.get(
+  "/influencer/:influencerId",
+  influencerAuth,
+  campaignInvitationController.getInvitationsByInfluencerId
+);
 
-router.post("/update-status", influencerAuth,campaignInvitationController.updateInvitationStatus);
+router.get(
+  "/influencer/:influencerId/all",
+  influencerAuth,
+  campaignInvitationController.getAllInvitationsByInfluencerId
+);
+
+router.get(
+  "/brand/:brandId",
+  brandAuth,
+  campaignInvitationController.getInvitationsByBrandId
+);
 
 router.post(
-  "/get-invitations",brandAuth,
+  "/update-status",
+  influencerAuth,
+  campaignInvitationController.updateInvitationStatus
+);
+
+router.post(
+  "/get-invitations",
+  brandAuth,
   campaignInvitationController.getInvitationsByBrandIdAndCampaignId
 );
 
-router.post("/get-by-campaign", campaignInvitationController.getInvitationsByCampaignIdPost);
+router.post(
+  "/get-by-campaign",
+  campaignInvitationController.getInvitationsByCampaignIdPost
+);
+
 router.get(
   "/accepted-admin-created-campaigns",
   campaignInvitationController.getAcceptedAdminCreatedCampaigns
@@ -37,9 +56,10 @@ router.get(
   "/accepted-admin-created-influencers",
   campaignInvitationController.getAcceptedAdminCreatedInfluencersByCampaignId
 );
+
 router.post(
   "/get-invitation-status-by-campaign-id",
   campaignInvitationController.getInvitationStatusByCampaignIdPost
 );
 
-module.exports = router;       
+module.exports = router;
