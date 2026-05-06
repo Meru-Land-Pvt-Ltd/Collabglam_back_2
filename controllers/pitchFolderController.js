@@ -1014,6 +1014,175 @@ async function enrichPitchFolderItemBodyWithProfileEmail(body = {}, fallback = {
 
   return nextBody;
 }
+
+
+function compactAiText(value, maxLength = 1200) {
+  const text = cleanStr(value).replace(/\s+/g, ' ');
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function formatSelectionReasonArray(value) {
+  if (Array.isArray(value)) return uniqStrings(value).join(', ');
+  return uniqStrings(String(value || '').split(',')).join(', ');
+}
+
+function buildSelectionReasonContext(body = {}) {
+  const assignedCampaign = body.assignedCampaign || {};
+  const campaignActivation = body.campaignActivation || {};
+  const mediaKitAccess = body.mediaKitAccess || {};
+
+  return {
+    provider: normalizeProvider(body.provider || body.platform),
+    name: cleanStr(body.name),
+    handle: cleanStr(body.handle || body.username || body.channelHandle),
+    followers: toNullableNumber(body.followers),
+    niche: formatSelectionReasonArray(body.niche || body.categories),
+    country: cleanStr(body.country || body.countryName),
+    email: cleanStr(body.email).toLowerCase(),
+    profileLink: cleanStr(body.profileLink || body.primaryLink || body.url || body.link),
+    profileLinks: Array.isArray(body.links) ? uniqStrings(body.links).join(', ') : cleanStr(body.links),
+    currentSelectionReason: compactAiText(body.currentSelectionReason || body.selectionReason, 1200),
+    goodFit: body.goodFit === true,
+    influencerRateCard: compactAiText(body.influencerRateCard, 1600),
+    platformRateCard: compactAiText(body.platformRateCard, 1600),
+    rateCardCurrency: cleanStr(body.rateCardCurrency || 'USD').toUpperCase(),
+    ourFeePct: toNullableNumber(body.ourFeePct),
+    shippingAddress: compactAiText(body.shippingAddress || body.comments, 900),
+    mediaKitStatus: cleanStr(mediaKitAccess.requestStatus || body.mediaKitStatus),
+    mediaKitVisibleSource: cleanStr(mediaKitAccess.visibleSource || body.mediaKitVisibleSource),
+    hasMediaKit: body.hasMediaKit === true || mediaKitAccess.hasAdded === true,
+    folderId: cleanStr(body.folderId),
+    itemId: cleanStr(body.itemId),
+    folderTitle: cleanStr(body.folderTitle),
+    folderDescription: compactAiText(body.folderDescription, 800),
+    campaignTitle: cleanStr(assignedCampaign.campaignTitle || body.campaignTitle),
+    campaignId: cleanStr(assignedCampaign.campaignId || body.campaignId),
+    brandName: cleanStr(assignedCampaign.brandName || body.brandName),
+    productOrServiceName: cleanStr(
+      assignedCampaign.productOrServiceName || body.productOrServiceName
+    ),
+    campaignActive: campaignActivation.active === true,
+    campaignInvitationStatus: cleanStr(body.campaignInvitationStatus),
+    influencerSource: cleanStr(body.influencerSource),
+  };
+}
+
+function hasEnoughSelectionReasonContext(ctx = {}) {
+  return !!(
+    ctx.name ||
+    ctx.handle ||
+    ctx.profileLink ||
+    ctx.niche ||
+    ctx.followers ||
+    ctx.country ||
+    ctx.influencerRateCard ||
+    ctx.platformRateCard ||
+    ctx.campaignTitle ||
+    ctx.productOrServiceName
+  );
+}
+
+function buildFallbackSelectionReason(ctx = {}) {
+  const creatorLabel = ctx.name || ctx.handle || 'This creator';
+  const parts = [];
+
+  if (ctx.niche) parts.push(`content focus in ${ctx.niche}`);
+  if (ctx.followers) parts.push(`${Number(ctx.followers).toLocaleString('en-IN')} followers`);
+  if (ctx.country) parts.push(`country/audience relevance in ${ctx.country}`);
+  if (ctx.campaignTitle) parts.push(`alignment with ${ctx.campaignTitle}`);
+  if (ctx.productOrServiceName) parts.push(`relevance to ${ctx.productOrServiceName}`);
+  if (ctx.influencerRateCard || ctx.platformRateCard) parts.push('available rate-card context for commercial planning');
+  if (ctx.goodFit) parts.push('already marked as a Good Fit in the pitch folder');
+
+  const supportText = parts.length ? parts.join(', ') : 'profile relevance, creator context, and campaign suitability';
+
+  return `${creatorLabel} is a strong campaign prospect based on ${supportText}. This profile gives the brand a useful creator option for outreach because the available information supports category relevance, collaboration readiness, and a clear basis for evaluating fit against the assigned campaign.`;
+}
+
+async function generateSelectionReasonWithAI(ctx = {}) {
+  const apiKey = cleanStr(process.env.OPENAI_API_KEY);
+  const model = cleanStr(process.env.OPENAI_SELECTION_REASON_MODEL || process.env.OPENAI_MODEL) || 'gpt-4o-mini';
+
+  if (!apiKey || typeof fetch !== 'function') {
+    return {
+      source: 'fallback',
+      selectionReason: buildFallbackSelectionReason(ctx),
+    };
+  }
+
+  const prompt = [
+    'Generate the strongest possible editable selection reason for a pitch folder influencer row.',
+    'Write in a professional brand-pitch tone for an internal influencer shortlist.',
+    'Use the maximum useful detail from the provided facts, but do not invent audience demographics, performance metrics, pricing, locations, or claims.',
+    'Mention campaign/product relevance when available, creator/category fit, reach/followers when available, geography when useful, and collaboration readiness if rate-card or media-kit information exists.',
+    'If an existing selection reason is provided, improve and expand it instead of ignoring it.',
+    'Keep it detailed but practical: 90 to 150 words. Return only the final selection reason text, no bullets and no heading.',
+    '',
+    `Existing reason to improve: ${ctx.currentSelectionReason || 'Not provided'}`,
+    `Creator name: ${ctx.name || 'Not provided'}`,
+    `Provider: ${ctx.provider || 'Not provided'}`,
+    `Handle: ${ctx.handle || 'Not provided'}`,
+    `Followers: ${ctx.followers ?? 'Not provided'}`,
+    `Niche/categories: ${ctx.niche || 'Not provided'}`,
+    `Country: ${ctx.country || 'Not provided'}`,
+    `Email present: ${ctx.email ? 'Yes' : 'No'}`,
+    `Profile link: ${ctx.profileLink || 'Not provided'}`,
+    `Other profile links: ${ctx.profileLinks || 'Not provided'}`,
+    `Influencer rate card: ${ctx.influencerRateCard || 'Not provided'}`,
+    `Platform/admin rate card: ${ctx.platformRateCard || 'Not provided'}`,
+    `Rate card currency: ${ctx.rateCardCurrency || 'Not provided'}`,
+    `Our fee percentage: ${ctx.ourFeePct ?? 'Not provided'}`,
+    `Shipping/address notes: ${ctx.shippingAddress || 'Not provided'}`,
+    `Media kit status: ${ctx.mediaKitStatus || 'Not provided'}`,
+    `Media kit visible source: ${ctx.mediaKitVisibleSource || 'Not provided'}`,
+    `Good Fit marked: ${ctx.goodFit ? 'Yes' : 'No'}`,
+    `Influencer source: ${ctx.influencerSource || 'Not provided'}`,
+    `Campaign invitation status: ${ctx.campaignInvitationStatus || 'Not provided'}`,
+    `Already active on assigned campaign: ${ctx.campaignActive ? 'Yes' : 'No'}`,
+    `Pitch folder: ${ctx.folderTitle || 'Not provided'}`,
+    `Pitch folder description: ${ctx.folderDescription || 'Not provided'}`,
+    `Campaign: ${ctx.campaignTitle || 'Not provided'}`,
+    `Campaign ID: ${ctx.campaignId || 'Not provided'}`,
+    `Brand: ${ctx.brandName || 'Not provided'}`,
+    `Product/service: ${ctx.productOrServiceName || 'Not provided'}`,
+  ].join('\n');
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.5,
+      max_tokens: 320,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write concise influencer marketing selection reasons for internal pitch folders.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = data?.error?.message || 'OpenAI selection reason generation failed';
+    throw new Error(message);
+  }
+
+  const selectionReason = cleanStr(data?.choices?.[0]?.message?.content);
+
+  return {
+    source: 'openai',
+    selectionReason: selectionReason || buildFallbackSelectionReason(ctx),
+  };
+}
 function normalizeMediaKit(input, actorId, currentMediaKit = null) {
   if (input === null) {
     return {
@@ -2130,6 +2299,55 @@ exports.getFolderList = async (req, res) => {
     });
   } catch (err) {
     console.error('[getFolderList] Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Internal error',
+    });
+  }
+};
+
+
+exports.generateSelectionReason = async (req, res) => {
+  try {
+    if (!canCreateOrManagePitchFolders(req.admin)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not allowed to generate selection reasons',
+      });
+    }
+
+    const ctx = buildSelectionReasonContext(req.body || {});
+
+    if (!hasEnoughSelectionReasonContext(ctx)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Add at least one creator detail such as name, handle, followers, niche, country, rate card, or campaign before generating a selection reason.',
+      });
+    }
+
+    const result = await generateSelectionReasonWithAI(ctx);
+    const selectionReason = cleanStr(result.selectionReason);
+
+    if (!selectionReason) {
+      return res.status(500).json({
+        success: false,
+        error: 'Selection reason could not be generated',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Selection reason generated successfully',
+      source: result.source,
+      selectionReason,
+      data: {
+        selectionReason,
+        source: result.source,
+      },
+    });
+  } catch (err) {
+    console.error('[generateSelectionReason] Error:', err);
     return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
