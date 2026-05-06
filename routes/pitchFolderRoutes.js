@@ -5,6 +5,7 @@ const router = express.Router();
 
 const controller = require('../controllers/pitchFolderController');
 const { adminAuth } = require('../middlewares/adminAuth');
+const { brandAuth } = require('../auth/brandAuth');
 
 // public shared routes
 router.get('/shared/:token', controller.getSharedFolder);
@@ -15,6 +16,19 @@ router.post('/shared/:token/media-kit-request/:itemId', controller.requestShared
 
 // backward-compatible alias
 router.post('/shared/:token/media-kit-link-request/:itemId', controller.requestSharedFolderMediaKit);
+
+// brand routes
+// Used by Creator Hub filter dropdown. Returns only this brand's fully-managed
+// campaign folders that are assigned to a campaign and have at least one good fit creator.
+router.get('/folder/list', brandAuth, controller.getFolderList);
+
+// Used after selecting a campaign/folder option from Creator Hub.
+// This checks the selected campaign belongs to the logged-in brand, then returns
+// only goodFit === true creators from the pitch folder assigned to that campaign.
+router.get('/campaign/:campaignId/good-fit', brandAuth, controller.getCampaignGoodFitList);
+
+// Keep this existing route as-is for any create-folder usage.
+router.post('/folder/create', brandAuth, controller.createFolder);
 
 // admin routes
 router.get('/list', adminAuth, controller.listFolders);

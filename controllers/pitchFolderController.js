@@ -13,6 +13,28 @@ const Campaign = require('../models/campaign');
 const ApplyCampaign = require('../models/applyCampaign');
 const { InfluencerModel } = require('../models/influencer');
 
+let BookmarkFolder = null;
+try {
+  const bookmarkFolderModule = require('../models/bookmarkFolder');
+  BookmarkFolder =
+    bookmarkFolderModule?.BookmarkFolder ||
+    bookmarkFolderModule?.BookmarkFolderModel ||
+    bookmarkFolderModule?.default ||
+    bookmarkFolderModule;
+} catch (err) {
+  try {
+    const bookmarkFolderModule = require('../models/bookmark');
+    BookmarkFolder =
+      bookmarkFolderModule?.BookmarkFolder ||
+      bookmarkFolderModule?.BookmarkFolderModel ||
+      bookmarkFolderModule?.default ||
+      bookmarkFolderModule;
+  } catch (innerErr) {
+    BookmarkFolder = null;
+  }
+}
+
+
 const ALLOWED_PROVIDERS = ['instagram', 'youtube', 'tiktok'];
 const MEDIA_KIT_REQUEST_STATUSES = ['none', 'requested', 'approved', 'rejected'];
 
@@ -26,6 +48,84 @@ function cleanStr(v) {
   if (v === undefined || v === null) return '';
   return String(v).trim();
 }
+
+function getAuthedBrandId(req = {}) {
+  return cleanStr(
+    req.brand?._id ||
+      req.brand?.id ||
+      req.brand?.brandId ||
+      req.brandId ||
+      req.user?.brandId ||
+      req.user?.brand?._id ||
+      req.user?.brand?.id ||
+      req.user?._id ||
+      req.user?.id
+  );
+}
+
+function getRequestedBrandId(req = {}) {
+  return (
+    getAuthedBrandId(req) ||
+    cleanStr(req.query?.brandId || req.body?.brandId || req.admin?.brandId)
+  );
+}
+
+function buildBrandScopeOr(brandId) {
+  const id = cleanStr(brandId);
+  if (!id) return [];
+
+  const or = [
+    { brandId: id },
+    { brandRef: id },
+    { 'brand._id': id },
+    { 'brand.id': id },
+    { 'assignedCampaign.brandId': id },
+  ];
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    const objectId = new mongoose.Types.ObjectId(id);
+    or.push(
+      { brandId: objectId },
+      { brandRef: objectId },
+      { 'brand._id': objectId },
+      { 'assignedCampaign.brandId': objectId }
+    );
+  }
+
+  return or;
+}
+
+function applyBrandScopeToFilter(filter = {}, brandId = '') {
+  const brandOr = buildBrandScopeOr(brandId);
+  if (!brandOr.length) return filter;
+
+  const nextFilter = { ...filter };
+  const existingAnd = Array.isArray(nextFilter.$and) ? nextFilter.$and : [];
+  nextFilter.$and = [...existingAnd, { $or: brandOr }];
+  return nextFilter;
+}
+
+function buildBrandScopedPitchFolderFilter(brandId) {
+  return applyBrandScopeToFilter({ archivedAt: null }, brandId);
+}
+
+function buildBrandScopedBookmarkFilter(brandId) {
+  return applyBrandScopeToFilter({ archivedAt: null }, brandId);
+}
+
+function sameMongoIdLike(a, b) {
+  const left = cleanStr(a?._id || a);
+  const right = cleanStr(b?._id || b);
+  return !!left && !!right && left === right;
+}
+
+function assertBrandCanUseCampaign(campaign, brandId) {
+  const scopedBrandId = cleanStr(brandId);
+  if (!scopedBrandId || !campaign) return true;
+
+  return sameMongoIdLike(campaign.brandId, scopedBrandId);
+}
+
 
 async function findCampaignByAnyIdForAssignment(campaignId) {
   const id = cleanStr(campaignId);
@@ -58,6 +158,32 @@ function uniqStrings(values = []) {
   }
 
   return out;
+}
+
+
+function buildAssignedCampaignMatchOr(rawCampaignId, campaign = null) {
+  const values = uniqStrings([
+    rawCampaignId,
+    campaign?._id ? String(campaign._id) : '',
+    campaign?.campaignsId,
+  ]);
+
+  const or = [];
+
+  for (const value of values) {
+    if (!value) continue;
+
+    or.push({ 'assignedCampaign.campaignId': value });
+    or.push({ 'assignedCampaign.campaignsId': value });
+
+    if (mongoose.Types.ObjectId.isValid(value)) {
+      or.push({
+        'assignedCampaign.campaignId': new mongoose.Types.ObjectId(value),
+      });
+    }
+  }
+
+  return or;
 }
 
 function toNullableNumber(v) {
@@ -644,9 +770,9 @@ function getSignedUpInfluencerEmail(influencer = {}) {
 
   return cleanStr(
     influencer.email ||
-      influencer.proxyEmail ||
-      influencer.emailTo ||
-      ''
+    influencer.proxyEmail ||
+    influencer.emailTo ||
+    ''
   ).toLowerCase();
 }
 
@@ -655,12 +781,12 @@ function getEmailFromInfluencerProfile(profile = {}) {
 
   return cleanStr(
     profile.email ||
-      profile.businessEmail ||
-      profile.contactEmail ||
-      profile.publicEmail ||
-      profile.profileEmail ||
-      profile.emailTo ||
-      ''
+    profile.businessEmail ||
+    profile.contactEmail ||
+    profile.publicEmail ||
+    profile.profileEmail ||
+    profile.emailTo ||
+    ''
   ).toLowerCase();
 }
 
@@ -865,8 +991,8 @@ async function enrichPitchFolderItemBodyWithProfileEmail(body = {}, fallback = {
     if (!cleanStr(nextBody.country)) {
       nextBody.country = cleanStr(
         signedUpInfluencer.countryName ||
-          signedUpInfluencer.country ||
-          signedUpInfluencer.location
+        signedUpInfluencer.country ||
+        signedUpInfluencer.location
       );
     }
 
@@ -1684,6 +1810,333 @@ async function saveAndHydrateFolder(doc) {
     .lean();
 }
 
+
+function normalizeFolderKind(value = '') {
+  const raw = cleanStr(value || 'all').toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_');
+
+  if (['pitch', 'pitchsheet', 'pitch_sheet', 'pitch_folder'].includes(raw)) {
+    return 'pitch_sheet';
+  }
+
+  if (['bookmark', 'bookmarks', 'bookmark_folder', 'saved', 'saved_creators'].includes(raw)) {
+    return 'bookmark';
+  }
+
+  if (['fully_managed', 'fullymanaged', 'campaign', 'campaign_specific', 'campaign_folder'].includes(raw)) {
+    return 'fully_managed';
+  }
+
+  return 'all';
+}
+
+function hasAssignedCampaignForFolderList(folder = {}) {
+  return Boolean(
+    folder?.assignedCampaign?.campaignId ||
+      folder?.assignedCampaign?.campaignsId ||
+      folder?.assignedCampaign?.campaignTitle ||
+      folder?.assignedCampaign?.productOrServiceName
+  );
+}
+
+function getStoredFolderKind(folder = {}) {
+  return cleanStr(
+    folder.folderType ||
+      folder.type ||
+      folder.source ||
+      folder.folderKind ||
+      folder.category
+  )
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+}
+
+function isBookmarkPitchFolder(folder = {}) {
+  const kind = getStoredFolderKind(folder);
+  return ['bookmark', 'bookmarks', 'bookmark_folder', 'saved', 'saved_creators'].includes(kind);
+}
+
+function isFullyManagedPitchFolder(folder = {}) {
+  const kind = getStoredFolderKind(folder);
+  return (
+    ['fully_managed', 'fullymanaged', 'campaign', 'campaign_specific', 'campaign_folder'].includes(kind) ||
+    hasAssignedCampaignForFolderList(folder)
+  );
+}
+
+function folderMatchesCampaign(folder = {}, rawCampaignId = '') {
+  const campaignId = cleanStr(rawCampaignId);
+  if (!campaignId) return true;
+
+  const assignedCampaign = folder?.assignedCampaign || {};
+  const assignedCampaignId = cleanStr(
+    assignedCampaign?.campaignId?._id || assignedCampaign?.campaignId
+  );
+  const assignedCampaignsId = cleanStr(assignedCampaign?.campaignsId);
+
+  return assignedCampaignId === campaignId || assignedCampaignsId === campaignId;
+}
+
+function folderMatchesBrand(folder = {}, rawBrandId = '') {
+  const brandId = cleanStr(rawBrandId);
+  if (!brandId) return true;
+
+  const assignedCampaign = folder?.assignedCampaign || {};
+  const directBrandId = cleanStr(folder?.brandId?._id || folder?.brandId || folder?.brandRef);
+  const campaignBrandId = cleanStr(assignedCampaign?.brandId?._id || assignedCampaign?.brandId);
+
+  return directBrandId === brandId || campaignBrandId === brandId;
+}
+
+function serializeFolderCardFromPitchFolder(folder = {}, overrideType = '') {
+  const items = Array.isArray(folder.items) ? folder.items : [];
+  const assignedCampaign = serializeAssignedCampaign(folder.assignedCampaign);
+  const isBookmark = isBookmarkPitchFolder(folder);
+  const isFullyManaged = isFullyManagedPitchFolder(folder);
+
+  const resolvedType = overrideType || (isBookmark ? 'bookmark' : isFullyManaged ? 'fully_managed' : 'pitch_sheet');
+
+  return {
+    _id: String(folder._id || ''),
+    type: resolvedType,
+    title: folder.title || folder.name || '',
+    name: folder.name || folder.title || '',
+    slug: folder.slug || '',
+    description: folder.description || '',
+    itemCount: items.length,
+    goodFitCount: items.filter((item) => item?.goodFit === true).length,
+    brandVisibleItemCount:
+      folder.brandVisibleItemCount === null || folder.brandVisibleItemCount === undefined
+        ? items.length
+        : Number(folder.brandVisibleItemCount || 0),
+    showFullListToBrand: !!folder.showFullListToBrand,
+    isCampaignSpecific: hasAssignedCampaignForFolderList(folder),
+    isFullyManaged,
+    assignedCampaign,
+    share: folder.share
+      ? {
+          token: folder.share.token || '',
+          url: folder.share.url || '',
+          generatedAt: folder.share.generatedAt || null,
+          sharedBy: serializeMiniAdmin(folder.share.sharedByAdminId),
+        }
+      : {},
+    createdAt: folder.createdAt || null,
+    updatedAt: folder.updatedAt || null,
+    createdBy: serializeAdmin(folder.createdByAdmin),
+    updatedBy: serializeAdmin(folder.updatedByAdmin),
+  };
+}
+
+function serializeFolderCardFromBookmarkFolder(folder = {}) {
+  const items = Array.isArray(folder.items)
+    ? folder.items
+    : Array.isArray(folder.bookmarks)
+      ? folder.bookmarks
+      : Array.isArray(folder.influencers)
+        ? folder.influencers
+        : Array.isArray(folder.creators)
+          ? folder.creators
+          : [];
+
+  return {
+    _id: String(folder._id || ''),
+    type: 'bookmark',
+    title: folder.title || folder.name || '',
+    name: folder.name || folder.title || '',
+    slug: folder.slug || '',
+    description: folder.description || '',
+    itemCount: items.length,
+    goodFitCount: 0,
+    brandVisibleItemCount: items.length,
+    showFullListToBrand: true,
+    isCampaignSpecific: false,
+    isFullyManaged: false,
+    assignedCampaign: null,
+    share: {},
+    createdAt: folder.createdAt || null,
+    updatedAt: folder.updatedAt || null,
+  };
+}
+
+function folderSearchMatches(folder = {}, search = '') {
+  const q = cleanStr(search).toLowerCase();
+  if (!q) return true;
+
+  return [
+    folder.title,
+    folder.name,
+    folder.slug,
+    folder.description,
+    folder.type,
+    folder.assignedCampaign?.campaignTitle,
+    folder.assignedCampaign?.productOrServiceName,
+    folder.assignedCampaign?.brandName,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .includes(q);
+}
+
+async function loadBookmarkFoldersForFolderList({ brandId = '', search = '' } = {}) {
+  if (!BookmarkFolder || typeof BookmarkFolder.find !== 'function') {
+    return [];
+  }
+
+  const filter = {};
+
+  if (brandId) {
+    filter.$or = [
+      { brandId },
+      { brandRef: brandId },
+    ];
+
+    if (mongoose.Types.ObjectId.isValid(brandId)) {
+      filter.$or.push({ brandId: new mongoose.Types.ObjectId(brandId) });
+      filter.$or.push({ brandRef: new mongoose.Types.ObjectId(brandId) });
+    }
+  }
+
+  const archivedOr = [
+    { archivedAt: null },
+    { archivedAt: { $exists: false } },
+  ];
+
+  filter.$and = [{ $or: archivedOr }];
+
+  const docs = await BookmarkFolder.find(filter).sort({ updatedAt: -1 }).lean();
+
+  return docs
+    .map(serializeFolderCardFromBookmarkFolder)
+    .filter((folder) => folderSearchMatches(folder, search));
+}
+
+exports.getFolderList = async (req, res) => {
+  try {
+    const hasAdminScope = !!req.admin;
+    const authedBrandId = getAuthedBrandId(req);
+    const brandId = getRequestedBrandId(req);
+
+    if (hasAdminScope && !canCreateOrManagePitchFolders(req.admin)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not allowed to access folders',
+      });
+    }
+
+    if (!hasAdminScope && !authedBrandId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Brand authentication is required',
+      });
+    }
+
+    const folderKind = normalizeFolderKind(req.query?.type || req.query?.folderType || 'all');
+    const search = cleanStr(req.query?.search || req.query?.q);
+    const campaignId = cleanStr(req.query?.campaignId);
+    const hasGoodFitOnly = ['1', 'true', 'yes', 'on'].includes(
+      cleanStr(req.query?.hasGoodFit || req.query?.onlyGoodFit || req.query?.goodFit).toLowerCase()
+    );
+
+    const includePitchSheets = folderKind === 'all' || folderKind === 'pitch_sheet';
+    const includeBookmarks = folderKind === 'all' || folderKind === 'bookmark';
+    const includeFullyManaged = folderKind === 'all' || folderKind === 'fully_managed';
+
+    let baseFilter = hasAdminScope
+      ? await buildFolderAccessFilter(req.admin)
+      : buildBrandScopedPitchFolderFilter(authedBrandId);
+
+    if (hasAdminScope && !baseFilter) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not allowed to access folders',
+      });
+    }
+
+    if (hasAdminScope && brandId) {
+      baseFilter = applyBrandScopeToFilter(baseFilter, brandId);
+    }
+
+    const pitchQueryFilter = hasGoodFitOnly
+      ? { ...baseFilter, 'items.goodFit': true }
+      : baseFilter;
+
+    const pitchDocs = includePitchSheets || includeFullyManaged || campaignId
+      ? await PitchFolder.find(pitchQueryFilter)
+          .populate(buildCreatorPopulate())
+          .populate(buildUpdatedByPopulate())
+          .populate(buildSharedByPopulate())
+          .sort({ updatedAt: -1 })
+          .lean()
+      : [];
+
+    const pitchCards = pitchDocs
+      .filter((folder) => folderMatchesCampaign(folder, campaignId))
+      .filter((folder) => folderMatchesBrand(folder, brandId))
+      .filter((folder) => {
+        if (!hasGoodFitOnly) return true;
+        const items = Array.isArray(folder.items) ? folder.items : [];
+        return items.some((item) => item?.goodFit === true);
+      })
+      .map((folder) => serializeFolderCardFromPitchFolder(folder));
+
+    const pitchSheetFolders = includePitchSheets
+      ? pitchCards
+          .filter((folder) => folder.type === 'pitch_sheet')
+          .filter((folder) => folderSearchMatches(folder, search))
+      : [];
+
+    const fullyManagedFolders = includeFullyManaged
+      ? pitchCards
+          .filter((folder) => folder.type === 'fully_managed' || folder.isCampaignSpecific)
+          .map((folder) => ({ ...folder, type: 'fully_managed', isFullyManaged: true }))
+          .filter((folder) => folderSearchMatches(folder, search))
+      : [];
+
+    const bookmarkPitchFolders = includeBookmarks
+      ? pitchCards
+          .filter((folder) => folder.type === 'bookmark')
+          .filter((folder) => folderSearchMatches(folder, search))
+      : [];
+
+    const externalBookmarkFolders = includeBookmarks && !campaignId && !hasGoodFitOnly
+      ? await loadBookmarkFoldersForFolderList({ brandId, search })
+      : [];
+
+    const bookmarkFolders = [...bookmarkPitchFolders, ...externalBookmarkFolders];
+
+    const folders = [
+      ...pitchSheetFolders,
+      ...bookmarkFolders,
+      ...fullyManagedFolders,
+    ];
+
+    return res.json({
+      success: true,
+      message: 'Folders fetched successfully',
+      data: {
+        totalCount: folders.length,
+        pitchSheetCount: pitchSheetFolders.length,
+        bookmarkCount: bookmarkFolders.length,
+        fullyManagedCount: fullyManagedFolders.length,
+        folders,
+        groups: {
+          pitchSheets: pitchSheetFolders,
+          bookmarks: bookmarkFolders,
+          fullyManagedCampaigns: fullyManagedFolders,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('[getFolderList] Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Internal error',
+    });
+  }
+};
+
 exports.listFolders = async (req, res) => {
   try {
     if (!canCreateOrManagePitchFolders(req.admin)) {
@@ -1903,26 +2356,102 @@ function cloneFolderItemForDuplicate(item, actorId = null) {
 
 exports.createFolder = async (req, res) => {
   try {
-    if (!canCreateOrManagePitchFolders(req.admin)) {
-      return res.status(403).json({ error: 'You are not allowed to create pitch folders' });
+    const hasAdminScope = !!req.admin;
+    const authedBrandId = getAuthedBrandId(req);
+
+    if (hasAdminScope && !canCreateOrManagePitchFolders(req.admin)) {
+      return res.status(403).json({ error: 'You are not allowed to create folders' });
     }
 
-    const actorId = getActorAdminId(req.admin);
-    const body = req.body || {};
+    if (!hasAdminScope && !authedBrandId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Brand authentication is required',
+      });
+    }
 
-    const title = cleanStr(body.title);
+    const actorId = hasAdminScope ? getActorAdminId(req.admin) : null;
+    const body = req.body || {};
+    const brandId = authedBrandId || cleanStr(body.brandId || req.admin?.brandId);
+    const brandRef = mongoose.Types.ObjectId.isValid(brandId)
+      ? new mongoose.Types.ObjectId(brandId)
+      : null;
+
+    const requestedFolderKind = normalizeFolderKind(body.type || body.folderType || body.kind || 'pitch_sheet');
+
+    const title = cleanStr(body.title || body.name);
     if (!title) {
       return res.status(400).json({ error: 'title is required' });
     }
 
-    const baseSlug = slugify(title) || `pitch-folder-${Date.now()}`;
-    let slug = baseSlug;
-    let counter = 1;
+    const description = cleanStr(body.description);
 
-    while (await PitchFolder.exists({ slug, archivedAt: null })) {
-      counter += 1;
-      slug = `${baseSlug}-${counter}`;
+    if (requestedFolderKind === 'bookmark') {
+      if (BookmarkFolder && typeof BookmarkFolder.create === 'function') {
+        const bookmarkPayload = {
+          title,
+          name: title,
+          slug: await buildUniqueFolderSlug(title),
+          description,
+          brandId,
+          brandRef,
+          createdByAdmin: actorId || null,
+          updatedByAdmin: actorId || null,
+          createdByRole: hasAdminScope ? cleanStr(req.admin?.role) : 'Brand',
+        };
+
+        const bookmarkDoc = await BookmarkFolder.create(bookmarkPayload);
+        const bookmarkObject = typeof bookmarkDoc.toObject === 'function'
+          ? bookmarkDoc.toObject()
+          : bookmarkDoc;
+
+        return res.json({
+          success: true,
+          message: 'Bookmark folder created successfully',
+          data: serializeFolderCardFromBookmarkFolder(bookmarkObject),
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        error:
+          'BookmarkFolder model was not found. Add ../models/bookmarkFolder or change the optional import path in this controller.',
+      });
     }
+
+    const rawCampaignId = cleanStr(body.campaignId || body.campaignsId);
+    const shouldCreateCampaignFolder = requestedFolderKind === 'fully_managed' || !!rawCampaignId;
+
+    let assignedCampaign = null;
+
+    if (shouldCreateCampaignFolder) {
+      if (!rawCampaignId) {
+        return res.status(400).json({
+          success: false,
+          error: 'campaignId is required for fully managed campaign folders',
+        });
+      }
+
+      const campaign = await findCampaignByAnyIdForAssignment(rawCampaignId);
+
+      if (!campaign) {
+        return res.status(404).json({
+          success: false,
+          error: 'Campaign not found',
+        });
+      }
+
+      if (brandId && !assertBrandCanUseCampaign(campaign, brandId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'This campaign does not belong to the authenticated brand',
+        });
+      }
+
+      assignedCampaign = buildAssignedCampaignPayload(campaign, actorId);
+    }
+
+    const slug = await buildUniqueFolderSlug(title);
 
     const rawItems = Array.isArray(body.items) ? body.items : [];
     const initialItems = [];
@@ -1950,12 +2479,17 @@ exports.createFolder = async (req, res) => {
     const doc = await PitchFolder.create({
       title,
       slug,
-      description: cleanStr(body.description),
+      description,
+      brandId,
+      brandRef,
+      folderType: shouldCreateCampaignFolder ? 'fully_managed' : 'pitch_sheet',
+      source: hasAdminScope ? 'admin' : 'brand',
       brandVisibleItemCount: hasOwn(body, 'brandVisibleItemCount')
         ? toNullableInteger(body.brandVisibleItemCount)
         : null,
       showFullListToBrand: hasOwn(body, 'showFullListToBrand') ? !!body.showFullListToBrand : true,
       items: initialItems,
+      assignedCampaign: assignedCampaign || {},
       createdByAdmin: actorId || null,
       updatedByAdmin: actorId || null,
     });
@@ -1968,7 +2502,9 @@ exports.createFolder = async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'Pitch folder created successfully',
+      message: shouldCreateCampaignFolder
+        ? 'Fully managed campaign folder created successfully'
+        : 'Pitch folder created successfully',
       data: serializeFolderDetail(hydrated),
     });
   } catch (err) {
@@ -2883,28 +3419,28 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
 
       const rawHandle = cleanStr(
         user.handle ||
-          user.username ||
-          user.handleId ||
-          user.channelHandle ||
-          ''
+        user.username ||
+        user.handleId ||
+        user.channelHandle ||
+        ''
       ).replace(/^@+/, '');
 
       const normalizedHandle = rawHandle ? `@${rawHandle}` : '';
 
       const channelId = cleanStr(
         user.channelId ||
-          user.userId ||
-          user.sourceRefId ||
-          user.modashUserId ||
-          ''
+        user.userId ||
+        user.sourceRefId ||
+        user.modashUserId ||
+        ''
       );
 
       const profileUrl = cleanStr(
         user.url ||
-          user.profileUrl ||
-          user.primaryLink ||
-          user.link ||
-          ''
+        user.profileUrl ||
+        user.primaryLink ||
+        user.link ||
+        ''
       );
 
       const rawLinks = Array.isArray(user.links)
@@ -2925,10 +3461,10 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
 
         name: cleanStr(
           user.fullname ||
-            user.fullName ||
-            user.name ||
-            user.title ||
-            normalizedHandle
+          user.fullName ||
+          user.name ||
+          user.title ||
+          normalizedHandle
         ),
 
         handle: normalizedHandle,
@@ -2942,9 +3478,9 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
 
         followers: toNullableNumber(
           user.followers ||
-            user.followersCount ||
-            user.subscribers ||
-            user.subscriberCount
+          user.followersCount ||
+          user.subscribers ||
+          user.subscriberCount
         ),
 
         primaryLink: profileUrl,
@@ -3813,6 +4349,417 @@ exports.assignCampaignToFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[assignCampaignToFolder] Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Internal error',
+    });
+  }
+};
+
+const getInfluencerUniqueKey = (item = {}) => {
+  const influencerId = cleanStr(
+    item.influencerId ||
+    item.creatorId ||
+    item.influencer?._id ||
+    item.creator?._id
+  );
+
+  if (influencerId) return `influencer:${influencerId}`;
+
+  const email = cleanStr(item.email).toLowerCase();
+  if (email) return `email:${email}`;
+
+  const primaryLink = cleanStr(
+    item.primaryLink || item.profileUrl || item.url || item.links?.[0]
+  )
+    .toLowerCase()
+    .replace(/\/+$/, "");
+
+  if (primaryLink) return `link:${primaryLink}`;
+
+  const provider = cleanStr(item.provider || item.platform).toLowerCase();
+  const handle = cleanStr(item.handle || item.username)
+    .toLowerCase()
+    .replace(/^@+/, "");
+
+  if (provider || handle) return `handle:${provider}:${handle}`;
+
+  const name = cleanStr(item.name).toLowerCase();
+  if (name) return `name:${name}:${provider}`;
+
+  return `item:${String(item._id || "")}`;
+};
+
+
+exports.getCampaignGoodFitList = async (req, res) => {
+  try {
+    const brandId = getAuthedBrandId(req);
+    const rawCampaignId = cleanStr(req.params?.campaignId || req.query?.campaignId);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Brand authentication is required',
+      });
+    }
+
+    if (!rawCampaignId) {
+      return res.status(400).json({
+        success: false,
+        error: 'campaignId is required',
+      });
+    }
+
+    const campaign = await findCampaignByAnyIdForAssignment(rawCampaignId);
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        error: 'Campaign not found',
+      });
+    }
+
+    if (!assertBrandCanUseCampaign(campaign, brandId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'This campaign does not belong to the authenticated brand',
+      });
+    }
+
+    const campaignOr = buildAssignedCampaignMatchOr(rawCampaignId, campaign);
+
+    if (!campaignOr.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Could not build campaign lookup',
+      });
+    }
+
+    const folderFilter = applyBrandScopeToFilter(
+      {
+        archivedAt: null,
+        $or: campaignOr,
+        'items.goodFit': true,
+      },
+      brandId
+    );
+
+    const docs = await PitchFolder.find(folderFilter)
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const campaignPayload = {
+      campaignId: String(campaign._id),
+      campaignsId: cleanStr(campaign.campaignsId),
+      campaignTitle: cleanStr(campaign.campaignTitle),
+      productOrServiceName: cleanStr(campaign.productOrServiceName),
+      brandId: cleanStr(campaign.brandId),
+      brandName: cleanStr(campaign.brandName),
+      assignedAt: null,
+    };
+
+    if (!docs.length) {
+      return res.json({
+        success: true,
+        message: 'No good fit influencers found for this campaign',
+        data: {
+          campaign: campaignPayload,
+          totalFolderCount: 0,
+          totalCampaignCount: 1,
+          totalGoodFitCount: 0,
+          campaigns: [campaignPayload],
+          folders: [],
+          items: [],
+        },
+      });
+    }
+
+    const folders = [];
+    const uniqueInfluencersMap = new Map();
+
+    for (const doc of docs) {
+      const allItems = sortFolderItemsByMediaKitPriority(
+        Array.isArray(doc.items) ? doc.items : []
+      );
+
+      const goodFitItems = allItems.filter((item) => item?.goodFit === true);
+
+      const assignedCampaign = serializeAssignedCampaign(doc.assignedCampaign);
+
+      const folderCampaignPayload = {
+        ...campaignPayload,
+        assignedAt: assignedCampaign?.assignedAt || null,
+        folderId: String(doc._id),
+        folderTitle: doc.title || '',
+        folderSlug: doc.slug || '',
+      };
+
+      const serializedItems = await Promise.all(
+        goodFitItems.map((item) => serializeFolderItemForShared(item))
+      );
+
+      const folderPayload = {
+        _id: String(doc._id),
+        title: doc.title || '',
+        slug: doc.slug || '',
+        description: doc.description || '',
+        brandId: cleanStr(doc.brandId || doc.brandRef || brandId),
+        assignedCampaign,
+      };
+
+      folders.push({
+        ...folderPayload,
+        totalItemCount: allItems.length,
+        goodFitCount: serializedItems.length,
+        items: serializedItems.map((item) => ({
+          ...item,
+          folder: folderPayload,
+          relatedCampaigns: [folderCampaignPayload],
+          relatedCampaignCount: 1,
+          relatedFolders: [folderPayload],
+          relatedFolderCount: 1,
+        })),
+      });
+
+      for (let i = 0; i < goodFitItems.length; i += 1) {
+        const originalItem = goodFitItems[i];
+        const serializedItem = serializedItems[i];
+
+        const uniqueKey = getInfluencerUniqueKey({
+          ...originalItem,
+          ...serializedItem,
+        });
+
+        if (!uniqueInfluencersMap.has(uniqueKey)) {
+          uniqueInfluencersMap.set(uniqueKey, {
+            ...serializedItem,
+            folder: folderPayload,
+            relatedCampaigns: [folderCampaignPayload],
+            relatedCampaignCount: 1,
+            relatedFolders: [folderPayload],
+            relatedFolderCount: 1,
+          });
+        }
+      }
+    }
+
+    const items = Array.from(uniqueInfluencersMap.values());
+
+    return res.json({
+      success: true,
+      message: 'Campaign good fit influencers fetched successfully',
+      data: {
+        campaign: campaignPayload,
+        totalFolderCount: folders.length,
+        totalCampaignCount: 1,
+        totalGoodFitCount: items.length,
+        campaigns: [campaignPayload],
+        folders,
+        items,
+      },
+    });
+  } catch (err) {
+    console.error('[getCampaignGoodFitList] Error:', err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Internal error',
+    });
+  }
+};
+
+exports.getFolderGoodFitListAll = async (req, res) => {
+  try {
+    const hasAdminScope = !!req.admin;
+    const authedBrandId = getAuthedBrandId(req);
+    const brandId = getRequestedBrandId(req);
+
+    if (!hasAdminScope && !authedBrandId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Brand authentication is required',
+      });
+    }
+
+    if (hasAdminScope && !canCreateOrManagePitchFolders(req.admin)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not allowed to access good fit influencers',
+      });
+    }
+
+    const folderFilter = brandId
+      ? buildBrandScopedPitchFolderFilter(brandId)
+      : { archivedAt: null };
+
+    folderFilter['items.goodFit'] = true;
+
+    const docs = await PitchFolder.find(folderFilter)
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    if (!docs.length) {
+      return res.json({
+        success: true,
+        message: 'No good fit influencers found',
+        data: {
+          totalFolderCount: 0,
+          totalCampaignCount: 0,
+          totalGoodFitCount: 0,
+          items: [],
+          folders: [],
+          campaigns: [],
+        },
+      });
+    }
+
+    const folders = [];
+    const campaignsMap = new Map();
+    const uniqueInfluencersMap = new Map();
+
+    for (const doc of docs) {
+      const allItems = sortFolderItemsByMediaKitPriority(
+        Array.isArray(doc.items) ? doc.items : []
+      );
+
+      const goodFitItems = allItems.filter((item) => item?.goodFit === true);
+
+      const assignedCampaign =
+        typeof serializeAssignedCampaign === 'function'
+          ? serializeAssignedCampaign(doc.assignedCampaign)
+          : doc.assignedCampaign || null;
+
+      const campaignId = cleanStr(
+        assignedCampaign?.campaignId ||
+        assignedCampaign?.campaignsId ||
+        assignedCampaign?._id
+      );
+
+      const campaignPayload = assignedCampaign
+        ? {
+            campaignId: cleanStr(assignedCampaign.campaignId),
+            campaignsId: cleanStr(assignedCampaign.campaignsId),
+            campaignTitle: cleanStr(assignedCampaign.campaignTitle),
+            productOrServiceName: cleanStr(
+              assignedCampaign.productOrServiceName
+            ),
+            brandId: cleanStr(assignedCampaign.brandId || brandId),
+            brandName: cleanStr(assignedCampaign.brandName),
+            assignedAt: assignedCampaign.assignedAt || null,
+            folderId: String(doc._id),
+            folderTitle: doc.title || '',
+            folderSlug: doc.slug || '',
+          }
+        : {
+            campaignId: '',
+            campaignsId: '',
+            campaignTitle: '',
+            productOrServiceName: '',
+            brandId: cleanStr(doc.brandId || doc.brandRef || brandId),
+            brandName: '',
+            assignedAt: null,
+            folderId: String(doc._id),
+            folderTitle: doc.title || '',
+            folderSlug: doc.slug || '',
+          };
+
+      const campaignMapKey = campaignId || `folder:${String(doc._id)}`;
+
+      if (!campaignsMap.has(campaignMapKey)) {
+        campaignsMap.set(campaignMapKey, campaignPayload);
+      }
+
+      const serializedItems = await Promise.all(
+        goodFitItems.map((item) => serializeFolderItemForShared(item))
+      );
+
+      const folderItems = serializedItems.map((item) => ({
+        ...item,
+        relatedCampaigns: [campaignPayload],
+        relatedCampaignCount: 1,
+      }));
+
+      folders.push({
+        _id: String(doc._id),
+        title: doc.title || '',
+        slug: doc.slug || '',
+        description: doc.description || '',
+        brandId: cleanStr(doc.brandId || doc.brandRef || campaignPayload.brandId),
+        assignedCampaign,
+        totalItemCount: allItems.length,
+        goodFitCount: serializedItems.length,
+        items: folderItems,
+      });
+
+      for (let i = 0; i < goodFitItems.length; i += 1) {
+        const originalItem = goodFitItems[i];
+        const serializedItem = serializedItems[i];
+
+        const uniqueKey = getInfluencerUniqueKey({
+          ...originalItem,
+          ...serializedItem,
+        });
+
+        const folderPayload = {
+          _id: String(doc._id),
+          title: doc.title || '',
+          slug: doc.slug || '',
+          description: doc.description || '',
+          brandId: cleanStr(doc.brandId || doc.brandRef || campaignPayload.brandId),
+          assignedCampaign,
+        };
+
+        if (!uniqueInfluencersMap.has(uniqueKey)) {
+          uniqueInfluencersMap.set(uniqueKey, {
+            ...serializedItem,
+            folder: folderPayload,
+            relatedCampaigns: [],
+            relatedCampaignCount: 0,
+            relatedFolders: [],
+            relatedFolderCount: 0,
+            _campaignKeys: new Set(),
+            _folderKeys: new Set(),
+          });
+        }
+
+        const existing = uniqueInfluencersMap.get(uniqueKey);
+
+        if (!existing._campaignKeys.has(campaignMapKey)) {
+          existing._campaignKeys.add(campaignMapKey);
+          existing.relatedCampaigns.push(campaignPayload);
+          existing.relatedCampaignCount = existing.relatedCampaigns.length;
+        }
+
+        const folderKey = String(doc._id);
+
+        if (!existing._folderKeys.has(folderKey)) {
+          existing._folderKeys.add(folderKey);
+          existing.relatedFolders.push(folderPayload);
+          existing.relatedFolderCount = existing.relatedFolders.length;
+        }
+      }
+    }
+
+    const uniqueItems = Array.from(uniqueInfluencersMap.values()).map((item) => {
+      const { _campaignKeys, _folderKeys, ...safeItem } = item;
+      return safeItem;
+    });
+
+    return res.json({
+      success: true,
+      message: 'Good fit influencers fetched successfully',
+      data: {
+        totalFolderCount: folders.length,
+        totalCampaignCount: campaignsMap.size,
+        totalGoodFitCount: uniqueItems.length,
+        campaigns: Array.from(campaignsMap.values()),
+        items: uniqueItems,
+        folders,
+      },
+    });
+  } catch (err) {
+    console.error('[getFolderGoodFitListAll] Error:', err);
+
     return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',

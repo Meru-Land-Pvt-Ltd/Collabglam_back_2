@@ -15,6 +15,7 @@ const HttpStatusImport = require("../core/http/HttpStatus");
 const ApiErrorImport = require("../core/http/ApiError");
 const SubscriptionPlan = require("../models/subscription");
 const { uploadBrandProfilePicToS3 } = require("../utils/uploadBase64ImagesToS3");
+const { BookmarkFolder } = require("../models/bookMarkFolder");
 
 void OpenAI;
 void BrandInfo;
@@ -600,8 +601,8 @@ async function recordFailedSignin(email) {
       (doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL
         ? "Too many failed login attempts. Try again after 24 hours."
         : `Too many failed login attempts. Try again in ${msToWaitString(
-            waitMs
-          )}.`,
+          waitMs
+        )}.`,
       {
         code:
           (doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL
@@ -1648,6 +1649,339 @@ async function verifyBrandCoupon(req, res) {
   }
 }
 
+const bookmarkCleanStr = (value) => String(value || "").trim();
+
+const getBookmarkBrandIdFromReq = (req) => {
+  return bookmarkCleanStr(
+    req.brand?._id ||
+      req.brand?.id ||
+      req.user?.brandId ||
+      req.user?._id ||
+      req.user?.id ||
+      req.body?.brandId ||
+      req.query?.brandId
+  );
+};
+
+const getBookmarkProfileKey = (item = {}) => {
+  const influencerId = bookmarkCleanStr(
+    item.influencerId ||
+      item.creatorId ||
+      item.userId ||
+      item.modashId ||
+      item._id
+  );
+
+  if (influencerId) return `id:${influencerId}`;
+
+  const email = bookmarkCleanStr(item.email).toLowerCase();
+  if (email) return `email:${email}`;
+
+  const link = bookmarkCleanStr(
+    item.primaryLink || item.profileUrl || item.url || item.links?.[0]
+  )
+    .toLowerCase()
+    .replace(/\/+$/, "");
+
+  if (link) return `link:${link}`;
+
+  const provider = bookmarkCleanStr(item.provider || item.platform).toLowerCase();
+
+  const handle = bookmarkCleanStr(item.handle || item.username)
+    .toLowerCase()
+    .replace(/^@+/, "");
+
+  if (provider || handle) return `handle:${provider}:${handle}`;
+
+  const name = bookmarkCleanStr(
+    item.name || item.fullname || item.fullName || item.username
+  ).toLowerCase();
+
+  return name ? `name:${name}:${provider}` : "";
+};
+
+async function addbookmarkProfile(req, res) {
+  try {
+    const brandId = getBookmarkBrandIdFromReq(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const incomingProfiles = Array.isArray(req.body?.profiles)
+      ? req.body.profiles
+      : Array.isArray(req.body?.influencers)
+      ? req.body.influencers
+      : req.body?.profile
+      ? [req.body.profile]
+      : req.body?.influencer
+      ? [req.body.influencer]
+      : [req.body];
+
+    const profiles = incomingProfiles
+      .filter(Boolean)
+      .map((item) => {
+        const primaryLink = bookmarkCleanStr(
+          item.primaryLink || item.profileUrl || item.url
+        );
+
+        const avatar = bookmarkCleanStr(
+          item.picture ||
+            item.avatarUrl ||
+            item.profileImage ||
+            item.profilePicture ||
+            item.image ||
+            item.thumbnail ||
+            item.avatar ||
+            item.profilePicUrl
+        );
+
+        const categories = Array.isArray(item.categories)
+          ? item.categories
+          : Array.isArray(item.niche)
+          ? item.niche
+          : item.category
+          ? [item.category]
+          : item.niche
+          ? [item.niche]
+          : [];
+
+        const profile = {
+          influencerId: bookmarkCleanStr(
+            item.influencerId || item.creatorId || item.userId || item._id
+          ),
+          creatorId: bookmarkCleanStr(
+            item.creatorId || item.influencerId || item.userId || item._id
+          ),
+          userId: bookmarkCleanStr(
+            item.userId || item.influencerId || item.creatorId || item._id
+          ),
+          modashId: bookmarkCleanStr(item.modashId),
+
+          name: bookmarkCleanStr(
+            item.name || item.fullname || item.fullName || item.username
+          ),
+          fullname: bookmarkCleanStr(item.fullname || item.fullName || item.name),
+          username: bookmarkCleanStr(item.username || item.handle),
+          handle: bookmarkCleanStr(item.handle || item.username),
+
+          email: bookmarkCleanStr(item.email).toLowerCase(),
+
+          provider: bookmarkCleanStr(item.provider || item.platform),
+          platform: bookmarkCleanStr(item.platform || item.provider),
+
+          country: bookmarkCleanStr(item.country),
+          location: bookmarkCleanStr(item.location || item.country),
+
+          categories,
+          niche: categories,
+
+          followers: Number(item.followers || item.followerCount || 0),
+          engagementRate: Number(item.engagementRate || 0),
+          engagements: Number(item.engagements || 0),
+          averageViews: Number(item.averageViews || 0),
+
+          primaryLink,
+          profileUrl: bookmarkCleanStr(item.profileUrl || primaryLink),
+          url: bookmarkCleanStr(item.url || primaryLink),
+          links: Array.isArray(item.links)
+            ? item.links.filter(Boolean).map(bookmarkCleanStr)
+            : primaryLink
+            ? [primaryLink]
+            : [],
+
+          picture: avatar,
+          avatarUrl: bookmarkCleanStr(item.avatarUrl || avatar),
+          profileImage: bookmarkCleanStr(item.profileImage || avatar),
+
+          bio: bookmarkCleanStr(item.bio),
+          description: bookmarkCleanStr(item.description || item.bio),
+
+          isVerified: Boolean(item.isVerified || item.verified),
+          verified: Boolean(item.verified || item.isVerified),
+          isPrivate: Boolean(item.isPrivate),
+
+          searchType: bookmarkCleanStr(item.searchType || "standard"),
+          source: bookmarkCleanStr(item.source || "standard"),
+
+          raw: item,
+          bookmarkedAt: new Date(),
+        };
+
+        profile.profileKey =
+          bookmarkCleanStr(item.profileKey) || getBookmarkProfileKey(profile);
+
+        return profile;
+      })
+      .filter((item) => {
+        return (
+          item.profileKey ||
+          item.influencerId ||
+          item.creatorId ||
+          item.userId ||
+          item.email ||
+          item.primaryLink ||
+          item.handle ||
+          item.name
+        );
+      });
+
+    if (!profiles.length) {
+      return res.status(400).json({
+        success: false,
+        error: "At least one influencer profile is required",
+      });
+    }
+
+    let folder = await BookmarkFolder.findOne({
+      brandId,
+      name: "bookmarked",
+      archivedAt: null,
+    });
+
+    if (!folder) {
+      folder = await BookmarkFolder.create({
+        brandId,
+        name: "bookmarked",
+        title: "Bookmarked",
+        slug: "bookmarked",
+        description: "Saved influencer profiles",
+        type: "bookmark",
+        items: [],
+        bookmarks: [],
+        createdBy: req.brand?._id || req.user?._id || null,
+        createdByRole: "Brand",
+        archivedAt: null,
+      });
+    }
+
+    const existingItems = Array.isArray(folder.items)
+      ? folder.items
+      : Array.isArray(folder.bookmarks)
+      ? folder.bookmarks
+      : [];
+
+    const existingKeys = new Set(
+      existingItems
+        .map((item) => item.profileKey || getBookmarkProfileKey(item))
+        .filter(Boolean)
+    );
+
+    const newProfiles = profiles.filter((profile) => {
+      const key = profile.profileKey || getBookmarkProfileKey(profile);
+
+      if (!key || existingKeys.has(key)) return false;
+
+      existingKeys.add(key);
+      return true;
+    });
+
+    if (newProfiles.length) {
+      folder.items = [...existingItems, ...newProfiles];
+      folder.bookmarks = folder.items;
+      folder.updatedAt = new Date();
+
+      await folder.save();
+    }
+
+    return res.status(newProfiles.length ? 201 : 200).json({
+      success: true,
+      message: newProfiles.length
+        ? "Profile bookmarked successfully"
+        : "Profile already exists in bookmarked folder",
+      data: {
+        folder: {
+          _id: String(folder._id),
+          name: folder.name,
+          title: folder.title || folder.name,
+          slug: folder.slug,
+          description: folder.description || "",
+          itemCount: Array.isArray(folder.items) ? folder.items.length : 0,
+          createdAt: folder.createdAt,
+          updatedAt: folder.updatedAt,
+        },
+        addedCount: newProfiles.length,
+        skippedCount: profiles.length - newProfiles.length,
+        addedItems: newProfiles,
+      },
+    });
+  } catch (err) {
+    console.error("[addbookmarkProfile] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+async function getbookmarkProfile(req, res) {
+  try {
+    const brandId = getBookmarkBrandIdFromReq(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const folder = await BookmarkFolder.findOne({
+      brandId,
+      name: "bookmarked",
+      archivedAt: null,
+    }).lean();
+
+    const items = folder
+      ? Array.isArray(folder.items)
+        ? folder.items
+        : Array.isArray(folder.bookmarks)
+        ? folder.bookmarks
+        : []
+      : [];
+
+    const savedKeys = Array.from(
+      new Set(
+        items
+          .map((item) => item.profileKey || getBookmarkProfileKey(item))
+          .filter(Boolean)
+      )
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Bookmarked profiles fetched successfully",
+      data: {
+        folder: folder
+          ? {
+              _id: String(folder._id),
+              name: folder.name,
+              title: folder.title || folder.name,
+              slug: folder.slug,
+              description: folder.description || "",
+              itemCount: items.length,
+              createdAt: folder.createdAt,
+              updatedAt: folder.updatedAt,
+            }
+          : null,
+        totalCount: items.length,
+        savedKeys,
+        items,
+      },
+    });
+  } catch (err) {
+    console.error("[getbookmarkProfile] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
 
 module.exports = {
   sendSignupOtp,
@@ -1662,8 +1996,8 @@ module.exports = {
   getBrandLiteById,
   getBrandProfile,
   updateBrandProfile,
-  verifyBrandCoupon
-
+  verifyBrandCoupon,
+  addbookmarkProfile,
+  getbookmarkProfile,
 };
-
 

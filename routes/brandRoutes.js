@@ -10,19 +10,21 @@ const upload = multer({
 });
 
 const {
-    sendSignupOtp,
-    verifyOtpSignUp,
-    saveBrandOnboarding,
-    signInBrand,
-    sendOtpForgotBrand,
-    verifyOtpForgotBrand,
-    updatePasswordBrand,
-    getBrandById,
-    getBrandLiteById,
-    getBrandProfile,
-    updateBrandProfile,
-    uploadBrandProfilePic,
-    verifyBrandCoupon
+  sendSignupOtp,
+  verifyOtpSignUp,
+  saveBrandOnboarding,
+  signInBrand,
+  sendOtpForgotBrand,
+  verifyOtpForgotBrand,
+  updatePasswordBrand,
+  getBrandById,
+  getBrandLiteById,
+  getBrandProfile,
+  updateBrandProfile,
+  uploadBrandProfilePic,
+  verifyBrandCoupon,
+  addbookmarkProfile,
+  getbookmarkProfile,
 } = require("../controllers/brandController");
 
 const { brandAuth } = require("../auth/brandAuth");
@@ -30,7 +32,7 @@ const { brandAuth } = require("../auth/brandAuth");
 const router = express.Router();
 router.post(
   "/upload-brand-profile-pic",
-  upload.single("brandProfilePic"),brandAuth,
+  upload.single("brandProfilePic"), brandAuth,
   uploadBrandProfilePic
 );
 router.post("/send-otp-signup", sendSignupOtp);
@@ -41,9 +43,10 @@ router.post("/send-otp-forgot", sendOtpForgotBrand);
 router.post("/verify-otp-forgot", verifyOtpForgotBrand);
 router.post("/update-password", updatePasswordBrand);
 router.get("/:id", getBrandById);
-router.get("/lite",brandAuth, getBrandLiteById);
+router.get("/lite", brandAuth, getBrandLiteById);
 router.post("/profile", brandAuth, getBrandProfile);
 router.post("/profile/update", brandAuth, updateBrandProfile);
 router.post("/verify-coupon", brandAuth, verifyBrandCoupon);
-
+router.post("/bookmark/profile", brandAuth, addbookmarkProfile);
+router.get("/bookmark/profile", brandAuth, getbookmarkProfile);
 module.exports = router;
