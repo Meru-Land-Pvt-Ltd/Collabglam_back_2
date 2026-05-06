@@ -2285,24 +2285,6 @@ exports.addFolderItem = async (req, res) => {
       });
     }
 
-    if (!item.email) {
-      const provider = normalizeProvider(enrichedBody.provider);
-      const username =
-        normalizeLookupUsername(enrichedBody.username) ||
-        normalizeLookupUsername(enrichedBody.handle) ||
-        extractUsernameFromProfileUrl(enrichedBody.primaryLink, provider);
-
-      return res.status(400).json({
-        success: false,
-        error:
-          'Email not found for this provider and username. Save the creator email first or enter the email manually.',
-        data: {
-          provider,
-          username,
-        },
-      });
-    }
-
     if (folderHasDuplicateItem(doc, item)) {
       return res.status(409).json({
         error: 'This influencer already exists in the pitch folder',
@@ -2367,6 +2349,22 @@ exports.updateFolderItem = async (req, res) => {
     const currentItem =
       typeof item.toObject === 'function' ? item.toObject() : item;
 
+    const requestedGoodFit = hasOwn(req.body || {}, 'goodFit')
+      ? !!req.body.goodFit
+      : null;
+
+    if (
+      hasAssignedCampaign(doc) &&
+      item.goodFit === true &&
+      requestedGoodFit === false
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Campaign is already assigned. You cannot mark an existing Good Fit influencer as Unfit.',
+      });
+    }
+
     const enrichedBody = await enrichPitchFolderItemBodyWithProfileEmail(
       req.body || {},
       currentItem || {}
@@ -2377,24 +2375,6 @@ exports.updateFolderItem = async (req, res) => {
     if (!cleanStr(item.name)) {
       return res.status(400).json({
         error: 'Influencer name is required',
-      });
-    }
-
-    if (!cleanStr(item.email)) {
-      const provider = normalizeProvider(item.provider);
-      const username =
-        normalizeLookupUsername(item.username) ||
-        normalizeLookupUsername(item.handle) ||
-        extractUsernameFromProfileUrl(item.primaryLink, provider);
-
-      return res.status(400).json({
-        success: false,
-        error:
-          'Email not found for this provider and username. Save the creator email first or enter the email manually.',
-        data: {
-          provider,
-          username,
-        },
       });
     }
 
@@ -2896,6 +2876,7 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
     const missingEmailUsers = [];
     const skippedInvalidUsers = [];
     const signedUpMatchedUsers = [];
+    const addedWithoutEmailUsers = [];
 
     for (const user of rawUsers) {
       const provider = normalizeProvider(user.platform || user.provider || 'youtube');
@@ -3001,19 +2982,6 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
         continue;
       }
 
-      if (!item.email) {
-        skipped += 1;
-        missingEmailUsers.push({
-          name: item.name,
-          handle: normalizedHandle,
-          channelId,
-          provider,
-          reason:
-            'Email not found in signed-up influencer or saved creator profile. Ask creator to sign up or add email manually.',
-        });
-        continue;
-      }
-
       const dedupeKey = buildFolderItemDedupeKey(item);
 
       if (!dedupeKey) {
@@ -3043,6 +3011,15 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
         });
       }
 
+      if (!item.email) {
+        addedWithoutEmailUsers.push({
+          name: item.name,
+          handle: item.handle || normalizedHandle,
+          channelId,
+          provider: item.provider,
+        });
+      }
+
       folder.items.push(item);
       existingKeys.add(dedupeKey);
       added += 1;
@@ -3055,11 +3032,9 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
     const message =
       added > 0
         ? 'Youtube creators imported successfully'
-        : missingEmailUsers.length > 0
-          ? 'No creators imported because email was missing for selected Youtube creators'
-          : alreadyAdded.length > 0
-            ? 'All selected Youtube creators are already added in this folder'
-            : 'No Youtube creators were imported';
+        : alreadyAdded.length > 0
+          ? 'All selected Youtube creators are already added in this folder'
+          : 'No Youtube creators were imported';
 
     return res.json({
       success: true,
@@ -3070,6 +3045,7 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
       missingEmailUsers,
       skippedInvalidUsers,
       signedUpMatchedUsers,
+      addedWithoutEmailUsers,
       total: hydrated?.items?.length || 0,
       data: serializeFolderDetail(hydrated),
     });
@@ -3106,6 +3082,14 @@ exports.updateSharedFolderGoodFit = async (req, res) => {
     const item = doc.items.id(itemId);
     if (!item) {
       return res.status(404).json({ error: 'Folder item not found' });
+    }
+
+    if (hasAssignedCampaign(doc) && item.goodFit === true && goodFit === false) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Campaign is already assigned. You cannot mark an existing Good Fit influencer as Unfit.',
+      });
     }
 
     item.goodFit = goodFit;
