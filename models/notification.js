@@ -1,33 +1,39 @@
 // models/notification.js
-const mongoose = require('mongoose');
-const { v4: uuidv4 } = require('uuid');
+const mongoose = require("mongoose");
+const { v4: uuidv4 } = require("uuid");
 
 const NotificationSchema = new mongoose.Schema(
   {
-    notificationId: { type: String, required: true, default: uuidv4 },
+    notificationId: { type: String, required: true, default: uuidv4, index: true },
 
-    // Exactly one of these must be present:
+    // Exactly one recipient target must be present.
     brandId: { type: String, default: null, index: true },
     influencerId: { type: String, default: null, index: true },
     adminId: { type: String, default: null, index: true },
-    type: { type: String, required: true },          // e.g. "campaign.match", "contract.accepted", "apply.submitted"
-    title: { type: String, required: true },
-    message: { type: String, default: '' },
 
-    entityType: { type: String, default: null },     // e.g. "campaign" | "contract" | "apply"
-    entityId: { type: String, default: null },       // e.g. campaignsId or contractId
+    type: { type: String, required: true },
+    title: { type: String, required: true },
+    message: { type: String, default: "" },
+
+    entityType: { type: String, default: null },
+    entityId: { type: String, default: null, index: true },
 
     actionPath: { type: String, default: null },
 
-    isRead: { type: Boolean, default: false }
+    // Optional: who performed the activity. This does not affect the XOR recipient rule.
+    actorAdminId: { type: String, default: null, index: true },
+    actorName: { type: String, default: "" },
+    actorEmail: { type: String, default: "" },
+    actorRole: { type: String, default: "" },
+
+    isRead: { type: Boolean, default: false, index: true },
   },
   { timestamps: { createdAt: true, updatedAt: true } }
 );
 
-// XOR validation: must target brand OR influencer (not both, not none)
 NotificationSchema.pre("validate", function (next) {
   const recipients = [this.brandId, this.influencerId, this.adminId].filter(
-    (v) => v !== null && v !== undefined && String(v).trim() !== ""
+    (value) => value !== null && value !== undefined && String(value).trim() !== ""
   );
 
   if (recipients.length !== 1) {
@@ -41,10 +47,13 @@ NotificationSchema.pre("validate", function (next) {
   next();
 });
 
-// Useful dedupe index if you want one-per-entity per recipient per type
 NotificationSchema.index(
-  { brandId: 1, influencerId: 1, entityType: 1, entityId: 1, type: 1 },
+  { brandId: 1, influencerId: 1, adminId: 1, entityType: 1, entityId: 1, type: 1 },
   { unique: false }
 );
+NotificationSchema.index({ notificationId: 1, createdAt: -1 });
+NotificationSchema.index({ actorAdminId: 1, createdAt: -1 });
+NotificationSchema.index({ createdAt: -1 });
 
-module.exports = mongoose.model('Notification', NotificationSchema);
+module.exports =
+  mongoose.models.Notification || mongoose.model("Notification", NotificationSchema);

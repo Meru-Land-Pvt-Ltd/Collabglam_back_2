@@ -4,8 +4,54 @@ const ProspectBrand = require("../models/prospectBrand");
 const { ConversationThread } = require("../models/conversationThread");
 const { AdminModel, ROLES } = require("../models/master");
 const { PROSPECT_STAGE, REVIEW_STATUS, OWNER_ROLE } = require("../constants/outreach");
+const { createAndEmit } = require("../utils/notifier");
 
 const BME_ROLE = ROLES?.BME || "bme";
+
+function uniqueNotificationIds(values = []) {
+  return [
+    ...new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function buildCrmRepliesAdminPath({ threadId = "", prospectId = "" } = {}) {
+  const thread = String(threadId || "").trim();
+  if (thread) return `/admin/crm/replies?threadId=${encodeURIComponent(thread)}`;
+
+  const prospect = String(prospectId || "").trim();
+  if (prospect) return `/admin/crm/replies?prospectId=${encodeURIComponent(prospect)}`;
+
+  return "/admin/crm/replies";
+}
+
+function getActorPayloadFromReq(req = {}) {
+  const admin = req?.admin || req?.user || {};
+  const actorAdminId = String(admin.adminId || admin._id || "").trim();
+
+  return {
+    actorAdminId: actorAdminId || null,
+    actorName: String(admin.name || "").trim(),
+    actorEmail: String(admin.email || "").trim().toLowerCase(),
+    actorRole: String(admin.role || "").trim().toLowerCase(),
+  };
+}
+
+async function notifySafely(context, req, payload) {
+  try {
+    return await createAndEmit({
+      ...getActorPayloadFromReq(req),
+      ...(payload || {}),
+    });
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
+  }
+}
+
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
@@ -239,7 +285,7 @@ exports.assignReplyToBme = async (req, res) => {
       });
     }
 
-    await ConversationThread.findOneAndUpdate(
+    const updatedThread = await ConversationThread.findOneAndUpdate(
       { prospectId: review.prospectId },
       {
         $set: {
@@ -249,8 +295,24 @@ exports.assignReplyToBme = async (req, res) => {
           unreadForRevenueHead: false,
           unreadForBme: true,
         },
-      }
+      },
+      { new: true }
     );
+
+    await notifySafely("assignReplyToBme", req, {
+      adminIds: uniqueNotificationIds([bme._id]),
+      type: "outreach.reply_assigned_to_bme",
+      title: "Reply assigned to BME",
+      message: `A pending reply was assigned to ${bme.name || bme.email || "BME"}.`,
+      entityType: "outreach_reply",
+      entityId: String(review._id),
+      actionPath: {
+        admin: buildCrmRepliesAdminPath({
+          threadId: updatedThread?._id,
+          prospectId: review.prospectId,
+        }),
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -292,7 +354,7 @@ exports.rejectReply = async (req, res) => {
       });
     }
 
-    await ConversationThread.findOneAndUpdate(
+    const updatedThread = await ConversationThread.findOneAndUpdate(
       { prospectId: review.prospectId },
       {
         $set: {
@@ -301,8 +363,24 @@ exports.rejectReply = async (req, res) => {
           unreadForBme: false,
           unreadForIme: false,
         },
-      }
+      },
+      { new: true }
     );
+
+    await notifySafely("rejectReply", req, {
+      adminIds: uniqueNotificationIds([review.RHId, review.reviewedBy]),
+      type: "outreach.reply_rejected",
+      title: "Reply marked unqualified",
+      message: "A pending reply was marked unqualified.",
+      entityType: "outreach_reply",
+      entityId: String(review._id),
+      actionPath: {
+        admin: buildCrmRepliesAdminPath({
+          threadId: updatedThread?._id,
+          prospectId: review.prospectId,
+        }),
+      },
+    });
 
     return res.status(200).json({
       success: true,

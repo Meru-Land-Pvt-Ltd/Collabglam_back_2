@@ -14,6 +14,36 @@ const {
   THREAD_STATUS,
 } = require("../constants/outreach");
 const { cleanName, getMailboxDisplayName } = require("../utils/mailboxDisplayName");
+const { createAndEmit } = require("../utils/notifier");
+
+function uniqueNotificationIds(values = []) {
+  return [
+    ...new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function buildCrmRepliesAdminPath({ threadId = "", prospectId = "" } = {}) {
+  const thread = String(threadId || "").trim();
+  if (thread) return `/admin/crm/replies?threadId=${encodeURIComponent(thread)}`;
+
+  const prospect = String(prospectId || "").trim();
+  if (prospect) return `/admin/crm/replies?prospectId=${encodeURIComponent(prospect)}`;
+
+  return "/admin/crm/replies";
+}
+
+async function notifyWebhookSafely(context, payload) {
+  try {
+    return await createAndEmit(payload || {});
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
+  }
+}
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -457,6 +487,29 @@ exports.handleInstantlyWebhook = async (req, res) => {
     if (campaign?._id) {
       await OutreachCampaign.findByIdAndUpdate(campaign._id, {
         $inc: { "stats.totalReplies": 1 },
+      });
+    }
+
+    const notificationAdminIds = uniqueNotificationIds([
+      ownerId,
+      resolvedRHId,
+      reviewRow?.RHId,
+    ]);
+
+    if (notificationAdminIds.length) {
+      await notifyWebhookSafely("handleInstantlyWebhook", {
+        adminIds: notificationAdminIds,
+        type: "outreach.reply_received",
+        title: "New reply received",
+        message: `${brandDisplayName} replied${campaign?.name ? ` to ${campaign.name}` : ""}.`,
+        entityType: "outreach_thread",
+        entityId: String(thread._id),
+        actionPath: {
+          admin: buildCrmRepliesAdminPath({
+            threadId: thread._id,
+            prospectId: prospect._id,
+          }),
+        },
       });
     }
 

@@ -32,9 +32,28 @@ const CampaignAssigned = require("../models/CampaignAssigned");
 
 const { createAndEmit } = require("../utils/notifier");
 
-async function notifySafely(context, payload) {
+function getActorPayloadFromReq(req = {}) {
+  const admin = req?.admin || req?.user || {};
+  const actorAdminId = String(admin.adminId || admin._id || "").trim();
+
+  return {
+    actorAdminId: actorAdminId || null,
+    actorName: String(admin.name || "").trim(),
+    actorEmail: String(admin.email || "").trim().toLowerCase(),
+    actorRole: String(admin.role || "").trim().toLowerCase(),
+  };
+}
+
+async function notifySafely(context, reqOrPayload, maybePayload) {
+  const hasReq = maybePayload !== undefined;
+  const req = hasReq ? reqOrPayload : null;
+  const payload = hasReq ? maybePayload : reqOrPayload;
+
   try {
-    return await createAndEmit(payload);
+    return await createAndEmit({
+      ...getActorPayloadFromReq(req),
+      ...(payload || {}),
+    });
   } catch (error) {
     console.warn(`${context} notification failed:`, error?.message || error);
     return null;
@@ -1112,7 +1131,7 @@ exports.adminAssignBrandPlan = async (req, res) => {
       eventType: "upgraded",
     });
 
-    await notifySafely("adminAssignBrandPlan", {
+    await notifySafely("adminAssignBrandPlan", req, {
       brandId: String(updated._id),
       adminIds: await getBrandAdminNotificationRecipients(updated._id),
       type: "brand.plan_assigned",
@@ -1122,7 +1141,7 @@ exports.adminAssignBrandPlan = async (req, res) => {
       entityId: String(updated._id),
       actionPath: {
         brand: "/brand/subscription",
-        admin: `/admin/brands/${updated._id}`,
+        admin: `/admin/brands/view?brandId=${updated._id}`,
       },
     });
 
@@ -1222,7 +1241,7 @@ exports.adminAssignInfluencerPlan = async (req, res) => {
       eventType: "upgraded",
     });
 
-    await notifySafely("adminAssignInfluencerPlan", {
+    await notifySafely("adminAssignInfluencerPlan", req, {
       influencerId: String(updated._id),
       type: "influencer.plan_assigned",
       title: "Influencer plan assigned",
@@ -1231,7 +1250,7 @@ exports.adminAssignInfluencerPlan = async (req, res) => {
       entityId: String(updated._id),
       actionPath: {
         influencer: "/influencer/subscription",
-        admin: `/admin/influencers/${updated._id}`,
+        admin: `/admin/influencers/view?influencerId=${updated._id}`,
       },
     });
 
@@ -2884,7 +2903,7 @@ exports.assignBrand = async (req, res) => {
         });
       }
 
-      await notifySafely("assignBrand", {
+      await notifySafely("assignBrand", req, {
         brandId: String(normalizedBrandId),
         adminIds: await getBrandAdminNotificationRecipients(normalizedBrandId),
         type: "brand.assignment_updated",
@@ -2894,7 +2913,7 @@ exports.assignBrand = async (req, res) => {
         entityId: String(normalizedBrandId),
         actionPath: {
           brand: "/brand/notifications",
-          admin: `/admin/brands/${normalizedBrandId}`,
+          admin: `/admin/brands/view?brandId=${normalizedBrandId}`,
         },
       });
 
@@ -2938,7 +2957,7 @@ exports.assignBrand = async (req, res) => {
       });
     }
 
-    await notifySafely("assignBrand", {
+    await notifySafely("assignBrand", req, {
       brandId: String(normalizedBrandId),
       adminIds: await getBrandAdminNotificationRecipients(normalizedBrandId),
       type: "brand.assignment_updated",
@@ -2951,7 +2970,7 @@ exports.assignBrand = async (req, res) => {
       entityId: String(normalizedBrandId),
       actionPath: {
         brand: "/brand/notifications",
-        admin: `/admin/brands/${normalizedBrandId}`,
+        admin: `/admin/brands/view?brandId=${normalizedBrandId}`,
       },
     });
 
@@ -4039,7 +4058,7 @@ exports.adminCreateBrand = async (req, res) => {
       "Brand"
     );
 
-    await notifySafely("adminCreateBrand", {
+    await notifySafely("adminCreateBrand", req, {
       brandId: String(brandDoc._id),
       adminIds: await getBrandAdminNotificationRecipients(brandDoc._id),
       type: existingBrand ? "brand.placeholder_updated" : "brand.created_by_admin",
@@ -4049,7 +4068,7 @@ exports.adminCreateBrand = async (req, res) => {
       entityId: String(brandDoc._id),
       actionPath: {
         brand: "/brand/notifications",
-        admin: `/admin/brands/${brandDoc._id}`,
+        admin: `/admin/brands/view?brandId=${brandDoc._id}`,
       },
     });
 
@@ -4311,7 +4330,7 @@ exports.adminCreateInfluencer = async (req, res) => {
     delete influencer.password;
     delete influencer.__v;
 
-    await notifySafely("adminCreateInfluencer", {
+    await notifySafely("adminCreateInfluencer", req, {
       influencerId: String(influencerDoc._id),
       type: existingInfluencer ? "influencer.placeholder_updated" : "influencer.created_by_admin",
       title: existingInfluencer ? "Influencer placeholder updated" : "Influencer created by admin",
@@ -4320,7 +4339,7 @@ exports.adminCreateInfluencer = async (req, res) => {
       entityId: String(influencerDoc._id),
       actionPath: {
         influencer: "/influencer/notifications",
-        admin: `/admin/influencers/${influencerDoc._id}`,
+        admin: `/admin/influencers/view?influencerId=${influencerDoc._id}`,
       },
     });
 
@@ -4654,7 +4673,7 @@ exports.adminEditCampaign = async (req, res) => {
 
     const updatedCampaign = savedCampaign.toObject();
 
-    await notifySafely("adminEditCampaign", {
+    await notifySafely("adminEditCampaign", req, {
       brandId: String(updatedCampaign.brandId),
       adminIds: await getCampaignAdminNotificationRecipients({
         campaignId: updatedCampaign._id,
@@ -4667,7 +4686,7 @@ exports.adminEditCampaign = async (req, res) => {
       entityId: String(updatedCampaign._id),
       actionPath: {
         brand: `/brand/campaigns/${updatedCampaign._id}`,
-        admin: `/admin/campaigns/${updatedCampaign._id}`,
+        admin: `/admin/campaigns/view?id=${updatedCampaign._id}`,
       },
     });
 

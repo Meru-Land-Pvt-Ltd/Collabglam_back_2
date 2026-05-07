@@ -1,17 +1,16 @@
 // controllers/notificationController.js
 const mongoose = require("mongoose");
 const Notification = require("../models/notification");
-
 const { AdminModel, ROLES } = require("../models/master");
 const BrandAssigned = require("../models/brandAssigned");
 const CampaignAssigned = require("../models/CampaignAssigned");
 
-function normalizeId(value = "") {
-  return String(value || "").trim();
-}
-
 function normalizeRole(value = "") {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeId(value = "") {
+  return String(value || "").trim();
 }
 
 function isObjectId(value) {
@@ -22,14 +21,16 @@ function toObjectId(value) {
   return new mongoose.Types.ObjectId(String(value));
 }
 
-function parsePageLimit(source = {}) {
-  const page = Math.max(1, parseInt(source.page || 1, 10));
-  const limit = Math.min(Math.max(1, parseInt(source.limit || 20, 10)), 100);
+function idVariants(value) {
+  const id = normalizeId(value);
+  if (!id) return [];
 
-  return { page, limit };
+  const values = [id];
+  if (isObjectId(id)) values.push(toObjectId(id));
+  return values;
 }
 
-function uniqueStrings(values = []) {
+function uniqueStringIds(values = []) {
   return [
     ...new Set(
       values
@@ -40,30 +41,14 @@ function uniqueStrings(values = []) {
   ];
 }
 
-function makeStringIdQuery(field, ids = []) {
-  const cleanIds = uniqueStrings(ids);
-  if (!cleanIds.length) return null;
-
-  return {
-    [field]: { $in: cleanIds },
-  };
-}
-
-function makeObjectIdMatch(value) {
-  const id = normalizeId(value);
-  if (!id) return [];
-
-  const list = [id];
-
-  if (isObjectId(id)) {
-    list.push(toObjectId(id));
-  }
-
-  return list;
+function parsePageLimit(source = {}) {
+  const page = Math.max(1, parseInt(source.page || 1, 10));
+  const limit = Math.min(Math.max(1, parseInt(source.limit || 20, 10)), 100);
+  return { page, limit };
 }
 
 function getActor(req = {}) {
-  const admin = req.admin || {};
+  const admin = req.admin || req.user || {};
 
   return {
     adminId: normalizeId(admin.adminId || admin._id || ""),
@@ -72,11 +57,23 @@ function getActor(req = {}) {
   };
 }
 
+function isFullNotificationAccess(role = "") {
+  const value = normalizeRole(role);
+  return value === ROLES.SUPER_ADMIN || value === "super_admin" || value === "admin" || value === "master_admin";
+}
+
+function makeStringInQuery(field, values = []) {
+  const ids = uniqueStringIds(values);
+  if (!ids.length) return null;
+  return { [field]: { $in: ids } };
+}
+
+function compact(values = []) {
+  return values.filter(Boolean);
+}
+
 async function resolveAdminFromToken(req) {
   const actor = getActor(req);
-
-  if (!actor.adminId && !actor.email) return null;
-
   const or = [];
 
   if (isObjectId(actor.adminId)) {
@@ -94,52 +91,33 @@ async function resolveAdminFromToken(req) {
     .lean();
 }
 
-function isFullAdminAccess(role = "") {
-  const normalized = normalizeRole(role);
-
-  return (
-    normalized === ROLES.SUPER_ADMIN ||
-    normalized === "super_admin" ||
-    normalized === "admin"
-  );
-}
-
-async function getRhTeamAdminIds(rhId) {
-  const rhObjectIds = makeObjectIdMatch(rhId);
-
-  if (!rhObjectIds.length) return [String(rhId)];
+async function getRhTeamIds(rhId) {
+  const parentVariants = idVariants(rhId);
+  if (!parentVariants.length) return [];
 
   const team = await AdminModel.find({
     status: "active",
     role: { $in: [ROLES.BME, ROLES.IME, ROLES.SDR] },
-    parentAdmin: { $in: rhObjectIds },
+    parentAdmin: { $in: parentVariants },
   })
     .select("_id")
     .lean();
 
-  return uniqueStrings([
-    rhId,
-    ...team.map((item) => item._id),
-  ]);
+  return uniqueStringIds([rhId, ...team.map((item) => item._id)]);
 }
 
-async function getRhBrandIds({ rhId, teamAdminIds = [] }) {
-  const rhObjectIds = makeObjectIdMatch(rhId);
+async function getRhBrandIds({ rhId, teamIds = [] }) {
+  const rhVariants = idVariants(rhId);
+  const teamVariants = [];
 
-  const teamObjectIds = [];
-  teamAdminIds.forEach((id) => {
-    teamObjectIds.push(...makeObjectIdMatch(id));
+  teamIds.forEach((id) => {
+    teamVariants.push(...idVariants(id));
   });
 
-  const or = [];
-
-  if (rhObjectIds.length) {
-    or.push({ RHId: { $in: rhObjectIds } });
-  }
-
-  if (teamObjectIds.length) {
-    or.push({ bdmId: { $in: teamObjectIds } });
-  }
+  const or = compact([
+    rhVariants.length ? { RHId: { $in: rhVariants } } : null,
+    teamVariants.length ? { bdmId: { $in: teamVariants } } : null,
+  ]);
 
   if (!or.length) return [];
 
@@ -150,36 +128,28 @@ async function getRhBrandIds({ rhId, teamAdminIds = [] }) {
     .select("brandId")
     .lean();
 
-  return uniqueStrings(assignments.map((item) => item.brandId));
+  return uniqueStringIds(assignments.map((item) => item.brandId));
 }
 
-async function getRhCampaignIds({ rhId, teamAdminIds = [], brandIds = [] }) {
-  const rhObjectIds = makeObjectIdMatch(rhId);
+async function getRhCampaignIds({ rhId, teamIds = [], brandIds = [] }) {
+  const rhVariants = idVariants(rhId);
 
-  const teamObjectIds = [];
-  teamAdminIds.forEach((id) => {
-    teamObjectIds.push(...makeObjectIdMatch(id));
+  const teamVariants = [];
+  teamIds.forEach((id) => {
+    teamVariants.push(...idVariants(id));
   });
 
-  const brandObjectIds = [];
+  const brandVariants = [];
   brandIds.forEach((id) => {
-    brandObjectIds.push(...makeObjectIdMatch(id));
+    brandVariants.push(...idVariants(id));
   });
 
-  const or = [];
-
-  if (rhObjectIds.length) {
-    or.push({ RHId: { $in: rhObjectIds } });
-  }
-
-  if (teamObjectIds.length) {
-    or.push({ bdmId: { $in: teamObjectIds } });
-    or.push({ idmId: { $in: teamObjectIds } });
-  }
-
-  if (brandObjectIds.length) {
-    or.push({ brandId: { $in: brandObjectIds } });
-  }
+  const or = compact([
+    rhVariants.length ? { RHId: { $in: rhVariants } } : null,
+    teamVariants.length ? { bdmId: { $in: teamVariants } } : null,
+    teamVariants.length ? { idmId: { $in: teamVariants } } : null,
+    brandVariants.length ? { brandId: { $in: brandVariants } } : null,
+  ]);
 
   if (!or.length) return [];
 
@@ -190,7 +160,7 @@ async function getRhCampaignIds({ rhId, teamAdminIds = [], brandIds = [] }) {
     .select("campaignId")
     .lean();
 
-  return uniqueStrings(assignments.map((item) => item.campaignId));
+  return uniqueStringIds(assignments.map((item) => item.campaignId));
 }
 
 async function buildAdminNotificationScope(req) {
@@ -203,47 +173,31 @@ async function buildAdminNotificationScope(req) {
   const actorId = String(admin._id);
   const actorRole = normalizeRole(admin.role);
 
-  if (isFullAdminAccess(actorRole)) {
+  if (isFullNotificationAccess(actorRole)) {
     return {};
   }
 
-  if (actorRole === ROLES.REVENUE_HEAD) {
-    const teamAdminIds = await getRhTeamAdminIds(actorId);
+  if (actorRole === ROLES.REVENUE_HEAD || actorRole === "rh") {
+    const teamIds = await getRhTeamIds(actorId);
+    const brandIds = await getRhBrandIds({ rhId: actorId, teamIds });
+    const campaignIds = await getRhCampaignIds({ rhId: actorId, teamIds, brandIds });
 
-    const brandIds = await getRhBrandIds({
-      rhId: actorId,
-      teamAdminIds,
-    });
-
-    const campaignIds = await getRhCampaignIds({
-      rhId: actorId,
-      teamAdminIds,
-      brandIds,
-    });
-
-    const or = [
-      makeStringIdQuery("adminId", teamAdminIds),
-      makeStringIdQuery("brandId", brandIds),
-
-      // Campaign notification support:
-      // Since your schema has no campaignId field, campaign notifications
-      // should use entityType: "campaign" and entityId: String(campaign._id).
+    const or = compact([
+      makeStringInQuery("adminId", teamIds),
+      makeStringInQuery("brandId", brandIds),
       campaignIds.length
         ? {
             entityType: "campaign",
             entityId: { $in: campaignIds },
           }
         : null,
-
-      // Global admin notification, compatible with your XOR schema.
       { adminId: "ALL" },
       { adminId: "all" },
-    ].filter(Boolean);
+    ]);
 
     return or.length ? { $or: or } : { _id: { $in: [] } };
   }
 
-  // BME / IME / SDR see only their direct admin notifications.
   return {
     $or: [
       { adminId: actorId },
@@ -253,114 +207,163 @@ async function buildAdminNotificationScope(req) {
   };
 }
 
-/* =========================
-   BRAND
-========================= */
+function buildActivityGroupKey(row) {
+  const notificationId = String(row.notificationId || "").trim();
 
+  // New rows created by utils/notifier.js share notificationId across all recipients.
+  if (notificationId) {
+    return `notification:${notificationId}`;
+  }
+
+  // Legacy fallback for old rows where every recipient had a unique notificationId.
+  const createdAt = row.createdAt ? new Date(row.createdAt).getTime() : 0;
+  const bucket = Number.isFinite(createdAt) ? Math.floor(createdAt / 1000) : 0;
+
+  return [
+    "legacy",
+    row.type || "",
+    row.entityType || "",
+    row.entityId || "",
+    row.title || "",
+    row.message || "",
+    bucket,
+  ].join("|");
+}
+
+function buildActivityMatchQuery(row) {
+  if (row.notificationId) {
+    return { notificationId: row.notificationId };
+  }
+
+  return {
+    type: row.type,
+    entityType: row.entityType || null,
+    entityId: row.entityId || null,
+    title: row.title,
+    message: row.message || "",
+  };
+}
+
+function preferAdminRow(existing, row) {
+  if (!existing) return row;
+
+  const existingIsAdmin = Boolean(existing.adminId);
+  const rowIsAdmin = Boolean(row.adminId);
+
+  if (!existingIsAdmin && rowIsAdmin) {
+    return {
+      ...row,
+      isRead: existing.isRead && row.isRead,
+      createdAt: existing.createdAt || row.createdAt,
+      updatedAt: existing.updatedAt || row.updatedAt,
+    };
+  }
+
+  return existing;
+}
+
+function groupAdminNotifications(rows = []) {
+  const grouped = new Map();
+
+  for (const row of rows) {
+    const key = buildActivityGroupKey(row);
+    const existing = grouped.get(key);
+
+    if (!existing) {
+      grouped.set(key, {
+        ...row,
+        isRead: Boolean(row.isRead),
+      });
+      continue;
+    }
+
+    const preferred = preferAdminRow(existing, row);
+    preferred.isRead = Boolean(existing.isRead && row.isRead);
+
+    if (!preferred.actorName && row.actorName) preferred.actorName = row.actorName;
+    if (!preferred.actorEmail && row.actorEmail) preferred.actorEmail = row.actorEmail;
+    if (!preferred.actorRole && row.actorRole) preferred.actorRole = row.actorRole;
+    if (!preferred.actorAdminId && row.actorAdminId) preferred.actorAdminId = row.actorAdminId;
+
+    const existingTime = new Date(preferred.createdAt || 0).getTime();
+    const rowTime = new Date(row.createdAt || 0).getTime();
+
+    if (rowTime > existingTime) {
+      preferred.createdAt = row.createdAt;
+      preferred.updatedAt = row.updatedAt;
+    }
+
+    grouped.set(key, preferred);
+  }
+
+  return Array.from(grouped.values()).sort((a, b) => {
+    const unreadDiff = Number(!b.isRead) - Number(!a.isRead);
+    if (unreadDiff) return unreadDiff;
+
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+  });
+}
+
+// -------------------------
+// BRAND
+// -------------------------
 async function listForBrand(req, res) {
   try {
     const { brandId, page = 1, limit = 20 } = req.query;
-
-    if (!brandId) {
-      return res.status(400).json({ message: "brandId is required" });
-    }
+    if (!brandId) return res.status(400).json({ message: "brandId is required" });
 
     const p = Math.max(1, parseInt(page, 10));
     const l = Math.max(1, parseInt(limit, 10));
-
-    const q = {
-      brandId: String(brandId),
-    };
+    const q = { brandId: String(brandId) };
 
     const [data, total, unread] = await Promise.all([
-      Notification.find(q)
-        .sort({ createdAt: -1 })
-        .skip((p - 1) * l)
-        .limit(l)
-        .lean(),
-
+      Notification.find(q).sort({ createdAt: -1 }).skip((p - 1) * l).limit(l).lean(),
       Notification.countDocuments(q),
-
-      Notification.countDocuments({
-        ...q,
-        isRead: false,
-      }),
+      Notification.countDocuments({ ...q, isRead: false }),
     ]);
 
-    return res.json({
-      data,
-      total,
-      unread,
-      page: p,
-      limit: l,
-    });
+    res.json({ data, total, unread, page: p, limit: l });
   } catch (err) {
     console.error("listForBrand error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function markReadForBrand(req, res) {
   try {
     const { id, brandId } = req.body;
-
     if (!id || !brandId) {
       return res.status(400).json({ message: "id and brandId are required" });
     }
 
     const doc = await Notification.findOneAndUpdate(
-      {
-        _id: id,
-        brandId: String(brandId),
-      },
-      {
-        $set: {
-          isRead: true,
-        },
-      },
-      {
-        new: true,
-      }
+      { _id: id, brandId: String(brandId) },
+      { $set: { isRead: true } },
+      { new: true }
     ).lean();
 
-    if (!doc) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    return res.json({
-      ok: true,
-      item: doc,
-    });
+    if (!doc) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true, item: doc });
   } catch (err) {
     console.error("markReadForBrand error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function markAllReadForBrand(req, res) {
   try {
     const { brandId } = req.body;
-
-    if (!brandId) {
-      return res.status(400).json({ message: "brandId is required" });
-    }
+    if (!brandId) return res.status(400).json({ message: "brandId is required" });
 
     await Notification.updateMany(
-      {
-        brandId: String(brandId),
-        isRead: false,
-      },
-      {
-        $set: {
-          isRead: true,
-        },
-      }
+      { brandId: String(brandId), isRead: false },
+      { $set: { isRead: true } }
     );
 
-    return res.json({ ok: true });
+    res.json({ ok: true });
   } catch (err) {
     console.error("markAllReadForBrand error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -374,146 +377,89 @@ async function deleteForBrand(req, res) {
     }
 
     const q = brandId
-      ? {
-          _id: targetId,
-          brandId: String(brandId),
-        }
-      : {
-          notificationId: String(targetId),
-        };
+      ? { _id: targetId, brandId: String(brandId) }
+      : { notificationId: String(targetId) };
 
     const doc = await Notification.findOneAndDelete(q).lean();
+    if (!doc) return res.status(404).json({ message: "Not found" });
 
-    if (!doc) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    return res.json({
-      ok: true,
-      deletedId: targetId,
-      previous: doc,
-    });
+    return res.json({ ok: true, deletedId: targetId, previous: doc });
   } catch (err) {
     console.error("deleteForBrand error:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 }
 
-/* =========================
-   INFLUENCER
-========================= */
-
+// -------------------------
+// INFLUENCER
+// -------------------------
 async function listForInfluencer(req, res) {
   try {
     const { influencerId, page = 1, limit = 20 } = req.query;
-
     if (!influencerId) {
       return res.status(400).json({ message: "influencerId is required" });
     }
 
     const p = Math.max(1, parseInt(page, 10));
     const l = Math.max(1, parseInt(limit, 10));
-
-    const q = {
-      influencerId: String(influencerId),
-    };
+    const q = { influencerId: String(influencerId) };
 
     const [data, total, unread] = await Promise.all([
-      Notification.find(q)
-        .sort({ createdAt: -1 })
-        .skip((p - 1) * l)
-        .limit(l)
-        .lean(),
-
+      Notification.find(q).sort({ createdAt: -1 }).skip((p - 1) * l).limit(l).lean(),
       Notification.countDocuments(q),
-
-      Notification.countDocuments({
-        ...q,
-        isRead: false,
-      }),
+      Notification.countDocuments({ ...q, isRead: false }),
     ]);
 
-    return res.json({
-      data,
-      total,
-      unread,
-      page: p,
-      limit: l,
-    });
+    res.json({ data, total, unread, page: p, limit: l });
   } catch (err) {
     console.error("listForInfluencer error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function markReadForInfluencer(req, res) {
   try {
     const { id, influencerId } = req.body;
-
     if (!id || !influencerId) {
       return res.status(400).json({ message: "id and influencerId are required" });
     }
 
     const doc = await Notification.findOneAndUpdate(
-      {
-        _id: id,
-        influencerId: String(influencerId),
-      },
-      {
-        $set: {
-          isRead: true,
-        },
-      },
-      {
-        new: true,
-      }
+      { _id: id, influencerId: String(influencerId) },
+      { $set: { isRead: true } },
+      { new: true }
     ).lean();
 
-    if (!doc) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    return res.json({
-      ok: true,
-      item: doc,
-    });
+    if (!doc) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true, item: doc });
   } catch (err) {
     console.error("markReadForInfluencer error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function markAllReadForInfluencer(req, res) {
   try {
     const { influencerId } = req.body;
-
     if (!influencerId) {
       return res.status(400).json({ message: "influencerId is required" });
     }
 
     await Notification.updateMany(
-      {
-        influencerId: String(influencerId),
-        isRead: false,
-      },
-      {
-        $set: {
-          isRead: true,
-        },
-      }
+      { influencerId: String(influencerId), isRead: false },
+      { $set: { isRead: true } }
     );
 
-    return res.json({ ok: true });
+    res.json({ ok: true });
   } catch (err) {
     console.error("markAllReadForInfluencer error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function deleteForInfluencer(req, res) {
   try {
     const { id, influencerId } = req.body;
-
     if (!id || !influencerId) {
       return res.status(400).json({ message: "id and influencerId are required" });
     }
@@ -523,58 +469,41 @@ async function deleteForInfluencer(req, res) {
       influencerId: String(influencerId),
     }).lean();
 
-    if (!doc) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    return res.json({
-      ok: true,
-      deletedId: id,
-      previous: doc,
-    });
+    if (!doc) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true, deletedId: id, previous: doc });
   } catch (err) {
     console.error("deleteForInfluencer error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
-/* =========================
-   ADMIN
-========================= */
-
+// -------------------------
+// ADMIN
+// -------------------------
 async function listForAdmin(req, res) {
   try {
-    const { page, limit } = parsePageLimit(req.query || {});
+    const { page, limit } = parsePageLimit({ ...req.query, ...req.body });
     const scope = await buildAdminNotificationScope(req);
 
-    const unreadOnly = String(req.query?.unread || "")
+    const unreadOnly = String(req.query?.unread || req.body?.unread || "")
       .trim()
       .toLowerCase();
 
-    const q = {
-      ...scope,
-    };
+    const rawRows = await Notification.find(scope)
+      .sort({ createdAt: -1, updatedAt: -1 })
+      .lean();
 
-    if (unreadOnly === "true" || unreadOnly === "1") {
-      q.isRead = false;
-    }
+    const groupedRows = groupAdminNotifications(rawRows);
+    const filteredRows =
+      unreadOnly === "true" || unreadOnly === "1"
+        ? groupedRows.filter((item) => !item.isRead)
+        : groupedRows;
 
-    const [data, total, unread] = await Promise.all([
-      Notification.find(q)
-        .sort({ createdAt: -1, updatedAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
+    const total = filteredRows.length;
+    const unread = groupedRows.filter((item) => !item.isRead).length;
+    const data = filteredRows.slice((page - 1) * limit, page * limit);
 
-      Notification.countDocuments(q),
-
-      Notification.countDocuments({
-        ...scope,
-        isRead: false,
-      }),
-    ]);
-
-    return res.json({
+    res.json({
       success: true,
       data,
       total,
@@ -585,46 +514,32 @@ async function listForAdmin(req, res) {
     });
   } catch (err) {
     console.error("listForAdmin error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function markReadForAdmin(req, res) {
   try {
     const { id } = req.body;
-
-    if (!id) {
-      return res.status(400).json({ message: "id is required" });
-    }
+    if (!id) return res.status(400).json({ message: "id is required" });
 
     const scope = await buildAdminNotificationScope(req);
+    const notification = await Notification.findOne({ _id: id, ...scope }).lean();
 
-    const doc = await Notification.findOneAndUpdate(
+    if (!notification) return res.status(404).json({ message: "Not found" });
+
+    await Notification.updateMany(
       {
-        _id: id,
         ...scope,
+        ...buildActivityMatchQuery(notification),
       },
-      {
-        $set: {
-          isRead: true,
-        },
-      },
-      {
-        new: true,
-      }
-    ).lean();
+      { $set: { isRead: true } }
+    );
 
-    if (!doc) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    return res.json({
-      ok: true,
-      item: doc,
-    });
+    res.json({ ok: true, item: { ...notification, isRead: true } });
   } catch (err) {
     console.error("markReadForAdmin error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -633,51 +548,41 @@ async function markAllReadForAdmin(req, res) {
     const scope = await buildAdminNotificationScope(req);
 
     await Notification.updateMany(
-      {
-        ...scope,
-        isRead: false,
-      },
-      {
-        $set: {
-          isRead: true,
-        },
-      }
+      { ...scope, isRead: false },
+      { $set: { isRead: true } }
     );
 
-    return res.json({ ok: true });
+    res.json({ ok: true });
   } catch (err) {
     console.error("markAllReadForAdmin error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
 async function deleteForAdmin(req, res) {
   try {
     const { id } = req.body;
-
-    if (!id) {
-      return res.status(400).json({ message: "id is required" });
-    }
+    if (!id) return res.status(400).json({ message: "id is required" });
 
     const scope = await buildAdminNotificationScope(req);
+    const notification = await Notification.findOne({ _id: id, ...scope }).lean();
 
-    const doc = await Notification.findOneAndDelete({
-      _id: id,
+    if (!notification) return res.status(404).json({ message: "Not found" });
+
+    const result = await Notification.deleteMany({
       ...scope,
-    }).lean();
+      ...buildActivityMatchQuery(notification),
+    });
 
-    if (!doc) {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    return res.json({
+    res.json({
       ok: true,
       deletedId: id,
-      previous: doc,
+      deletedCount: result.deletedCount || 0,
+      previous: notification,
     });
   } catch (err) {
     console.error("deleteForAdmin error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 }
 
