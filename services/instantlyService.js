@@ -234,16 +234,16 @@ async function getCampaignSendingStatus(id, params = {}) {
 async function sendTestEmail(payload = {}) {
   const eaccount = String(
     payload.eaccount ||
-      payload.account_email ||
-      payload.accountEmail ||
-      ""
+    payload.account_email ||
+    payload.accountEmail ||
+    ""
   ).trim();
 
   const to_address_email_list = String(
     payload.to_address_email_list ||
-      payload.to_email ||
-      payload.toEmail ||
-      ""
+    payload.to_email ||
+    payload.toEmail ||
+    ""
   ).trim();
 
   const subject = String(payload.subject || "").trim();
@@ -322,7 +322,32 @@ async function updateAccount(email, payload = {}) {
 }
 
 async function deleteAccount(email) {
-  return request("delete", `/accounts/${encodeEmail(email)}`);
+  if (!email) {
+    throw new Error("Instantly account email is required");
+  }
+
+  const res = await instantlyClient.request({
+    method: "delete",
+    url: `/accounts/${encodeEmail(email)}`,
+    data: null,
+    transformRequest: [
+      (data, headers) => {
+        if (headers) {
+          if (typeof headers.delete === "function") {
+            headers.delete("Content-Type");
+            headers.delete("content-type");
+          } else {
+            delete headers["Content-Type"];
+            delete headers["content-type"];
+          }
+        }
+
+        return data;
+      },
+    ],
+  });
+
+  return unwrap(res);
 }
 
 async function enableWarmup(payload = {}) {

@@ -2,12 +2,14 @@
 const mongoose = require("mongoose");
 const Dispute = require('../models/dispute');
 const Campaign = require('../models/campaign');
-const Admin = require('../models/admin');
+const { AdminModel: Admin, ROLES } = require('../models/master');
 const Brand = require('../models/brand');
 const { InfluencerModel: Influencer } = require('../models/influencer');
 const ApplyCampaign = require('../models/applyCampaign');
 const Modash = require('../models/modash');
 const Contract = require('../models/contract');
+const BrandAssigned = require('../models/brandAssigned');
+const CampaignAssigned = require('../models/CampaignAssigned');
 const { Types } = require('mongoose');
 const { createAndEmit } = require('../utils/notifier');
 const { v4: uuidv4 } = require("uuid");
@@ -290,6 +292,115 @@ async function buildAttachmentsFromReq(req, attachmentsFromBody = []) {
 
   return [...existing, ...newOnes];
 }
+
+function uniqueIdStrings(values = []) {
+  return [
+    ...new Set(
+      values
+        .filter(Boolean)
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function objectIdVariants(value) {
+  const id = String(value || "").trim();
+  if (!id) return [];
+
+  const variants = [id];
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    variants.push(new mongoose.Types.ObjectId(id));
+  }
+
+  return variants;
+}
+
+async function findAdminByAnyId(adminId) {
+  const id = String(adminId || "").trim();
+  if (!id) return null;
+
+  const or = [];
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    or.push({ _id: new mongoose.Types.ObjectId(id) });
+  }
+
+  if (id.includes("@")) {
+    or.push({ email: id.toLowerCase() });
+  }
+
+  if (!or.length) return null;
+
+  return Admin.findOne({ $or: or })
+    .select("_id name email role parentAdmin rootAdmin status")
+    .lean();
+}
+
+async function getAssignedAdminIdsForDispute(disputeLike = {}) {
+  const recipients = [];
+  const brandId = String(disputeLike.brandId || "").trim();
+  const campaignId = String(disputeLike.campaignId || "").trim();
+
+  if (disputeLike?.assignedTo?.adminId) {
+    recipients.push(disputeLike.assignedTo.adminId);
+  }
+
+  const brandVariants = objectIdVariants(brandId);
+  const campaignVariants = objectIdVariants(campaignId);
+
+  if (campaignVariants.length) {
+    const campaignAssignment = await CampaignAssigned.findOne({
+      status: "active",
+      campaignId: { $in: campaignVariants },
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .select("RHId bdmId idmId brandId")
+      .lean();
+
+    if (campaignAssignment) {
+      recipients.push(
+        campaignAssignment.RHId,
+        campaignAssignment.bdmId,
+        campaignAssignment.idmId
+      );
+
+      if (!brandVariants.length && campaignAssignment.brandId) {
+        brandVariants.push(...objectIdVariants(campaignAssignment.brandId));
+      }
+    }
+  }
+
+  if (brandVariants.length) {
+    const brandAssignment = await BrandAssigned.findOne({
+      status: "active",
+      brandId: { $in: brandVariants },
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .select("RHId bdmId")
+      .lean();
+
+    if (brandAssignment) {
+      recipients.push(brandAssignment.RHId, brandAssignment.bdmId);
+    }
+  }
+
+  return uniqueIdStrings(recipients);
+}
+
+async function getAdminNotificationRecipientsForDispute(disputeLike = {}) {
+  try {
+    return await getAssignedAdminIdsForDispute(disputeLike);
+  } catch (error) {
+    console.warn(
+      "Failed to resolve dispute admin notification recipients:",
+      error?.message || error
+    );
+    return [];
+  }
+}
+
 const EDITABLE_ISSUE_TYPES = new Set([
   'content_not_as_expected',
   'delay_or_missed_deadline',
@@ -714,7 +825,7 @@ async function requireBrandModel(req, res) {
     return null;
   }
 
-  const brand = await Brand.findOne({ brandId: String(brandId) }).lean();
+  const brand = await Brand.findOne(buildBrandLookup(brandId)).lean();
   if (!brand) {
     res.status(404).json({ message: 'Brand not found' });
     return null;
@@ -738,9 +849,9 @@ async function requireInfluencerModel(req, res) {
     return null;
   }
 
-  const influencer = await Influencer.findOne({
-    influencerId: String(influencerId),
-  }).lean();
+  const influencer = await Influencer.findOne(
+    buildInfluencerLookupForProfile(influencerId)
+  ).lean();
 
   if (!influencer) {
     res.status(404).json({ message: 'Influencer not found' });
@@ -763,11 +874,7 @@ async function resolveAdminModel(req) {
 
   if (!adminId) return null;
 
-  const admin = await Admin.findOne({ adminId: String(adminId) })
-    .select('adminId name email')
-    .lean();
-
-  return admin || null;
+  return findAdminByAnyId(adminId);
 }
 
 // ----------------- BRAND ENDPOINTS -----------------
@@ -830,6 +937,7 @@ exports.brandRevokeDispute = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         influencerId: dispute.influencerId,
         type: "dispute.revoked",
         title: `Dispute #${dispute.disputeId} revoked`,
@@ -1061,6 +1169,7 @@ exports.brandEditDispute = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         influencerId: dispute.influencerId,
         type: 'dispute.updated',
         title: `Dispute #${dispute.disputeId} updated`,
@@ -1210,6 +1319,7 @@ exports.brandCreateDispute = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         influencerId: String(influencerId),
         type: "dispute.created_against_you",
         title: `New dispute raised (Ticket #${dispute.disputeId})`,
@@ -1466,6 +1576,7 @@ exports.brandAddComment = async (req, res) => {
     try {
       const snippet = String(text).trim().slice(0, 120);
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(d),
         influencerId: d.influencerId,
         type: "dispute.comment_added",
         title: `New comment on Dispute #${d.disputeId}`,
@@ -1573,6 +1684,7 @@ exports.brandEditComment = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         influencerId: dispute.influencerId,
         type: 'dispute.comment_edited',
         title: `Comment updated on Dispute #${dispute.disputeId}`,
@@ -1659,6 +1771,7 @@ exports.brandDeleteComment = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         influencerId: dispute.influencerId,
         type: 'dispute.comment_deleted',
         title: `Comment removed from Dispute #${dispute.disputeId}`,
@@ -1745,6 +1858,7 @@ exports.influencerRevokeDispute = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(d),
         brandId: d.brandId,
         type: 'dispute.revoked',
         title: `Dispute #${d.disputeId} revoked`,
@@ -1835,6 +1949,7 @@ exports.influencerCreateDispute = async (req, res) => {
     // 🔔 IN-APP NOTIFICATION (Influencer raised dispute -> Brand must see it)
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         brandId: String(brandId),
         type: 'dispute.created_against_you',
         title: `New dispute raised (Ticket #${dispute.disputeId})`,
@@ -2078,6 +2193,7 @@ exports.influencerAddComment = async (req, res) => {
     try {
       const snippet = String(text).trim().slice(0, 120);
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(d),
         brandId: d.brandId,
         type: "dispute.comment_added",
         title: `New comment on Dispute #${d.disputeId}`,
@@ -2163,6 +2279,7 @@ exports.influencerRevokeDispute = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         brandId: dispute.brandId,
         type: "dispute.revoked",
         title: `Dispute #${dispute.disputeId} revoked`,
@@ -2362,6 +2479,7 @@ exports.influencerEditDispute = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         brandId: dispute.brandId,
         type: "dispute.updated",
         title: `Dispute #${dispute.disputeId} updated`,
@@ -2452,9 +2570,7 @@ exports.adminCreateDisputeEvidence = async (req, res) => {
     const admin =
       (await resolveAdminModel(req)) ||
       (adminId
-        ? await Admin.findOne({ adminId: String(adminId) })
-          .select("adminId name email")
-          .lean()
+        ? await findAdminByAnyId(adminId)
         : null);
 
     const uploadedAttachments = await buildAttachmentsFromReq(req, attachments);
@@ -2466,7 +2582,7 @@ exports.adminCreateDisputeEvidence = async (req, res) => {
     }
 
     const actorId =
-      admin?.adminId ||
+      admin?._id ||
       (adminId ? String(adminId) : null) ||
       req.user?.id ||
       "system";
@@ -2524,6 +2640,7 @@ exports.adminCreateDisputeEvidence = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(dispute),
         brandId: dispute.brandId,
         influencerId: dispute.influencerId,
         type: "dispute.evidence_added",
@@ -2581,9 +2698,7 @@ exports.adminAddComment = async (req, res) => {
 
     const admin =
       (adminId
-        ? await Admin.findOne({ adminId: String(adminId) })
-          .select("adminId name email")
-          .lean()
+        ? await findAdminByAnyId(adminId)
         : null) || (await resolveAdminModel(req));
 
     const sanitized = await buildAttachmentsFromReq(req, attachments);
@@ -2607,7 +2722,7 @@ exports.adminAddComment = async (req, res) => {
       }
     }
 
-    const actorId = admin?.adminId || adminId || req.user?.id || "system";
+    const actorId = admin?._id || adminId || req.user?.id || "system";
 
     d.comments.push({
       authorRole: "Admin",
@@ -2624,6 +2739,7 @@ exports.adminAddComment = async (req, res) => {
 
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(d),
         brandId: d.brandId,
         influencerId: d.influencerId,
         type: parentComment ? "dispute.admin_reply" : "dispute.admin_comment",
@@ -2773,12 +2889,10 @@ exports.adminUpdateStatus = async (req, res) => {
 
     let admin = null;
     if (adminId) {
-      admin = await Admin.findOne({ adminId: String(adminId) })
-        .select("adminId name email")
-        .lean();
+      admin = await findAdminByAnyId(adminId);
     }
 
-    const actorId = admin ? admin.adminId : adminId || "system";
+    const actorId = admin?._id ? String(admin._id) : adminId || "system";
 
     if (prevStatus !== normalizedStatus) {
       d.comments.push({
@@ -2808,6 +2922,7 @@ exports.adminUpdateStatus = async (req, res) => {
           : "";
 
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(d),
         brandId: d.brandId,
         influencerId: d.influencerId,
         type: "dispute.status_updated",
@@ -2826,8 +2941,8 @@ exports.adminUpdateStatus = async (req, res) => {
 
     if (d.status === "resolved") {
       const [brand, influencer] = await Promise.all([
-        Brand.findOne({ brandId: d.brandId }).lean(),
-        Influencer.findOne({ influencerId: d.influencerId }).lean(),
+        Brand.findOne(buildBrandLookup(d.brandId)).lean(),
+        Influencer.findOne(buildInfluencerLookupForProfile(d.influencerId)).lean(),
       ]);
 
       const resolutionSummary =
@@ -2921,9 +3036,7 @@ exports.adminAssign = async (req, res) => {
 
     if (targetAdminId) {
       try {
-        const a = await Admin.findOne({ adminId: targetAdminId })
-          .select('email name')
-          .lean();
+        const a = await findAdminByAnyId(targetAdminId);
         if (a) {
           name = a.name || a.email || null;
         }
@@ -2936,6 +3049,7 @@ exports.adminAssign = async (req, res) => {
     await d.save();
     try {
       await createAndEmit({
+        adminIds: await getAdminNotificationRecipientsForDispute(d),
         brandId: d.brandId,
         influencerId: d.influencerId,
         type: 'dispute.assigned',

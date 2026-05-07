@@ -385,6 +385,9 @@ function serializeThread(threadDoc, admin = {}) {
     unreadForBme: Boolean(threadDoc.unreadForBme),
     unreadForIme: Boolean(threadDoc.unreadForIme),
 
+    isUnread: isThreadUnreadForAdmin(threadDoc, admin),
+    hasUnreadReply: isThreadUnreadForAdmin(threadDoc, admin) && Boolean(threadDoc.lastInboundAt),
+
     createdAt: threadDoc.createdAt || null,
     updatedAt: threadDoc.updatedAt || null,
   };
@@ -565,6 +568,63 @@ function buildThreadQueryWithFilters(baseScope = {}, queryParams = {}) {
   return query;
 }
 
+function getUnreadFlagForAdmin(admin = {}) {
+  const role = normalizeRole(admin?.role);
+
+  if (role === OWNER_ROLE.BME) return "unreadForBme";
+  if (role === OWNER_ROLE.IME) return "unreadForIme";
+  if (role === OWNER_ROLE.REVENUE_HEAD || role === "rh" || role === "revenue_head") {
+    return "unreadForRevenueHead";
+  }
+
+  return "";
+}
+
+function isThreadUnreadForAdmin(threadDoc, admin = {}) {
+  if (!threadDoc) return false;
+
+  const role = normalizeRole(admin?.role);
+
+  if (role === "super_admin") {
+    return Boolean(
+      threadDoc.unreadForRevenueHead ||
+      threadDoc.unreadForBme ||
+      threadDoc.unreadForIme
+    );
+  }
+
+  const flag = getUnreadFlagForAdmin(admin);
+  return flag ? Boolean(threadDoc?.[flag]) : false;
+}
+
+function getThreadSortTime(threadDoc) {
+  const values = [
+    threadDoc?.lastMessageAt,
+    threadDoc?.lastInboundAt,
+    threadDoc?.updatedAt,
+    threadDoc?.createdAt,
+  ];
+
+  for (const value of values) {
+    const time = new Date(value || "").getTime();
+    if (Number.isFinite(time)) return time;
+  }
+
+  return 0;
+}
+
+function sortThreadsForAdminInbox(threads = [], admin = {}) {
+  return [...threads].sort((a, b) => {
+    const unreadDiff =
+      Number(isThreadUnreadForAdmin(b, admin)) -
+      Number(isThreadUnreadForAdmin(a, admin));
+
+    if (unreadDiff) return unreadDiff;
+
+    return getThreadSortTime(b) - getThreadSortTime(a);
+  });
+}
+
 exports.listBmeThreads = async (req, res) => {
   try {
     ensureRole(req.admin, ["revenue_head", "bme", "ime", "super_admin"]);
@@ -691,15 +751,42 @@ exports.listBmeThreads = async (req, res) => {
       return haystack.includes(search);
     });
 
+    const sorted = sortThreadsForAdminInbox(filtered, req.admin);
+
     return res.status(200).json({
       success: true,
-      count: filtered.length,
-      data: filtered.map((thread) => serializeThread(thread, req.admin)),
+      count: sorted.length,
+      data: sorted.map((thread) => serializeThread(thread, req.admin)),
     });
   } catch (error) {
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load threads",
+    });
+  }
+};
+
+exports.markThreadAsRead = async (req, res) => {
+  try {
+    ensureRole(req.admin, ["revenue_head", "bme", "ime", "super_admin"]);
+
+    const thread = await getScopedThread(req.admin, req.params.threadId);
+
+    thread.unreadForRevenueHead = false;
+    thread.unreadForBme = false;
+    thread.unreadForIme = false;
+
+    await thread.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Thread marked as read",
+      thread: serializeThread(thread, req.admin),
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to mark thread as read",
     });
   }
 };

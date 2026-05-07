@@ -32,6 +32,115 @@ const { buildCampaignVisibilityFilter } = require('../utils/campaignAccess');
 const EXECUTIVE_ROLES = [ROLES.IME, ROLES.BME, ROLES.SDR];
 const CampaignAssigned = require("../models/CampaignAssigned");
 
+const { createAndEmit } = require("../utils/notifier");
+
+async function notifySafely(context, payload) {
+  try {
+    return await createAndEmit(payload);
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
+  }
+}
+
+function toStringId(value) {
+  return String(value || "").trim();
+}
+
+function uniqueCleanIds(values = []) {
+  return [
+    ...new Set(
+      values
+        .map((value) => toStringId(value))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function objectIdVariants(value) {
+  const id = toStringId(value);
+  if (!id) return [];
+
+  const variants = [id];
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    variants.push(new mongoose.Types.ObjectId(id));
+  }
+
+  return variants;
+}
+
+async function getTeamUnderRevenueHeads(revenueHeadIds = []) {
+  const rhIds = uniqueCleanIds(revenueHeadIds);
+  const parentVariants = [];
+
+  rhIds.forEach((id) => {
+    parentVariants.push(...objectIdVariants(id));
+  });
+
+  if (!parentVariants.length) return [];
+
+  const team = await AdminModel.find({
+    status: "active",
+    parentAdmin: { $in: parentVariants },
+    role: { $in: [ROLES.BME, ROLES.IME, ROLES.SDR] },
+  })
+    .select("_id")
+    .lean();
+
+  return team.map((item) => String(item._id));
+}
+
+async function getBrandAdminNotificationRecipients(brandId) {
+  const variants = objectIdVariants(brandId);
+  if (!variants.length) return [];
+
+  const assignments = await BrandAssigned.find({
+    brandId: { $in: variants },
+    status: "active",
+  })
+    .select("RHId bdmId idmId sdrId")
+    .lean();
+
+  const directIds = assignments.flatMap((assignment) => [
+    assignment?.RHId,
+    assignment?.bdmId,
+    assignment?.idmId,
+    assignment?.sdrId,
+  ]);
+
+  const rhIds = assignments.map((assignment) => assignment?.RHId).filter(Boolean);
+  const teamIds = await getTeamUnderRevenueHeads(rhIds);
+
+  return uniqueCleanIds([...directIds, ...teamIds]);
+}
+
+async function getCampaignAdminNotificationRecipients({ campaignId, brandId }) {
+  const campaignVariants = objectIdVariants(campaignId);
+  const brandRecipients = await getBrandAdminNotificationRecipients(brandId);
+
+  if (!campaignVariants.length) return brandRecipients;
+
+  const assignments = await CampaignAssigned.find({
+    campaignId: { $in: campaignVariants },
+    status: "active",
+  })
+    .select("RHId bdmId idmId")
+    .lean();
+
+  const directIds = assignments.flatMap((assignment) => [
+    assignment?.RHId,
+    assignment?.bdmId,
+    assignment?.idmId,
+  ]);
+
+  const rhIds = assignments.map((assignment) => assignment?.RHId).filter(Boolean);
+  const teamIds = await getTeamUnderRevenueHeads(rhIds);
+
+  return uniqueCleanIds([...brandRecipients, ...directIds, ...teamIds]);
+}
+
+
 // ======================
 // Local Helpers
 // ======================
@@ -401,6 +510,18 @@ exports.inviteAdmin = async (req, res) => {
       text: tpl.text,
     });
 
+    await notifySafely("inviteAdmin", {
+      adminId: String(admin._id),
+      type: "admin.invited",
+      title: "Admin invite sent",
+      message: `You were invited as ${role.replace(/_/g, " ")}.`,
+      entityType: "admin",
+      entityId: String(admin._id),
+      actionPath: {
+        admin: "/admin/profile",
+      },
+    });
+
     const response = {
       message: "Invite sent successfully",
     };
@@ -476,6 +597,18 @@ exports.acceptInviteSetPassword = async (req, res) => {
     admin.inviteExpiresAt = undefined;
 
     await admin.save();
+
+    await notifySafely("acceptInviteSetPassword", {
+      adminId: String(admin._id),
+      type: "admin.activated",
+      title: "Admin account activated",
+      message: "Your admin account is now active.",
+      entityType: "admin",
+      entityId: String(admin._id),
+      actionPath: {
+        admin: "/admin/dashboard",
+      },
+    });
 
     return res.status(200).json({
       message: "Password set successfully. Please login.",
@@ -598,6 +731,18 @@ exports.updateStatus = async (req, res) => {
     }
 
     await admin.save();
+
+    await notifySafely("updateStatus", {
+      adminId: String(admin._id),
+      type: "admin.status_updated",
+      title: "Admin account updated",
+      message: `Your admin account status is now ${admin.status}.`,
+      entityType: "admin",
+      entityId: String(admin._id),
+      actionPath: {
+        admin: "/admin/profile",
+      },
+    });
 
     return res.status(200).json({
       message: "Admin updated successfully",
@@ -967,6 +1112,23 @@ exports.assignCampaignIme = async (req, res) => {
       }
     ).exec();
 
+    await notifySafely("assignCampaignIme", {
+      brandId: String(campaign.brandId),
+      adminIds: await getCampaignAdminNotificationRecipients({
+        campaignId: campaign._id,
+        brandId: campaign.brandId,
+      }),
+      type: "campaign.ime_assigned",
+      title: "IME assigned to campaign",
+      message: `${campaign.campaignTitle || "Campaign"} was assigned to an IME.`,
+      entityType: "campaign",
+      entityId: String(campaign._id),
+      actionPath: {
+        brand: `/brand/campaigns/${campaign._id}`,
+        admin: `/admin/campaigns/${campaign._id}`,
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Campaign IME assignment saved successfully",
@@ -1064,6 +1226,20 @@ exports.assignBrand = async (req, res) => {
         }
       ).exec();
 
+      await notifySafely("assignBrand", {
+        brandId: String(normalizedBrandId),
+        adminIds: await getBrandAdminNotificationRecipients(normalizedBrandId),
+        type: "brand.assignment_updated",
+        title: "Brand assignment updated",
+        message: "A brand assignment was updated.",
+        entityType: "brand",
+        entityId: String(normalizedBrandId),
+        actionPath: {
+          brand: "/brand/notifications",
+          admin: `/admin/brands/${normalizedBrandId}`,
+        },
+      });
+
       return res.status(200).json({
         success: true,
         message: "Brand assignment saved successfully",
@@ -1118,6 +1294,20 @@ exports.assignBrand = async (req, res) => {
         new: true,
       }
     ).exec();
+
+    await notifySafely("assignBrand", {
+      brandId: String(normalizedBrandId),
+      adminIds: await getBrandAdminNotificationRecipients(normalizedBrandId),
+      type: "brand.bme_assigned",
+      title: "BME assigned to brand",
+      message: "A BME was assigned to a brand.",
+      entityType: "brand",
+      entityId: String(normalizedBrandId),
+      actionPath: {
+        brand: "/brand/notifications",
+        admin: `/admin/brands/${normalizedBrandId}`,
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -1195,6 +1385,20 @@ exports.updateBrandAssignment = async (req, res) => {
     if (bdmId) assignment.bdmId = bdmId;
 
     await assignment.save();
+
+    await notifySafely("updateBrandAssignment", {
+      brandId: String(assignment.brandId),
+      adminIds: await getBrandAdminNotificationRecipients(assignment.brandId),
+      type: "brand.assignment_updated",
+      title: "Brand assignment updated",
+      message: "A brand assignment was updated.",
+      entityType: "brand",
+      entityId: String(assignment.brandId),
+      actionPath: {
+        brand: "/brand/notifications",
+        admin: `/admin/brands/${assignment.brandId}`,
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -1277,6 +1481,20 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
     if (RHId) assignment.RHId = RHId;
 
     await assignment.save();
+
+    await notifySafely("updateBrandAssignmentStatusAndRH", {
+      brandId: String(assignment.brandId),
+      adminIds: await getBrandAdminNotificationRecipients(assignment.brandId),
+      type: "brand.assignment_updated",
+      title: "Brand assignment updated",
+      message: "A brand assignment was updated.",
+      entityType: "brand",
+      entityId: String(assignment.brandId),
+      actionPath: {
+        brand: "/brand/notifications",
+        admin: `/admin/brands/${assignment.brandId}`,
+      },
+    });
 
     return res.status(200).json({
       success: true,

@@ -101,6 +101,7 @@ router.post("/replies/:reviewId/assign-bme", adminAuth, replyReviewController.as
 
 router.get("/threads", adminAuth, threadController.listBmeThreads);
 router.get("/threads/:threadId", adminAuth, threadController.getThreadMessages);
+router.post("/threads/:threadId/read", adminAuth, threadController.markThreadAsRead);
 router.post("/threads/:threadId/reply", adminAuth, threadController.replyToThread);
 
 /* templates */
