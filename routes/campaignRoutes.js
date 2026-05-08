@@ -120,4 +120,10 @@ router.post("/share/enable", brandAuth, campaignController.enableCampaignShare);
 router.post("/share/disable", brandAuth, campaignController.disableCampaignShare);
 router.get("/public/:token", campaignController.getPublicCampaignByToken);
 
+
+router.post(
+  "/influencer-match-score",
+  campaignController.getInfluencerMatchScore
+);
+
 module.exports = router;

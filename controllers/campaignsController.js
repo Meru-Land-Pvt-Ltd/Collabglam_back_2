@@ -6444,3 +6444,647 @@ exports.uploadImagesToS3 = async (req, res) => {
     });
   }
 };
+
+
+
+exports.getInfluencerMatchScore = async (req, res) => {
+  const requestId = getRequestId(req);
+
+  try {
+    const campaignId = clean(req.body?.campaignId);
+    const influencerId = clean(req.body?.influencerId);
+
+    if (!campaignId) {
+      return failField(
+        res,
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "campaignId",
+        requestId
+      );
+    }
+
+    if (!influencerId) {
+      return failField(
+        res,
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "influencerId",
+        requestId
+      );
+    }
+
+    const campaignOr = [{ campaignsId: campaignId }];
+
+    if (isOid(campaignId)) {
+      campaignOr.push({ _id: toObjectId(campaignId) });
+    }
+
+    const influencerOr = [{ influencerId: String(influencerId) }];
+
+    if (isOid(influencerId)) {
+      influencerOr.push({ _id: toObjectId(influencerId) });
+    }
+
+    const [campaign, influencer] = await Promise.all([
+      Campaign.findOne({ $or: campaignOr }).lean(),
+      Influencer.findOne({ $or: influencerOr }).lean(),
+    ]);
+
+    if (!campaign) {
+      return fail(
+        res,
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Campaign not found",
+        requestId
+      );
+    }
+
+    if (!influencer) {
+      return fail(
+        res,
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Influencer not found",
+        requestId
+      );
+    }
+
+    const normalizeText = (value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/&/g, "and")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const normalizePlatform = (value) => {
+      const text = normalizeText(value);
+
+      if (text.includes("instagram")) return "instagram";
+      if (text.includes("youtube")) return "youtube";
+      if (text.includes("tiktok") || text.includes("tik tok")) return "tiktok";
+
+      return text;
+    };
+
+    const toArray = (value) => {
+      if (Array.isArray(value)) return value;
+      if (value === undefined || value === null || value === "") return [];
+      return [value];
+    };
+
+    const uniq = (arr) =>
+      [...new Set(arr.map((x) => String(x || "").trim()).filter(Boolean))];
+
+    const addText = (target, value) => {
+      const text = String(value || "").trim();
+      if (text) target.push(text);
+    };
+
+    const addId = (target, value) => {
+      const id = String(value || "").trim();
+      if (id) target.push(id);
+    };
+
+    const scoreTextMatch = (campaignTexts = [], influencerTexts = []) => {
+      const cTexts = uniq(campaignTexts.map(normalizeText).filter(Boolean));
+      const iTexts = uniq(influencerTexts.map(normalizeText).filter(Boolean));
+
+      if (!cTexts.length) return null;
+      if (!iTexts.length) return 0;
+
+      const exactMatches = cTexts.filter((c) => iTexts.includes(c));
+      if (exactMatches.length) {
+        return Math.round((exactMatches.length / cTexts.length) * 100);
+      }
+
+      const campaignTokens = new Set(cTexts.join(" ").split(" ").filter(Boolean));
+      const influencerTokens = new Set(iTexts.join(" ").split(" ").filter(Boolean));
+
+      if (!campaignTokens.size || !influencerTokens.size) return 0;
+
+      const matchedTokens = [...campaignTokens].filter((token) =>
+        influencerTokens.has(token)
+      );
+
+      return Math.round((matchedTokens.length / campaignTokens.size) * 70);
+    };
+
+    const scoreIdOrTextMatch = ({
+      campaignIds = [],
+      influencerIds = [],
+      campaignTexts = [],
+      influencerTexts = [],
+    }) => {
+      const cIds = uniq(campaignIds);
+      const iIds = uniq(influencerIds);
+
+      if (!cIds.length && !campaignTexts.length) return null;
+
+      if (cIds.length && iIds.length) {
+        const idMatches = cIds.filter((id) => iIds.includes(id));
+
+        if (idMatches.length) {
+          return Math.round((idMatches.length / cIds.length) * 100);
+        }
+      }
+
+      return scoreTextMatch(campaignTexts, influencerTexts);
+    };
+
+    const getEngagementPercent = (value) => {
+      const n = Number(value);
+
+      if (!Number.isFinite(n)) return null;
+
+      return n <= 1 ? n * 100 : n;
+    };
+
+    const scoreEngagement = (value) => {
+      const engagement = getEngagementPercent(value);
+
+      if (!Number.isFinite(engagement)) return null;
+
+      if (engagement >= 5) return 100;
+      if (engagement >= 3) return 85;
+      if (engagement >= 1.5) return 70;
+      if (engagement >= 1) return 55;
+
+      return 35;
+    };
+
+    const scoreFollowers = ({ followers, minFollowers, maxFollowers }) => {
+      const f = Number(followers || 0);
+      const min = Number(minFollowers || 0);
+      const max = Number(maxFollowers || 0);
+
+      if (!min && !max) return null;
+      if (!Number.isFinite(f) || f <= 0) return 0;
+
+      if (min && f < min) {
+        return Math.max(0, Math.round((f / min) * 100));
+      }
+
+      if (max && f > max) {
+        return Math.max(50, Math.round((max / f) * 100));
+      }
+
+      return 100;
+    };
+
+    const campaignCategoryIds = [];
+    const campaignCategoryNames = [];
+    const campaignSubcategoryIds = [];
+    const campaignSubcategoryNames = [];
+    const campaignSubcategoryTags = [];
+
+    addId(campaignCategoryIds, campaign.categoryId);
+    addText(campaignCategoryNames, campaign.campaignCategory);
+
+    toArray(campaign.categories).forEach((item) => {
+      addId(campaignCategoryIds, item?.categoryId);
+      addText(campaignCategoryNames, item?.categoryName);
+      addId(campaignSubcategoryIds, item?.subcategoryId);
+      addText(campaignSubcategoryNames, item?.subcategoryName);
+    });
+
+    toArray(campaign.subcategoryIds).forEach((id) => {
+      addId(campaignSubcategoryIds, id);
+    });
+
+    if (campaign.categoryId && isOid(String(campaign.categoryId))) {
+      const categoryDoc = await Category.findById(campaign.categoryId)
+        .select("_id name subcategories")
+        .lean();
+
+      if (categoryDoc) {
+        addText(campaignCategoryNames, categoryDoc.name);
+
+        const subMap = new Map(
+          toArray(categoryDoc.subcategories).map((sub) => [
+            String(sub?._id),
+            sub,
+          ])
+        );
+
+        campaignSubcategoryIds.forEach((subId) => {
+          const sub = subMap.get(String(subId));
+
+          if (sub) {
+            addText(campaignSubcategoryNames, sub.name);
+            toArray(sub.tags).forEach((tag) => addText(campaignSubcategoryTags, tag));
+          }
+        });
+      }
+    }
+
+    const page1List = toArray(influencer.page1);
+    const page1Primary =
+      page1List.find((item) => item?.isPrimary) ||
+      page1List[0] ||
+      {};
+
+    const page1Data = page1Primary?.data || {};
+    const page1Profile = page1Data?.profile || {};
+    const providerRaw = page1Data?.providerRaw || {};
+    const providerRawProfileRoot = providerRaw?.profile || {};
+    const providerRawProfile =
+      providerRawProfileRoot?.profile ||
+      providerRaw?.profile ||
+      {};
+
+    const influencerCategoryIds = [];
+    const influencerCategoryNames = [];
+    const influencerSubcategoryIds = [];
+    const influencerSubcategoryNames = [];
+    const influencerInterestNames = [];
+
+    toArray(influencer.categories).forEach((item) => {
+      if (typeof item === "string") {
+        addText(influencerCategoryNames, item);
+        addId(influencerCategoryIds, item);
+        return;
+      }
+
+      addId(influencerCategoryIds, item?.categoryId || item?._id || item?.id);
+      addText(influencerCategoryNames, item?.categoryName || item?.name || item?.title);
+
+      addId(influencerSubcategoryIds, item?.subcategoryId);
+      addText(influencerSubcategoryNames, item?.subcategoryName);
+    });
+
+    toArray(influencer.categoryIds).forEach((id) => {
+      addId(influencerCategoryIds, id);
+    });
+
+    toArray(influencer?.onboarding?.subcategories).forEach((item) => {
+      addId(influencerSubcategoryIds, item?.subcategoryId || item?._id || item?.id);
+      addText(influencerSubcategoryNames, item?.subcategoryName || item?.name || item?.title);
+    });
+
+    if (influencer?.onboarding?.categoryId) {
+      addId(influencerCategoryIds, influencer.onboarding.categoryId);
+    }
+
+    toArray(page1Data.categories).forEach((item) => {
+      addId(influencerCategoryIds, item?.categoryId || item?._id || item?.id);
+      addText(influencerCategoryNames, item?.categoryName || item?.name || item?.title);
+
+      addId(influencerSubcategoryIds, item?.subcategoryId);
+      addText(influencerSubcategoryNames, item?.subcategoryName);
+    });
+
+    toArray(providerRawProfileRoot.interests).forEach((item) => {
+      addText(influencerInterestNames, item?.name || item?.title || item);
+    });
+
+    toArray(page1Data.hashtags).forEach((item) => {
+      addText(influencerInterestNames, item?.name || item?.tag || item?.hashtag || item);
+    });
+
+    const socialProfiles = influencer.socialProfiles;
+
+    if (Array.isArray(socialProfiles)) {
+      socialProfiles.forEach((profile) => {
+        toArray(profile?.categories).forEach((item) => {
+          addId(influencerCategoryIds, item?.categoryId || item?._id || item?.id);
+          addText(influencerCategoryNames, item?.categoryName || item?.name || item?.title);
+
+          addId(influencerSubcategoryIds, item?.subcategoryId);
+          addText(influencerSubcategoryNames, item?.subcategoryName);
+        });
+      });
+    } else if (socialProfiles && typeof socialProfiles === "object") {
+      Object.values(socialProfiles).forEach((profile) => {
+        toArray(profile?.categories).forEach((item) => {
+          addId(influencerCategoryIds, item?.categoryId || item?._id || item?.id);
+          addText(influencerCategoryNames, item?.categoryName || item?.name || item?.title);
+
+          addId(influencerSubcategoryIds, item?.subcategoryId);
+          addText(influencerSubcategoryNames, item?.subcategoryName);
+        });
+      });
+    }
+
+    const categoryScore = scoreIdOrTextMatch({
+      campaignIds: campaignCategoryIds,
+      influencerIds: influencerCategoryIds,
+      campaignTexts: campaignCategoryNames,
+      influencerTexts: [
+        ...influencerCategoryNames,
+        ...influencerInterestNames,
+      ],
+    });
+
+    const subcategoryScore = scoreIdOrTextMatch({
+      campaignIds: campaignSubcategoryIds,
+      influencerIds: influencerSubcategoryIds,
+      campaignTexts: [
+        ...campaignSubcategoryNames,
+        ...campaignSubcategoryTags,
+      ],
+      influencerTexts: [
+        ...influencerSubcategoryNames,
+        ...influencerInterestNames,
+        ...influencerCategoryNames,
+      ],
+    });
+
+    const campaignPlatforms = uniq(
+      toArray(campaign.platformSelection).map(normalizePlatform).filter(Boolean)
+    );
+
+    const influencerPlatforms = uniq(
+      [
+        page1Primary?.platform,
+        page1Data?.provider,
+        page1Data?.platform,
+        influencer.primaryPlatform,
+        influencer.primaryProvider,
+        ...(Array.isArray(socialProfiles)
+          ? socialProfiles.map((item) => item?.provider || item?.platform)
+          : socialProfiles && typeof socialProfiles === "object"
+            ? Object.values(socialProfiles).map((item) => item?.provider || item?.platform)
+            : []),
+      ]
+        .map(normalizePlatform)
+        .filter(Boolean)
+    );
+
+    const platformScore =
+      campaignPlatforms.length > 0
+        ? influencerPlatforms.length > 0
+          ? Math.round(
+              (campaignPlatforms.filter((item) => influencerPlatforms.includes(item)).length /
+                campaignPlatforms.length) *
+                100
+            )
+          : 0
+        : null;
+
+    const campaignCountryIds = uniq(
+      toArray(campaign.targetCountryIds).map((id) => String(id || "").trim())
+    );
+
+    const campaignCountryDocs = campaignCountryIds.length
+      ? await Country.find({
+          _id: {
+            $in: campaignCountryIds
+              .filter((id) => isOid(id))
+              .map((id) => toObjectId(id)),
+          },
+        })
+          .select("_id countryNameEn countryNameLocal countryName name countryCode")
+          .lean()
+      : [];
+
+    const campaignCountries = uniq(
+      campaignCountryDocs.flatMap((country) => [
+        country.countryNameEn,
+        country.countryNameLocal,
+        country.countryName,
+        country.name,
+        country.countryCode,
+      ])
+    );
+
+    const influencerCountries = uniq([
+      influencer.countryName,
+      influencer.country?.name,
+      influencer.country?.countryName,
+      influencer.country?.countryNameEn,
+      influencer.country?.countryCode,
+      page1Data.country,
+      providerRawProfileRoot.country,
+      providerRawProfile.country,
+    ]);
+
+    const countryScore =
+      campaignCountryIds.length || campaignCountries.length
+        ? scoreTextMatch(campaignCountries, influencerCountries)
+        : null;
+
+    const campaignLanguageIds = uniq(
+      toArray(campaign.contentLanguageIds).map((id) => String(id || "").trim())
+    );
+
+    const campaignLanguageDocs = campaignLanguageIds.length
+      ? await ContentLanguage.find({
+          _id: {
+            $in: campaignLanguageIds
+              .filter((id) => isOid(id))
+              .map((id) => toObjectId(id)),
+          },
+        })
+          .select("_id code name")
+          .lean()
+      : [];
+
+    const campaignLanguages = uniq(
+      campaignLanguageDocs.flatMap((lang) => [lang.name, lang.code])
+    );
+
+    const influencerLanguages = uniq([
+      page1Data.language?.name,
+      page1Data.language,
+      providerRawProfileRoot.language?.name,
+      providerRawProfileRoot.language,
+      ...(Array.isArray(influencer.languages)
+        ? influencer.languages.map((item) => item?.name || item?.code || item)
+        : []),
+      ...toArray(influencer.languageIds),
+    ]);
+
+    const languageScore =
+      campaignLanguageIds.length || campaignLanguages.length
+        ? scoreTextMatch(campaignLanguages, influencerLanguages)
+        : null;
+
+    const followers =
+      Number(page1Profile.followers) ||
+      Number(providerRawProfile.followers) ||
+      Number(page1Data?.stats?.followers?.value) ||
+      Number(influencer.followerCount) ||
+      Number(influencer.audienceSize) ||
+      0;
+
+    const followerScore = scoreFollowers({
+      followers,
+      minFollowers: campaign.minFollowers,
+      maxFollowers: campaign.maxFollowers,
+    });
+
+    const engagementRate =
+      page1Profile.engagementRate ??
+      providerRawProfile.engagementRate ??
+      page1Data?.statsByContentType?.all?.engagementRate ??
+      page1Data?.statsByContentType?.reels?.engagementRate ??
+      influencer.engagementRate;
+
+    const engagementScore = scoreEngagement(engagementRate);
+
+    const criteria = [
+      {
+        key: "category",
+        label: "Category Match",
+        weight: 25,
+        score: categoryScore,
+        campaignValues: uniq(campaignCategoryNames),
+        influencerValues: uniq([...influencerCategoryNames, ...influencerInterestNames]),
+      },
+      {
+        key: "subcategory",
+        label: "Subcategory Match",
+        weight: 25,
+        score: subcategoryScore,
+        campaignValues: uniq([...campaignSubcategoryNames, ...campaignSubcategoryTags]),
+        influencerValues: uniq([...influencerSubcategoryNames, ...influencerInterestNames]),
+      },
+      {
+        key: "platform",
+        label: "Platform Match",
+        weight: 15,
+        score: platformScore,
+        campaignValues: campaignPlatforms,
+        influencerValues: influencerPlatforms,
+      },
+      {
+        key: "country",
+        label: "Country Match",
+        weight: 10,
+        score: countryScore,
+        campaignValues: campaignCountries,
+        influencerValues: influencerCountries,
+      },
+      {
+        key: "language",
+        label: "Language Match",
+        weight: 10,
+        score: languageScore,
+        campaignValues: campaignLanguages,
+        influencerValues: influencerLanguages,
+      },
+      {
+        key: "followers",
+        label: "Follower Range Match",
+        weight: 10,
+        score: followerScore,
+        campaignValues: [
+          campaign.minFollowers ? `Min ${campaign.minFollowers}` : "",
+          campaign.maxFollowers ? `Max ${campaign.maxFollowers}` : "",
+        ].filter(Boolean),
+        influencerValues: followers ? [`${followers}`] : [],
+      },
+      {
+        key: "engagement",
+        label: "Engagement Quality",
+        weight: 5,
+        score: engagementScore,
+        campaignValues: ["Profile quality"],
+        influencerValues: [
+          Number.isFinite(getEngagementPercent(engagementRate))
+            ? `${getEngagementPercent(engagementRate).toFixed(2)}%`
+            : "",
+        ].filter(Boolean),
+      },
+    ];
+
+    const usedCriteria = criteria.filter((item) => item.score !== null);
+
+    const totalWeight = usedCriteria.reduce(
+      (sum, item) => sum + Number(item.weight || 0),
+      0
+    );
+
+    const weightedScore = usedCriteria.reduce(
+      (sum, item) => sum + Number(item.score || 0) * Number(item.weight || 0),
+      0
+    );
+
+    const finalScore =
+      totalWeight > 0 ? Math.round(weightedScore / totalWeight) : 0;
+
+    const label =
+      finalScore >= 80
+        ? "High"
+        : finalScore >= 60
+          ? "Good"
+          : finalScore >= 40
+            ? "Average"
+            : "Low";
+
+    const breakdown = usedCriteria.reduce((acc, item) => {
+      acc[item.key] = {
+        label: item.label,
+        weight: item.weight,
+        score: item.score,
+        weightedScore: Math.round((item.score * item.weight) / 100),
+        campaignValues: item.campaignValues,
+        influencerValues: item.influencerValues,
+      };
+
+      return acc;
+    }, {});
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        matchScore: finalScore,
+        matchPercent: `${finalScore}%`,
+        label,
+        breakdown,
+        criteria: usedCriteria,
+        matched: {
+          category:
+            categoryScore > 0
+              ? uniq(campaignCategoryNames).filter((item) =>
+                  scoreTextMatch([item], [...influencerCategoryNames, ...influencerInterestNames])
+                )
+              : [],
+          subcategory:
+            subcategoryScore > 0
+              ? uniq(campaignSubcategoryNames).filter((item) =>
+                  scoreTextMatch([item], [...influencerSubcategoryNames, ...influencerInterestNames])
+                )
+              : [],
+          platform: campaignPlatforms.filter((item) =>
+            influencerPlatforms.includes(item)
+          ),
+        },
+        source: {
+          campaign: {
+            id: String(campaign._id),
+            campaignTitle: campaign.campaignTitle,
+            categoryId: campaign.categoryId ? String(campaign.categoryId) : "",
+            subcategoryIds: campaignSubcategoryIds,
+            categoryNames: uniq(campaignCategoryNames),
+            subcategoryNames: uniq(campaignSubcategoryNames),
+            platforms: campaignPlatforms,
+          },
+          influencer: {
+            id: String(influencer._id),
+            influencerId: String(influencer.influencerId || influencer._id),
+            name: influencer.name || page1Profile.fullname || "",
+            handle: page1Primary.handle || page1Profile.username || "",
+            categoryNames: uniq(influencerCategoryNames),
+            subcategoryNames: uniq(influencerSubcategoryNames),
+            interests: uniq(influencerInterestNames),
+            platforms: influencerPlatforms,
+            followers,
+            engagementRate: Number.isFinite(getEngagementPercent(engagementRate))
+              ? `${getEngagementPercent(engagementRate).toFixed(2)}%`
+              : "N/A",
+          },
+        },
+      },
+      requestId
+    );
+  } catch (err) {
+    console.error("[getInfluencerMatchScore] Error:", err);
+    return sendControllerError(res, requestId, err);
+  }
+};
