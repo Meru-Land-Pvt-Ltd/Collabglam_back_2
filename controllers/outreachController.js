@@ -14,6 +14,7 @@ const { ensureRole } = require("../utils/outreachGuards");
 const OutreachTemplate = require("../models/OutreachTemplate");
 const OutreachSubsequence = require("../models/OutreachSubsequence");
 const instantlyService = require("../services/instantlyService");
+const { createAndEmit } = require("../utils/notifier");
 
 const SDR_ROLE = ROLES?.SDR || "sdr";
 const RH_ROLE = ROLES?.REVENUE_HEAD || "revenue_head";
@@ -25,6 +26,45 @@ function readExternalId(value) {
 
 function uniqueIds(values = []) {
   return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+
+function getActorPayloadFromReq(req = {}) {
+  const admin = req?.admin || req?.user || {};
+  const actorAdminId = String(admin.adminId || admin._id || "").trim();
+
+  return {
+    actorAdminId: actorAdminId || null,
+    actorName: String(admin.name || "").trim(),
+    actorEmail: String(admin.email || "").trim().toLowerCase(),
+    actorRole: String(admin.role || "").trim().toLowerCase(),
+  };
+}
+
+async function notifySafely(context, req, payload) {
+  try {
+    return await createAndEmit({
+      ...getActorPayloadFromReq(req),
+      ...(payload || {}),
+    });
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
+  }
+}
+
+function getOutreachCampaignAdminPath(campaignId = "") {
+  const id = String(campaignId || "").trim();
+  return id ? `/admin/crm/campaigns/${encodeURIComponent(id)}` : "/admin/crm/campaigns";
+}
+
+function getOutreachCampaignNotificationRecipients(campaign = {}) {
+  return uniqueIds([
+    campaign?.createdByAdminId,
+    campaign?.sdrId?._id || campaign?.sdrId,
+    campaign?.RHId?._id || campaign?.RHId,
+    campaign?.IMEId?._id || campaign?.IMEId,
+  ]);
 }
 
 function normalizeEmail(value) {
@@ -1379,6 +1419,18 @@ exports.createOutreachCampaign = async (req, res) => {
       .populate("RHId", "name email role")
       .populate("IMEId", "name email role");
 
+    await notifySafely("createOutreachCampaign", req, {
+      adminIds: getOutreachCampaignNotificationRecipients(populated || campaign),
+      type: "outreach.campaign_created",
+      title: "Outreach campaign created",
+      message: `${populated?.name || campaign?.name || "Outreach campaign"} was created.`,
+      entityType: "outreach_campaign",
+      entityId: String(campaign._id),
+      actionPath: {
+        admin: getOutreachCampaignAdminPath(campaign._id),
+      },
+    });
+
     return res.status(201).json({
       success: true,
       message: "Campaign created successfully",
@@ -1493,6 +1545,18 @@ exports.updateOutreachCampaign = async (req, res) => {
     campaign.name = nextName;
     await campaign.save();
 
+    await notifySafely("updateOutreachCampaign", req, {
+      adminIds: getOutreachCampaignNotificationRecipients(campaign),
+      type: "outreach.campaign_updated",
+      title: "Outreach campaign updated",
+      message: `${campaign.name || "Outreach campaign"} was updated.`,
+      entityType: "outreach_campaign",
+      entityId: String(campaign._id),
+      actionPath: {
+        admin: getOutreachCampaignAdminPath(campaign._id),
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Campaign updated successfully",
@@ -1528,7 +1592,21 @@ exports.deleteOutreachCampaign = async (req, res) => {
       }
     }
 
+    const campaignNotificationRecipients = getOutreachCampaignNotificationRecipients(campaign);
+
     await campaign.deleteOne();
+
+    await notifySafely("deleteOutreachCampaign", req, {
+      adminIds: campaignNotificationRecipients,
+      type: "outreach.campaign_deleted",
+      title: "Outreach campaign deleted",
+      message: `${campaign.name || "Outreach campaign"} was deleted.`,
+      entityType: "outreach_campaign",
+      entityId: String(campaign._id),
+      actionPath: {
+        admin: "/admin/crm/campaigns",
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -3251,6 +3329,18 @@ exports.launchOutreachCampaign = async (req, res) => {
       }
     );
 
+    await notifySafely("launchOutreachCampaign", req, {
+      adminIds: getOutreachCampaignNotificationRecipients(campaign),
+      type: "outreach.campaign_launched",
+      title: "Outreach campaign launched",
+      message: `${campaign.name || "Outreach campaign"} was launched.`,
+      entityType: "outreach_campaign",
+      entityId: String(campaign._id),
+      actionPath: {
+        admin: getOutreachCampaignAdminPath(campaign._id),
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Campaign launched successfully",
@@ -3316,6 +3406,18 @@ exports.pauseOutreachCampaign = async (req, res) => {
     campaign.status = OUTREACH_CAMPAIGN_STATUS.PAUSED;
     campaign.pausedAt = new Date();
     await campaign.save();
+
+    await notifySafely("pauseOutreachCampaign", req, {
+      adminIds: getOutreachCampaignNotificationRecipients(campaign),
+      type: "outreach.campaign_paused",
+      title: "Outreach campaign paused",
+      message: `${campaign.name || "Outreach campaign"} was paused.`,
+      entityType: "outreach_campaign",
+      entityId: String(campaign._id),
+      actionPath: {
+        admin: getOutreachCampaignAdminPath(campaign._id),
+      },
+    });
 
     return res.status(200).json({
       success: true,

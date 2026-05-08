@@ -34,9 +34,28 @@ const CampaignAssigned = require("../models/CampaignAssigned");
 
 const { createAndEmit } = require("../utils/notifier");
 
-async function notifySafely(context, payload) {
+function getActorPayloadFromReq(req = {}) {
+  const admin = req?.admin || req?.user || {};
+  const actorAdminId = String(admin.adminId || admin._id || "").trim();
+
+  return {
+    actorAdminId: actorAdminId || null,
+    actorName: String(admin.name || "").trim(),
+    actorEmail: String(admin.email || "").trim().toLowerCase(),
+    actorRole: String(admin.role || "").trim().toLowerCase(),
+  };
+}
+
+async function notifySafely(context, reqOrPayload, maybePayload) {
+  const hasReq = maybePayload !== undefined;
+  const req = hasReq ? reqOrPayload : null;
+  const payload = hasReq ? maybePayload : reqOrPayload;
+
   try {
-    return await createAndEmit(payload);
+    return await createAndEmit({
+      ...getActorPayloadFromReq(req),
+      ...(payload || {}),
+    });
   } catch (error) {
     console.warn(`${context} notification failed:`, error?.message || error);
     return null;
@@ -668,7 +687,7 @@ exports.inviteAdmin = async (req, res) => {
       text: tpl.text,
     });
 
-    await notifySafely("inviteAdmin", {
+    await notifySafely("inviteAdmin", req, {
       adminId: String(admin._id),
       type: "admin.invited",
       title: "Admin invite sent",
@@ -841,7 +860,7 @@ exports.acceptInviteSetPassword = async (req, res) => {
 
     await admin.save();
 
-    await notifySafely("acceptInviteSetPassword", {
+    await notifySafely("acceptInviteSetPassword", req, {
       adminId: String(admin._id),
       type: "admin.activated",
       title: "Admin account activated",
@@ -975,7 +994,7 @@ exports.updateStatus = async (req, res) => {
 
     await admin.save();
 
-    await notifySafely("updateStatus", {
+    await notifySafely("updateStatus", req, {
       adminId: String(admin._id),
       type: "admin.status_updated",
       title: "Admin account updated",
@@ -1355,7 +1374,7 @@ exports.assignCampaignIme = async (req, res) => {
       }
     ).exec();
 
-    await notifySafely("assignCampaignIme", {
+    await notifySafely("assignCampaignIme", req, {
       brandId: String(campaign.brandId),
       adminIds: await getCampaignAdminNotificationRecipients({
         campaignId: campaign._id,
@@ -1368,7 +1387,7 @@ exports.assignCampaignIme = async (req, res) => {
       entityId: String(campaign._id),
       actionPath: {
         brand: `/brand/campaigns/${campaign._id}`,
-        admin: `/admin/campaigns/${campaign._id}`,
+        admin: `/admin/campaigns/view?id=${campaign._id}`,
       },
     });
 
@@ -1469,7 +1488,7 @@ exports.assignBrand = async (req, res) => {
         }
       ).exec();
 
-      await notifySafely("assignBrand", {
+      await notifySafely("assignBrand", req, {
         brandId: String(normalizedBrandId),
         adminIds: await getBrandAdminNotificationRecipients(normalizedBrandId),
         type: "brand.assignment_updated",
@@ -1479,7 +1498,7 @@ exports.assignBrand = async (req, res) => {
         entityId: String(normalizedBrandId),
         actionPath: {
           brand: "/brand/notifications",
-          admin: `/admin/brands/${normalizedBrandId}`,
+          admin: `/admin/brands/view?brandId=${normalizedBrandId}`,
         },
       });
 
@@ -1538,7 +1557,7 @@ exports.assignBrand = async (req, res) => {
       }
     ).exec();
 
-    await notifySafely("assignBrand", {
+    await notifySafely("assignBrand", req, {
       brandId: String(normalizedBrandId),
       adminIds: await getBrandAdminNotificationRecipients(normalizedBrandId),
       type: "brand.bme_assigned",
@@ -1548,7 +1567,7 @@ exports.assignBrand = async (req, res) => {
       entityId: String(normalizedBrandId),
       actionPath: {
         brand: "/brand/notifications",
-        admin: `/admin/brands/${normalizedBrandId}`,
+        admin: `/admin/brands/view?brandId=${normalizedBrandId}`,
       },
     });
 
@@ -1629,7 +1648,7 @@ exports.updateBrandAssignment = async (req, res) => {
 
     await assignment.save();
 
-    await notifySafely("updateBrandAssignment", {
+    await notifySafely("updateBrandAssignment", req, {
       brandId: String(assignment.brandId),
       adminIds: await getBrandAdminNotificationRecipients(assignment.brandId),
       type: "brand.assignment_updated",
@@ -1639,7 +1658,7 @@ exports.updateBrandAssignment = async (req, res) => {
       entityId: String(assignment.brandId),
       actionPath: {
         brand: "/brand/notifications",
-        admin: `/admin/brands/${assignment.brandId}`,
+        admin: `/admin/brands/view?brandId=${assignment.brandId}`,
       },
     });
 
@@ -1725,7 +1744,7 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
 
     await assignment.save();
 
-    await notifySafely("updateBrandAssignmentStatusAndRH", {
+    await notifySafely("updateBrandAssignmentStatusAndRH", req, {
       brandId: String(assignment.brandId),
       adminIds: await getBrandAdminNotificationRecipients(assignment.brandId),
       type: "brand.assignment_updated",
@@ -1735,7 +1754,7 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
       entityId: String(assignment.brandId),
       actionPath: {
         brand: "/brand/notifications",
-        admin: `/admin/brands/${assignment.brandId}`,
+        admin: `/admin/brands/view?brandId=${assignment.brandId}`,
       },
     });
 

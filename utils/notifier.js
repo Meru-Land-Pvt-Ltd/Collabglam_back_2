@@ -1,5 +1,7 @@
 // utils/notifier.js
+const { v4: uuidv4 } = require("uuid");
 const Notification = require("../models/notification");
+const { AdminModel } = require("../models/master");
 
 let sockets = {};
 
@@ -46,76 +48,39 @@ function resolveActionPath(actionPath, kind) {
   return null;
 }
 
-function buildBaseNotificationPayload({
-  type,
-  title,
-  message = "",
-  entityType = null,
-  entityId = null,
+async function resolveActorMeta({
+  actorAdminId = null,
+  actorName = "",
+  actorEmail = "",
+  actorRole = "",
 }) {
-  return {
-    type: toCleanString(type),
-    title: toCleanString(title),
-    message: String(message || ""),
-    entityType: normalizeNullableString(entityType),
-    entityId: normalizeNullableString(entityId),
-    isRead: false,
+  const id = toCleanString(actorAdminId);
+
+  const fallback = {
+    actorAdminId: id || null,
+    actorName: toCleanString(actorName),
+    actorEmail: toCleanString(actorEmail).toLowerCase(),
+    actorRole: toCleanString(actorRole).toLowerCase(),
   };
-}
 
-function buildNotificationDocs({
-  brandIds = [],
-  influencerIds = [],
-  adminIds = [],
+  if (!id) return fallback;
 
-  type,
-  title,
-  message = "",
-  entityType = null,
-  entityId = null,
-  actionPath = null,
-}) {
-  const basePayload = buildBaseNotificationPayload({
-    type,
-    title,
-    message,
-    entityType,
-    entityId,
-  });
+  try {
+    const admin = await AdminModel.findById(id)
+      .select("_id name email role")
+      .lean();
 
-  const docs = [];
+    if (!admin) return fallback;
 
-  for (const id of brandIds) {
-    docs.push({
-      ...basePayload,
-      brandId: String(id),
-      influencerId: null,
-      adminId: null,
-      actionPath: resolveActionPath(actionPath, "brand"),
-    });
+    return {
+      actorAdminId: String(admin._id),
+      actorName: admin.name || fallback.actorName || admin.email || "",
+      actorEmail: admin.email || fallback.actorEmail || "",
+      actorRole: admin.role || fallback.actorRole || "",
+    };
+  } catch (error) {
+    return fallback;
   }
-
-  for (const id of influencerIds) {
-    docs.push({
-      ...basePayload,
-      brandId: null,
-      influencerId: String(id),
-      adminId: null,
-      actionPath: resolveActionPath(actionPath, "influencer"),
-    });
-  }
-
-  for (const id of adminIds) {
-    docs.push({
-      ...basePayload,
-      brandId: null,
-      influencerId: null,
-      adminId: String(id),
-      actionPath: resolveActionPath(actionPath, "admin"),
-    });
-  }
-
-  return docs;
 }
 
 function emitNotification(doc) {
@@ -128,11 +93,7 @@ function emitNotification(doc) {
     }
 
     if (payload.influencerId && typeof sockets.emitToInfluencer === "function") {
-      sockets.emitToInfluencer(
-        String(payload.influencerId),
-        "notification.new",
-        payload
-      );
+      sockets.emitToInfluencer(String(payload.influencerId), "notification.new", payload);
     }
 
     if (payload.adminId) {
@@ -167,6 +128,11 @@ async function createAndEmit({
   entityType = null,
   entityId = null,
   actionPath = null,
+
+  actorAdminId = null,
+  actorName = "",
+  actorEmail = "",
+  actorRole = "",
 }) {
   const cleanType = toCleanString(type);
   const cleanTitle = toCleanString(title);
@@ -189,22 +155,55 @@ async function createAndEmit({
     );
   }
 
-  const docsToInsert = buildNotificationDocs({
-    brandIds: uniqueBrandIds,
-    influencerIds: uniqueInfluencerIds,
-    adminIds: uniqueAdminIds,
-
-    type: cleanType,
-    title: cleanTitle,
-    message,
-    entityType,
-    entityId,
-    actionPath,
+  const actorMeta = await resolveActorMeta({
+    actorAdminId,
+    actorName,
+    actorEmail,
+    actorRole,
   });
 
-  if (!docsToInsert.length) {
-    throw new Error("createAndEmit: no notification documents created");
-  }
+  // One createAndEmit call = one activity. Every recipient row shares this ID.
+  const sharedNotificationId = uuidv4();
+
+  const basePayload = {
+    notificationId: sharedNotificationId,
+    type: cleanType,
+    title: cleanTitle,
+    message: String(message || ""),
+    entityType: normalizeNullableString(entityType),
+    entityId: normalizeNullableString(entityId),
+    isRead: false,
+    actorAdminId: actorMeta.actorAdminId,
+    actorName: actorMeta.actorName,
+    actorEmail: actorMeta.actorEmail,
+    actorRole: actorMeta.actorRole,
+  };
+
+  const docsToInsert = [
+    ...uniqueBrandIds.map((id) => ({
+      ...basePayload,
+      brandId: String(id),
+      influencerId: null,
+      adminId: null,
+      actionPath: resolveActionPath(actionPath, "brand"),
+    })),
+
+    ...uniqueInfluencerIds.map((id) => ({
+      ...basePayload,
+      brandId: null,
+      influencerId: String(id),
+      adminId: null,
+      actionPath: resolveActionPath(actionPath, "influencer"),
+    })),
+
+    ...uniqueAdminIds.map((id) => ({
+      ...basePayload,
+      brandId: null,
+      influencerId: null,
+      adminId: String(id),
+      actionPath: resolveActionPath(actionPath, "admin"),
+    })),
+  ];
 
   const created = await Notification.insertMany(docsToInsert, {
     ordered: true,

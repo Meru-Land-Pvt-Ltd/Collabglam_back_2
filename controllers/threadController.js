@@ -1,3 +1,4 @@
+const { createAndEmit } = require("../utils/notifier");
 const ProspectBrand = require("../models/prospectBrand");
 const OutreachCampaign = require("../models/outreachCampaign");
 const {
@@ -15,6 +16,45 @@ const {
   getMailboxDisplayName,
   nameFromEmail,
 } = require("../utils/mailboxDisplayName");
+
+
+function uniqueNotificationIds(values = []) {
+  return [
+    ...new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function buildCrmRepliesAdminPath() {
+  return "/admin/crm/replies";
+}
+
+function getActorPayloadFromReq(req = {}) {
+  const admin = req?.admin || req?.user || {};
+  const actorAdminId = String(admin.adminId || admin._id || "").trim();
+
+  return {
+    actorAdminId: actorAdminId || null,
+    actorName: String(admin.name || "").trim(),
+    actorEmail: String(admin.email || "").trim().toLowerCase(),
+    actorRole: String(admin.role || "").trim().toLowerCase(),
+  };
+}
+
+async function notifySafely(context, req, payload) {
+  try {
+    return await createAndEmit({
+      ...getActorPayloadFromReq(req),
+      ...(payload || {}),
+    });
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
+  }
+}
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
@@ -935,6 +975,27 @@ exports.replyToThread = async (req, res) => {
     };
 
     await thread.save();
+
+    const notifyAdminIds = uniqueNotificationIds([thread.ownerId]).filter(
+      (id) => id !== String(req.admin.adminId || "")
+    );
+
+    if (notifyAdminIds.length) {
+      await notifySafely("replyToThread", req, {
+        adminIds: notifyAdminIds,
+        type: "outreach.reply_sent",
+        title: "Reply sent in conversation",
+        message: `${getMailboxNameFromThread(thread)} replied to ${brandDisplayName}.`,
+        entityType: "outreach_thread",
+        entityId: String(thread._id),
+        actionPath: {
+          admin: buildCrmRepliesAdminPath({
+            threadId: thread._id,
+            prospectId: thread.prospectId?._id || thread.prospectId,
+          }),
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,

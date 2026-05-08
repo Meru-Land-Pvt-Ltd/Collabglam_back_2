@@ -945,6 +945,7 @@ exports.brandRevokeDispute = async (req, res) => {
         entityType: "dispute",
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           influencer: `/influencer/disputes/${dispute.disputeId}`,
         },
       });
@@ -1177,6 +1178,7 @@ exports.brandEditDispute = async (req, res) => {
         entityType: 'dispute',
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           influencer: `/influencer/disputes/${dispute.disputeId}`,
         },
       });
@@ -1326,7 +1328,7 @@ exports.brandCreateDispute = async (req, res) => {
         message: `${brand?.name || "A brand"} raised a dispute: "${dispute.subject}".`,
         entityType: "dispute",
         entityId: dispute.disputeId,
-        actionPath: { influencer: `/influencer/disputes/${dispute.disputeId}` },
+        actionPath: { admin: `/admin/disputes/${dispute.disputeId}`, influencer: `/influencer/disputes/${dispute.disputeId}` },
       });
     } catch (e) {
       console.warn("In-app notify failed (brandCreateDispute):", e.message);
@@ -1583,7 +1585,7 @@ exports.brandAddComment = async (req, res) => {
         message: `${brand?.name || "Brand"}: ${snippet}${String(text).trim().length > 120 ? "..." : ""}`,
         entityType: "dispute",
         entityId: d.disputeId,
-        actionPath: { influencer: `/influencer/disputes/${d.disputeId}` },
+        actionPath: { admin: `/admin/disputes/${d.disputeId}`, influencer: `/influencer/disputes/${d.disputeId}` },
       });
     } catch (e) {
       console.warn("In-app notify failed (brandAddComment):", e.message);
@@ -1692,6 +1694,7 @@ exports.brandEditComment = async (req, res) => {
         entityType: 'dispute',
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           influencer: `/influencer/disputes/${dispute.disputeId}`,
         },
       });
@@ -1779,6 +1782,7 @@ exports.brandDeleteComment = async (req, res) => {
         entityType: 'dispute',
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           influencer: `/influencer/disputes/${dispute.disputeId}`,
         },
       });
@@ -1866,6 +1870,7 @@ exports.influencerRevokeDispute = async (req, res) => {
         entityType: 'dispute',
         entityId: d.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${d.disputeId}`,
           brand: `/brand/disputes/${d.disputeId}`,
         },
       });
@@ -1956,7 +1961,7 @@ exports.influencerCreateDispute = async (req, res) => {
         message: `${influencer?.name || 'An influencer'} raised a dispute: "${dispute.subject}".`,
         entityType: 'dispute',
         entityId: dispute.disputeId,
-        actionPath: { brand: `/brand/disputes/${dispute.disputeId}` },
+        actionPath: { admin: `/admin/disputes/${dispute.disputeId}`, brand: `/brand/disputes/${dispute.disputeId}` },
       });
     } catch (e) {
       console.warn('In-app notify failed (influencerCreateDispute):', e.message);
@@ -2200,7 +2205,7 @@ exports.influencerAddComment = async (req, res) => {
         message: `${influencer?.name || "Influencer"}: ${snippet}${String(text).trim().length > 120 ? "..." : ""}`,
         entityType: "dispute",
         entityId: d.disputeId,
-        actionPath: { brand: `/brand/disputes/${d.disputeId}` },
+        actionPath: { admin: `/admin/disputes/${d.disputeId}`, brand: `/brand/disputes/${d.disputeId}` },
       });
     } catch (e) {
       console.warn("In-app notify failed (influencerAddComment):", e.message);
@@ -2287,6 +2292,7 @@ exports.influencerRevokeDispute = async (req, res) => {
         entityType: "dispute",
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           brand: `/brand/disputes/${dispute.disputeId}`,
         },
       });
@@ -2487,6 +2493,7 @@ exports.influencerEditDispute = async (req, res) => {
         entityType: "dispute",
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           brand: `/brand/disputes/${dispute.disputeId}`,
         },
       });
@@ -2649,6 +2656,7 @@ exports.adminCreateDisputeEvidence = async (req, res) => {
         entityType: "dispute",
         entityId: dispute.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${dispute.disputeId}`,
           brand: `/brand/disputes/${dispute.disputeId}`,
           influencer: `/influencer/disputes/${dispute.disputeId}`,
         },
@@ -2752,6 +2760,7 @@ exports.adminAddComment = async (req, res) => {
         entityType: "dispute",
         entityId: d.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${d.disputeId}`,
           brand: `/brand/disputes/${d.disputeId}`,
           influencer: `/influencer/disputes/${d.disputeId}`,
         },
@@ -2931,6 +2940,7 @@ exports.adminUpdateStatus = async (req, res) => {
         entityType: "dispute",
         entityId: d.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${d.disputeId}`,
           brand: `/brand/disputes/${d.disputeId}`,
           influencer: `/influencer/disputes/${d.disputeId}`,
         },
@@ -3058,6 +3068,7 @@ exports.adminAssign = async (req, res) => {
         entityType: 'dispute',
         entityId: d.disputeId,
         actionPath: {
+          admin: `/admin/disputes/${d.disputeId}`,
           brand: `/brand/disputes/${d.disputeId}`,
           influencer: `/influencer/disputes/${d.disputeId}`,
         },

@@ -3,6 +3,32 @@ const OutreachCampaign = require("../models/outreachCampaign");
 const instantlyService = require("../services/instantlyService");
 const { OWNER_ROLE } = require("../constants/outreach");
 const { ensureRole } = require("../utils/outreachGuards");
+const { createAndEmit } = require("../utils/notifier");
+
+
+function getActorPayloadFromReq(req = {}) {
+  const admin = req?.admin || req?.user || {};
+  const actorAdminId = String(admin.adminId || admin._id || "").trim();
+
+  return {
+    actorAdminId: actorAdminId || null,
+    actorName: String(admin.name || "").trim(),
+    actorEmail: String(admin.email || "").trim().toLowerCase(),
+    actorRole: String(admin.role || "").trim().toLowerCase(),
+  };
+}
+
+async function notifySafely(context, req, payload) {
+  try {
+    return await createAndEmit({
+      ...getActorPayloadFromReq(req),
+      ...(payload || {}),
+    });
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
+  }
+}
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -573,6 +599,18 @@ exports.assignMailbox = async (req, res) => {
 
     await ensureFallbackPrimary(adminId, role);
 
+    await notifySafely("assignMailbox", req, {
+      adminId,
+      type: "outreach.mailbox_assigned",
+      title: "Mailbox assigned",
+      message: `${email} was assigned to your ${role.replace(/_/g, " ")} mailbox list.`,
+      entityType: "outreach_mailbox",
+      entityId: String(doc._id),
+      actionPath: {
+        admin: "/admin/crm/my-accounts",
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Mailbox assigned successfully",
@@ -615,6 +653,18 @@ exports.unassignMailbox = async (req, res) => {
     }
 
     await ensureFallbackPrimary(row.adminId, row.role);
+
+    await notifySafely("unassignMailbox", req, {
+      adminId: String(row.adminId),
+      type: "outreach.mailbox_unassigned",
+      title: "Mailbox unassigned",
+      message: `${row.email} was unassigned from your ${row.role.replace(/_/g, " ")} mailbox list.`,
+      entityType: "outreach_mailbox",
+      entityId: String(row._id),
+      actionPath: {
+        admin: "/admin/crm/my-accounts",
+      },
+    });
 
     return res.status(200).json({
       success: true,
