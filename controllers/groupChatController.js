@@ -8,6 +8,7 @@ const mime = require("mime-types");
 const { uploadToGridFS, deleteGridFsFiles } = require("../utils/gridfs");
 const GroupChat = require("../models/groupChat");
 const { AdminModel, ROLES } = require("../models/master");
+const { createAndEmit } = require("../utils/notifier");
 
 const GRIDFS_BUCKET = process.env.GRIDFS_BUCKET || "uploads";
 
@@ -113,6 +114,122 @@ function emitToAdmins(app, participants, event, payload) {
 
   for (const p of participants || []) {
     emitToAdmin(String(p.adminId), event, payload);
+  }
+}
+
+function toCleanString(value) {
+  return String(value || "").trim();
+}
+
+function uniqueCleanStrings(values = []) {
+  return [
+    ...new Set(
+      values
+        .map((value) => toCleanString(value))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function roleLabel(role = "") {
+  const value = toCleanString(role).toLowerCase();
+
+  if (value === ROLES.SUPER_ADMIN) return "Super Admin";
+  if (value === ROLES.REVENUE_HEAD) return "RH";
+  if (value === ROLES.BME) return "BME";
+  if (value === ROLES.IME) return "IME";
+  if (value === ROLES.SDR) return "SDR";
+
+  return value ? value.replace(/_/g, " ").toUpperCase() : "Admin";
+}
+
+function adminDisplayName(admin = {}) {
+  return (
+    toCleanString(admin.name) ||
+    toCleanString(admin.email) ||
+    toCleanString(admin._id) ||
+    toCleanString(admin.adminId) ||
+    "Admin"
+  );
+}
+
+function participantDisplayName(participant = {}) {
+  return (
+    toCleanString(participant.name) ||
+    toCleanString(participant.email) ||
+    toCleanString(participant.adminId) ||
+    "Admin"
+  );
+}
+
+function getGroupAdminActionPath(groupId) {
+  const id = toCleanString(groupId);
+  return id ? `/admin/team-discussions/${encodeURIComponent(id)}` : "/admin/team-discussions";
+}
+
+function getParticipantAdminIds(participants = [], excludeIds = []) {
+  const excluded = new Set(excludeIds.map((id) => toCleanString(id)).filter(Boolean));
+
+  return uniqueCleanStrings(
+    (participants || [])
+      .map((participant) => participant?.adminId)
+      .filter((adminId) => !excluded.has(toCleanString(adminId)))
+  );
+}
+
+async function findAdminForNotification(adminId) {
+  const id = toCleanString(adminId);
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+  return AdminModel.findById(id)
+    .select("_id name email role")
+    .lean();
+}
+
+async function notifyGroupAdminsSafely(context, {
+  group,
+  actorId,
+  adminIds = null,
+  excludeActor = true,
+  type,
+  title,
+  message,
+  messageId = null,
+}) {
+  try {
+    const cleanActorId = toCleanString(actorId);
+    const recipientIds = Array.isArray(adminIds)
+      ? uniqueCleanStrings(adminIds)
+      : getParticipantAdminIds(
+          group?.participants || [],
+          excludeActor && cleanActorId ? [cleanActorId] : []
+        );
+
+    if (!recipientIds.length) return null;
+
+    const actor = await findAdminForNotification(cleanActorId);
+    const actorName = actor ? adminDisplayName(actor) : cleanActorId || "Admin";
+    const actorRole = actor?.role || "";
+    const groupId = toCleanString(group?.groupId);
+
+    return await createAndEmit({
+      adminIds: recipientIds,
+      type,
+      title,
+      message,
+      entityType: "group_chat",
+      entityId: messageId ? String(messageId) : groupId,
+      actionPath: {
+        admin: getGroupAdminActionPath(groupId),
+      },
+      actorAdminId: actor?._id || cleanActorId || null,
+      actorName,
+      actorEmail: actor?.email || "",
+      actorRole,
+    });
+  } catch (error) {
+    console.warn(`${context} notification failed:`, error?.message || error);
+    return null;
   }
 }
 
@@ -561,6 +678,15 @@ exports.createGroup = async (req, res) => {
       group: buildGroupSummary(group.toObject(), String(creator._id)),
     });
 
+    await notifyGroupAdminsSafely("createGroup", {
+      group: group.toObject ? group.toObject() : group,
+      actorId: creator._id,
+      excludeActor: true,
+      type: "group_chat.created",
+      title: "Group chat created",
+      message: `${adminDisplayName(creator)} (${roleLabel(creator.role)}) created the group "${group.groupName}".`,
+    });
+
     return res.status(201).json({
       message: "Group chat created successfully",
       group,
@@ -683,6 +809,15 @@ exports.updateGroup = async (req, res) => {
 
     emitToAdmins(req.app, group.participants, "groupChatUpdated", {
       group: groupPayload,
+    });
+
+    await notifyGroupAdminsSafely("updateGroup", {
+      group,
+      actorId: actingAdmin._id,
+      excludeActor: true,
+      type: "group_chat.updated",
+      title: "Group chat updated",
+      message: `${adminDisplayName(actingAdmin)} (${roleLabel(actingAdmin.role)}) updated the group "${group.groupName}".`,
     });
 
     return res.json({
@@ -846,6 +981,22 @@ exports.postMessage = async (req, res) => {
       lastMessageAt: group.lastMessageAt,
     });
 
+    const senderParticipant = (group.participants || []).find((p) => sameId(p.adminId, senderId));
+    const senderName = participantDisplayName(senderParticipant);
+    const messagePreview = String(text || "").trim().slice(0, 160);
+
+    await notifyGroupAdminsSafely("postMessage", {
+      group,
+      actorId: senderId,
+      excludeActor: true,
+      type: "group_chat.message",
+      title: `New message in ${group.groupName}`,
+      message: messagePreview
+        ? `${senderName}: ${messagePreview}`
+        : `${senderName} sent a message in ${group.groupName}.`,
+      messageId: msg.messageId,
+    });
+
     return res.status(201).json({
       message: "Message sent successfully",
       messageData: msg,
@@ -935,6 +1086,23 @@ exports.postFileMessage = [
         lastMessageAt: group.lastMessageAt,
       });
 
+      const senderParticipant = (group.participants || []).find((p) => sameId(p.adminId, senderId));
+      const senderName = participantDisplayName(senderParticipant);
+      const fileCount = attachments.length;
+      const messagePreview = String(text || "").trim().slice(0, 160);
+
+      await notifyGroupAdminsSafely("postFileMessage", {
+        group,
+        actorId: senderId,
+        excludeActor: true,
+        type: "group_chat.file_message",
+        title: `New file in ${group.groupName}`,
+        message: messagePreview
+          ? `${senderName}: ${messagePreview}`
+          : `${senderName} sent ${fileCount} file${fileCount === 1 ? "" : "s"} in ${group.groupName}.`,
+        messageId: msg.messageId,
+      });
+
       return res.status(201).json({
         message: "File message sent successfully",
         messageData: msg,
@@ -991,6 +1159,19 @@ exports.editMessage = async (req, res) => {
       groupId: group.groupId,
       lastMessage: msg,
       lastMessageAt: group.lastMessageAt,
+    });
+
+    const senderParticipant = (group.participants || []).find((p) => sameId(p.adminId, senderId));
+    const senderName = participantDisplayName(senderParticipant);
+
+    await notifyGroupAdminsSafely("editMessage", {
+      group,
+      actorId: senderId,
+      excludeActor: true,
+      type: "group_chat.message_edited",
+      title: `Message edited in ${group.groupName}`,
+      message: `${senderName} edited a message in ${group.groupName}.`,
+      messageId: msg.messageId,
     });
 
     return res.json({
@@ -1064,6 +1245,19 @@ exports.deleteMessage = async (req, res) => {
       groupId: group.groupId,
       lastMessage: group.messages[group.messages.length - 1] || null,
       lastMessageAt: group.lastMessageAt,
+    });
+
+    const senderParticipant = (group.participants || []).find((p) => sameId(p.adminId, senderId));
+    const senderName = participantDisplayName(senderParticipant);
+
+    await notifyGroupAdminsSafely("deleteMessage", {
+      group,
+      actorId: senderId,
+      excludeActor: true,
+      type: "group_chat.message_deleted",
+      title: `Message deleted in ${group.groupName}`,
+      message: `${senderName} deleted a message in ${group.groupName}.`,
+      messageId,
     });
 
     return res.json({
