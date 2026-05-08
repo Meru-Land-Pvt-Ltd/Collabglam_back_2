@@ -47,4 +47,6 @@ router.post(
   adminController.updateEmployeePassword
 );
 
+router.get("/verify-invite-email", adminController.verifyInviteEmail);
+
 module.exports = router;

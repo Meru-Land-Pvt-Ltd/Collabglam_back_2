@@ -20,7 +20,7 @@ const brand = require("../models/brand");
 const subscription = require("../models/subscription");
 const BrandAssigned = require("../models/brandAssigned");
 const mongoose = require("mongoose");
-const DEFAULT_INVITE_EXP_MINUTES = 24 * 60; // 24 hours
+const DEFAULT_INVITE_EXP_MINUTES = 5; // 24 hours
 
 const parsedInviteExpiry = Number(process.env.INVITE_EXP_MINUTES);
 
@@ -293,6 +293,145 @@ function normalizeProxyEmailInput(value) {
   return `${safeLocalPart}@${PROXY_EMAIL_DOMAIN}`;
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function adminEmailVerificationTemplate({
+  invitedEmail,
+  verificationLink,
+  role,
+  expiryMinutes,
+}) {
+  const roleLabel = escapeHtml(String(role || "").replace(/_/g, " "));
+  const emailLabel = escapeHtml(invitedEmail || "");
+  const safeVerificationLink = String(verificationLink || "");
+
+  return {
+    subject: "Verify your email to accept admin invite",
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Verify your email</title>
+        </head>
+
+        <body style="margin:0; padding:0; background:#f6f7f9; font-family:Arial, Helvetica, sans-serif; color:#111111;">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f6f7f9; padding:32px 16px;">
+            <tr>
+              <td align="center">
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:560px; background:#ffffff; border-radius:18px; overflow:hidden; border:1px solid #e8e8e8;">
+                  
+                  <tr>
+                    <td style="padding:28px 28px 20px 28px; text-align:center;">
+                      <div style="display:inline-block; width:58px; height:58px; border-radius:50%; background:#111111; text-align:center; line-height:58px; margin-bottom:18px;">
+                        <span style="color:#ffffff; font-size:28px; font-weight:bold;">✓</span>
+                      </div>
+
+                      <h1 style="margin:0; font-size:26px; line-height:34px; font-weight:700; color:#111111;">
+                        Verify your email
+                      </h1>
+
+                      <p style="margin:12px 0 0 0; font-size:15px; line-height:24px; color:#666666;">
+                        Complete your admin invite verification.
+                      </p>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td style="padding:6px 28px 0 28px;">
+                      <div style="background:#fafafa; border:1px solid #eeeeee; border-radius:14px; padding:18px;">
+                        <p style="margin:0 0 12px 0; font-size:15px; line-height:24px; color:#222222;">
+                          Hello,
+                        </p>
+
+                        <p style="margin:0 0 12px 0; font-size:15px; line-height:24px; color:#222222;">
+                          You have been invited to join the admin panel as 
+                          <strong style="text-transform:capitalize;">${roleLabel}</strong>.
+                        </p>
+
+                        <p style="margin:0; font-size:15px; line-height:24px; color:#222222;">
+                          Please verify <strong>${emailLabel}</strong> to continue.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td align="center" style="padding:28px 28px 12px 28px;">
+                      <a href="${safeVerificationLink}"
+                        style="display:inline-block; background:#111111; color:#ffffff; text-decoration:none; padding:14px 26px; border-radius:12px; font-size:15px; font-weight:700; letter-spacing:0.2px;">
+                        Verify Email
+                      </a>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td style="padding:4px 28px 22px 28px; text-align:center;">
+                      <p style="margin:0; font-size:14px; line-height:22px; color:#777777;">
+                        This verification link will expire in 
+                        <strong style="color:#111111;">${expiryMinutes} minutes</strong>.
+                      </p>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td style="padding:0 28px 28px 28px;">
+                      <div style="background:#fff8e6; border:1px solid #ffe2a8; border-radius:14px; padding:14px;">
+                        <p style="margin:0 0 8px 0; font-size:13px; line-height:20px; color:#7a5200;">
+                          If the button does not work, copy and paste this link into your browser:
+                        </p>
+
+                        <p style="margin:0; font-size:13px; line-height:20px; word-break:break-all;">
+                          <a href="${safeVerificationLink}" style="color:#111111; text-decoration:underline;">
+                            ${safeVerificationLink}
+                          </a>
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td style="padding:20px 28px; background:#111111; text-align:center;">
+                      <p style="margin:0; font-size:13px; line-height:20px; color:#ffffff;">
+                        CollabGlam Admin Team
+                      </p>
+                    </td>
+                  </tr>
+
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `,
+    text: `
+Verify your email to accept admin invite.
+
+Hello,
+
+You have been invited to join the admin panel as ${String(role || "").replace(/_/g, " ")}.
+
+Please verify ${invitedEmail || "your email"} before setting your password.
+
+Verification link:
+${verificationLink}
+
+This verification link will expire in ${expiryMinutes} minutes.
+
+CollabGlam Admin Team
+    `.trim(),
+  };
+}
+
 // ======================
 // Admin Login
 // ======================
@@ -418,11 +557,15 @@ exports.inviteAdmin = async (req, res) => {
     if (actor.role === ROLES.SUPER_ADMIN && EXECUTIVE_ROLES.includes(role)) {
       if (!explicitParentAdmin) {
         return res.status(400).json({
-          message: "parentAdmin is required when Super Admin invites IME/BME/SDR directly",
+          message:
+            "parentAdmin is required when Super Admin invites IME/BME/SDR directly",
         });
       }
 
-      parentAdminDoc = await AdminModel.findById(explicitParentAdmin).select("_id role rootAdmin");
+      parentAdminDoc = await AdminModel.findById(explicitParentAdmin).select(
+        "_id role rootAdmin"
+      );
+
       if (!parentAdminDoc || parentAdminDoc.role !== ROLES.REVENUE_HEAD) {
         return res.status(400).json({
           message: "parentAdmin must be a valid Revenue Head",
@@ -482,7 +625,6 @@ exports.inviteAdmin = async (req, res) => {
 
     const rawToken = generateInviteToken(32);
     const tokenHash = sha256(rawToken);
-
     const invitedAt = new Date();
 
     admin.invitedAt = invitedAt;
@@ -491,14 +633,30 @@ exports.inviteAdmin = async (req, res) => {
       invitedAt.getTime() + INVITE_EXP_MINUTES * 60 * 1000
     );
 
+    // Important: on every new invite/re-invite, force email verification again.
+    admin.emailVerified = false;
+    admin.emailVerifiedAt = undefined;
+
     await admin.save();
 
     const adminAppUrl = process.env.ADMIN_APP_URL || "https://collabglam.com";
-    const inviteLink = `${adminAppUrl}/admin/invite?token=${rawToken}`;
 
-    const tpl = adminInviteEmailTemplate({
+    // This should be your backend public URL.
+    // Example: https://api.collabglam.com
+    const apiPublicUrl =
+      process.env.API_PUBLIC_URL ||
+      process.env.BACKEND_URL ||
+      process.env.SERVER_URL;
+
+    if (!apiPublicUrl) {
+      throw new Error("API_PUBLIC_URL is required for admin invite verification link");
+    }
+
+    const verificationLink = `${apiPublicUrl.replace(/\/$/, "")}/admins/verify-invite-email?token=${rawToken}`;
+
+    const tpl = adminEmailVerificationTemplate({
       invitedEmail: email,
-      inviteLink,
+      verificationLink,
       role,
       expiryMinutes: INVITE_EXP_MINUTES,
     });
@@ -523,11 +681,11 @@ exports.inviteAdmin = async (req, res) => {
     });
 
     const response = {
-      message: "Invite sent successfully",
+      message: "Verification email sent successfully",
     };
 
     if (process.env.NODE_ENV !== "production") {
-      response.inviteLink = inviteLink;
+      response.verificationLink = verificationLink;
     }
 
     return res.status(201).json(response);
@@ -537,6 +695,85 @@ exports.inviteAdmin = async (req, res) => {
     }
 
     return res.status(500).json({ message: err.message || "Internal error" });
+  }
+};
+
+
+exports.verifyInviteEmail = async (req, res) => {
+  const adminAppUrl = process.env.ADMIN_APP_URL || "https://collabglam.com";
+
+  const buildRedirectUrl = (params = {}) => {
+    const url = new URL("/admin/invite", adminAppUrl);
+
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        url.searchParams.set(key, String(value));
+      }
+    });
+
+    return url.toString();
+  };
+
+  try {
+    const token = clean(req.query?.token || req.body?.token);
+
+    if (!token) {
+      return res.redirect(
+        buildRedirectUrl({
+          verified: "0",
+          reason: "missing_token",
+        })
+      );
+    }
+
+    const tokenHash = sha256(token);
+
+    const admin = await AdminModel.findOne({
+      inviteTokenHash: tokenHash,
+    }).select(
+      "+inviteTokenHash role status email name inviteExpiresAt emailVerified emailVerifiedAt"
+    );
+
+    if (!admin) {
+      return res.redirect(
+        buildRedirectUrl({
+          token,
+          verified: "0",
+          reason: "invalid_token",
+        })
+      );
+    }
+
+    const now = new Date();
+
+    if (!admin.inviteExpiresAt || admin.inviteExpiresAt <= now) {
+      return res.redirect(
+        buildRedirectUrl({
+          token,
+          verified: "0",
+          reason: "expired_token",
+        })
+      );
+    }
+
+    admin.emailVerified = true;
+    admin.emailVerifiedAt = now;
+
+    await admin.save();
+
+    return res.redirect(
+      buildRedirectUrl({
+        token,
+        verified: "1",
+      })
+    );
+  } catch (err) {
+    return res.redirect(
+      buildRedirectUrl({
+        verified: "0",
+        reason: "server_error",
+      })
+    );
   }
 };
 
@@ -565,7 +802,7 @@ exports.acceptInviteSetPassword = async (req, res) => {
     const admin = await AdminModel.findOne({
       inviteTokenHash: tokenHash,
     }).select(
-      "+inviteTokenHash +passwordHash role status email name access proxyEmail parentAdmin rootAdmin inviteExpiresAt"
+      "+inviteTokenHash +passwordHash role status email name access proxyEmail parentAdmin rootAdmin inviteExpiresAt emailVerified emailVerifiedAt"
     );
 
     if (!admin) {
@@ -579,6 +816,12 @@ exports.acceptInviteSetPassword = async (req, res) => {
     if (!admin.inviteExpiresAt || admin.inviteExpiresAt <= now) {
       return res.status(400).json({
         message: "Invite token expired. Please request a new invite.",
+      });
+    }
+
+    if (!admin.emailVerified) {
+      return res.status(403).json({
+        message: "Please verify your email before setting password.",
       });
     }
 
