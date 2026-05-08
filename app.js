@@ -58,6 +58,7 @@ const brandNetworkRoutes = require("./routes/brandNetworkRoutes");
 const paymentDetailsRoutes = require("./routes/paymentDetailsRoutes");
 const instantlytestRoutes = require("./routes/instantlyTestRoutes");
 const matchedCreatorRoutes = require("./routes/matchedCreatorRoutes");
+const campaignReviewRoutes = require("./routes/campaignReviewRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -81,7 +82,7 @@ const defaultCorsOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:4000",
-  "http://192.168.1.4:3000",
+  "http://192.168.1.45:3000",
 
   "http://192.168.1.5:3000",
   "https://mhd.sharemitra.com",
@@ -409,6 +410,7 @@ app.use("/instantly", require("./routes/instantlyRoutes"));
 app.use("/instantly/webhook", require("./routes/instantlyWebhookRoutes"));
 app.use("/outreach", require("./routes/outreachRoutes"));
 app.use("/matched-creators", matchedCreatorRoutes);
+app.use("/campaign-reviews", campaignReviewRoutes);
 
 /* =========================================================
    404 HANDLER

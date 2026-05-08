@@ -55,7 +55,7 @@ async function notifySafely(context, req, payload) {
 
 function getOutreachCampaignAdminPath(campaignId = "") {
   const id = String(campaignId || "").trim();
-  return id ? `/admin/outreach/campaigns/${encodeURIComponent(id)}` : "/admin/outreach/campaigns";
+  return id ? `/admin/crm/campaigns/${encodeURIComponent(id)}` : "/admin/crm/campaigns";
 }
 
 function getOutreachCampaignNotificationRecipients(campaign = {}) {
@@ -1604,7 +1604,7 @@ exports.deleteOutreachCampaign = async (req, res) => {
       entityType: "outreach_campaign",
       entityId: String(campaign._id),
       actionPath: {
-        admin: "/admin/outreach/campaigns",
+        admin: "/admin/crm/campaigns",
       },
     });
 

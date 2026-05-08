@@ -607,7 +607,7 @@ exports.assignMailbox = async (req, res) => {
       entityType: "outreach_mailbox",
       entityId: String(doc._id),
       actionPath: {
-        admin: "/admin/outreach/mailboxes",
+        admin: "/admin/crm/my-accounts",
       },
     });
 
@@ -662,7 +662,7 @@ exports.unassignMailbox = async (req, res) => {
       entityType: "outreach_mailbox",
       entityId: String(row._id),
       actionPath: {
-        admin: "/admin/outreach/mailboxes",
+        admin: "/admin/crm/my-accounts",
       },
     });
 

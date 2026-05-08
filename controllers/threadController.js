@@ -28,13 +28,7 @@ function uniqueNotificationIds(values = []) {
   ];
 }
 
-function buildCrmRepliesAdminPath({ threadId = "", prospectId = "" } = {}) {
-  const thread = String(threadId || "").trim();
-  if (thread) return `/admin/crm/replies?threadId=${encodeURIComponent(thread)}`;
-
-  const prospect = String(prospectId || "").trim();
-  if (prospect) return `/admin/crm/replies?prospectId=${encodeURIComponent(prospect)}`;
-
+function buildCrmRepliesAdminPath() {
   return "/admin/crm/replies";
 }
 

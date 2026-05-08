@@ -62,6 +62,13 @@ const AdminSchema = new Schema(
         message: `proxyEmail must use @${PROXY_EMAIL_DOMAIN}`,
       },
     },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailVerifiedAt: {
+      type: Date,
+    },
 
     invitedAt: { type: Date },
     inviteTokenHash: { type: String, select: false },
