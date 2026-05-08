@@ -8,7 +8,6 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const PitchFolder = require('../models/pitchFolder');
 const { AdminModel, ROLES } = require('../models/master');
 const InfluencerProfile = require('../models/youtube');
-const Modash = require('../models/modash');
 
 const Campaign = require('../models/campaign');
 const ApplyCampaign = require('../models/applyCampaign');
@@ -737,10 +736,6 @@ function getProviderUsernameLookupCandidates(source = {}) {
     cleanStr(source.userId),
     cleanStr(source.sourceRefId),
     cleanStr(source.modashUserId),
-    cleanStr(source.influencerId),
-    cleanStr(source.creatorId),
-    cleanStr(source.influencer?._id),
-    cleanStr(source.creator?._id),
   ]).filter(Boolean);
 
   const emailCandidates = uniqStrings([
@@ -1018,6 +1013,175 @@ async function enrichPitchFolderItemBodyWithProfileEmail(body = {}, fallback = {
   }
 
   return nextBody;
+}
+
+
+function compactAiText(value, maxLength = 1200) {
+  const text = cleanStr(value).replace(/\s+/g, ' ');
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function formatSelectionReasonArray(value) {
+  if (Array.isArray(value)) return uniqStrings(value).join(', ');
+  return uniqStrings(String(value || '').split(',')).join(', ');
+}
+
+function buildSelectionReasonContext(body = {}) {
+  const assignedCampaign = body.assignedCampaign || {};
+  const campaignActivation = body.campaignActivation || {};
+  const mediaKitAccess = body.mediaKitAccess || {};
+
+  return {
+    provider: normalizeProvider(body.provider || body.platform),
+    name: cleanStr(body.name),
+    handle: cleanStr(body.handle || body.username || body.channelHandle),
+    followers: toNullableNumber(body.followers),
+    niche: formatSelectionReasonArray(body.niche || body.categories),
+    country: cleanStr(body.country || body.countryName),
+    email: cleanStr(body.email).toLowerCase(),
+    profileLink: cleanStr(body.profileLink || body.primaryLink || body.url || body.link),
+    profileLinks: Array.isArray(body.links) ? uniqStrings(body.links).join(', ') : cleanStr(body.links),
+    currentSelectionReason: compactAiText(body.currentSelectionReason || body.selectionReason, 1200),
+    goodFit: body.goodFit === true,
+    influencerRateCard: compactAiText(body.influencerRateCard, 1600),
+    platformRateCard: compactAiText(body.platformRateCard, 1600),
+    rateCardCurrency: cleanStr(body.rateCardCurrency || 'USD').toUpperCase(),
+    ourFeePct: toNullableNumber(body.ourFeePct),
+    shippingAddress: compactAiText(body.shippingAddress || body.comments, 900),
+    mediaKitStatus: cleanStr(mediaKitAccess.requestStatus || body.mediaKitStatus),
+    mediaKitVisibleSource: cleanStr(mediaKitAccess.visibleSource || body.mediaKitVisibleSource),
+    hasMediaKit: body.hasMediaKit === true || mediaKitAccess.hasAdded === true,
+    folderId: cleanStr(body.folderId),
+    itemId: cleanStr(body.itemId),
+    folderTitle: cleanStr(body.folderTitle),
+    folderDescription: compactAiText(body.folderDescription, 800),
+    campaignTitle: cleanStr(assignedCampaign.campaignTitle || body.campaignTitle),
+    campaignId: cleanStr(assignedCampaign.campaignId || body.campaignId),
+    brandName: cleanStr(assignedCampaign.brandName || body.brandName),
+    productOrServiceName: cleanStr(
+      assignedCampaign.productOrServiceName || body.productOrServiceName
+    ),
+    campaignActive: campaignActivation.active === true,
+    campaignInvitationStatus: cleanStr(body.campaignInvitationStatus),
+    influencerSource: cleanStr(body.influencerSource),
+  };
+}
+
+function hasEnoughSelectionReasonContext(ctx = {}) {
+  return !!(
+    ctx.name ||
+    ctx.handle ||
+    ctx.profileLink ||
+    ctx.niche ||
+    ctx.followers ||
+    ctx.country ||
+    ctx.influencerRateCard ||
+    ctx.platformRateCard ||
+    ctx.campaignTitle ||
+    ctx.productOrServiceName
+  );
+}
+
+function buildFallbackSelectionReason(ctx = {}) {
+  const creatorLabel = ctx.name || ctx.handle || 'This creator';
+  const parts = [];
+
+  if (ctx.niche) parts.push(`content focus in ${ctx.niche}`);
+  if (ctx.followers) parts.push(`${Number(ctx.followers).toLocaleString('en-IN')} followers`);
+  if (ctx.country) parts.push(`country/audience relevance in ${ctx.country}`);
+  if (ctx.campaignTitle) parts.push(`alignment with ${ctx.campaignTitle}`);
+  if (ctx.productOrServiceName) parts.push(`relevance to ${ctx.productOrServiceName}`);
+  if (ctx.influencerRateCard || ctx.platformRateCard) parts.push('available rate-card context for commercial planning');
+  if (ctx.goodFit) parts.push('already marked as a Good Fit in the pitch folder');
+
+  const supportText = parts.length ? parts.join(', ') : 'profile relevance, creator context, and campaign suitability';
+
+  return `${creatorLabel} is a strong campaign prospect based on ${supportText}. This profile gives the brand a useful creator option for outreach because the available information supports category relevance, collaboration readiness, and a clear basis for evaluating fit against the assigned campaign.`;
+}
+
+async function generateSelectionReasonWithAI(ctx = {}) {
+  const apiKey = cleanStr(process.env.OPENAI_API_KEY);
+  const model = cleanStr(process.env.OPENAI_SELECTION_REASON_MODEL || process.env.OPENAI_MODEL) || 'gpt-4o-mini';
+
+  if (!apiKey || typeof fetch !== 'function') {
+    return {
+      source: 'fallback',
+      selectionReason: buildFallbackSelectionReason(ctx),
+    };
+  }
+
+  const prompt = [
+    'Generate the strongest possible editable selection reason for a pitch folder influencer row.',
+    'Write in a professional brand-pitch tone for an internal influencer shortlist.',
+    'Use the maximum useful detail from the provided facts, but do not invent audience demographics, performance metrics, pricing, locations, or claims.',
+    'Mention campaign/product relevance when available, creator/category fit, reach/followers when available, geography when useful, and collaboration readiness if rate-card or media-kit information exists.',
+    'If an existing selection reason is provided, improve and expand it instead of ignoring it.',
+    'Keep it detailed but practical: 90 to 150 words. Return only the final selection reason text, no bullets and no heading.',
+    '',
+    `Existing reason to improve: ${ctx.currentSelectionReason || 'Not provided'}`,
+    `Creator name: ${ctx.name || 'Not provided'}`,
+    `Provider: ${ctx.provider || 'Not provided'}`,
+    `Handle: ${ctx.handle || 'Not provided'}`,
+    `Followers: ${ctx.followers ?? 'Not provided'}`,
+    `Niche/categories: ${ctx.niche || 'Not provided'}`,
+    `Country: ${ctx.country || 'Not provided'}`,
+    `Email present: ${ctx.email ? 'Yes' : 'No'}`,
+    `Profile link: ${ctx.profileLink || 'Not provided'}`,
+    `Other profile links: ${ctx.profileLinks || 'Not provided'}`,
+    `Influencer rate card: ${ctx.influencerRateCard || 'Not provided'}`,
+    `Platform/admin rate card: ${ctx.platformRateCard || 'Not provided'}`,
+    `Rate card currency: ${ctx.rateCardCurrency || 'Not provided'}`,
+    `Our fee percentage: ${ctx.ourFeePct ?? 'Not provided'}`,
+    `Shipping/address notes: ${ctx.shippingAddress || 'Not provided'}`,
+    `Media kit status: ${ctx.mediaKitStatus || 'Not provided'}`,
+    `Media kit visible source: ${ctx.mediaKitVisibleSource || 'Not provided'}`,
+    `Good Fit marked: ${ctx.goodFit ? 'Yes' : 'No'}`,
+    `Influencer source: ${ctx.influencerSource || 'Not provided'}`,
+    `Campaign invitation status: ${ctx.campaignInvitationStatus || 'Not provided'}`,
+    `Already active on assigned campaign: ${ctx.campaignActive ? 'Yes' : 'No'}`,
+    `Pitch folder: ${ctx.folderTitle || 'Not provided'}`,
+    `Pitch folder description: ${ctx.folderDescription || 'Not provided'}`,
+    `Campaign: ${ctx.campaignTitle || 'Not provided'}`,
+    `Campaign ID: ${ctx.campaignId || 'Not provided'}`,
+    `Brand: ${ctx.brandName || 'Not provided'}`,
+    `Product/service: ${ctx.productOrServiceName || 'Not provided'}`,
+  ].join('\n');
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.5,
+      max_tokens: 320,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write concise influencer marketing selection reasons for internal pitch folders.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = data?.error?.message || 'OpenAI selection reason generation failed';
+    throw new Error(message);
+  }
+
+  const selectionReason = cleanStr(data?.choices?.[0]?.message?.content);
+
+  return {
+    source: 'openai',
+    selectionReason: selectionReason || buildFallbackSelectionReason(ctx),
+  };
 }
 function normalizeMediaKit(input, actorId, currentMediaKit = null) {
   if (input === null) {
@@ -1863,8 +2027,10 @@ function isBookmarkPitchFolder(folder = {}) {
 
 function isFullyManagedPitchFolder(folder = {}) {
   const kind = getStoredFolderKind(folder);
-
-  return ['fully_managed', 'fullymanaged', 'campaign_folder'].includes(kind);
+  return (
+    ['fully_managed', 'fullymanaged', 'campaign', 'campaign_specific', 'campaign_folder'].includes(kind) ||
+    hasAssignedCampaignForFolderList(folder)
+  );
 }
 
 function folderMatchesCampaign(folder = {}, rawCampaignId = '') {
@@ -1981,178 +2147,6 @@ function folderSearchMatches(folder = {}, search = '') {
     .toLowerCase()
     .includes(q);
 }
-
-function normalizeCampaignManagedValue(value = '') {
-  return cleanStr(value).toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_');
-}
-
-function campaignFieldLooksFullyManaged(value = '') {
-  const normalized = normalizeCampaignManagedValue(value);
-
-  return [
-    'fully_managed',
-    'fullymanaged',
-    'full_managed',
-    'fullmanaged',
-    'managed',
-    'done_for_you',
-    'doneforyou',
-  ].includes(normalized);
-}
-
-function campaignLooksFullyManaged(campaign = {}) {
-  const directFlags = [
-    campaign.isFullyManaged,
-    campaign.fullyManaged,
-    campaign.fullManaged,
-    campaign.isFullManaged,
-    campaign.is_full_managed,
-    campaign.isManaged,
-    campaign.managedByAdmin,
-  ];
-
-  if (directFlags.some((value) => value === true || value === 'true' || value === 1 || value === '1')) {
-    return true;
-  }
-
-  const rawValues = [
-    campaign.campaignType,
-    campaign.type,
-    campaign.planType,
-    campaign.planName,
-    campaign.plan,
-    campaign.packageType,
-    campaign.packageName,
-    campaign.subscriptionPlan,
-    campaign.managementType,
-    campaign.serviceType,
-    campaign.creatorManagement,
-    campaign.campaignMode,
-    campaign.mode,
-    campaign.source,
-    campaign.createdBy?.role,
-    campaign.creatorType,
-    campaign.category,
-  ];
-
-  return rawValues.some(campaignFieldLooksFullyManaged);
-}
-
-function campaignTitleForFolder(campaign = {}, fallback = '') {
-  return cleanStr(
-    campaign.campaignTitle ||
-      campaign.productOrServiceName ||
-      campaign.title ||
-      campaign.name ||
-      campaign.campaignsId ||
-      fallback
-  );
-}
-
-function campaignMatchesFolderSearch(campaign = {}, search = '') {
-  const q = cleanStr(search).toLowerCase();
-  if (!q) return true;
-
-  return [
-    campaign.campaignTitle,
-    campaign.productOrServiceName,
-    campaign.title,
-    campaign.name,
-    campaign.campaignsId,
-    campaign.brandName,
-    campaign.status,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-    .includes(q);
-}
-
-function serializeCampaignForFolderCreate(campaign = {}) {
-  const id = campaign?._id ? String(campaign._id) : cleanStr(campaign.campaignId);
-
-  return {
-    id,
-    _id: id,
-    campaignId: id,
-    campaignsId: cleanStr(campaign.campaignsId),
-    label: campaignTitleForFolder(campaign, id),
-    campaignTitle: cleanStr(campaign.campaignTitle || campaign.title || campaign.name),
-    productOrServiceName: cleanStr(campaign.productOrServiceName),
-    brandId: cleanStr(campaign.brandId),
-    brandName: cleanStr(campaign.brandName),
-    status: cleanStr(campaign.status),
-    isFullyManaged: campaignLooksFullyManaged(campaign),
-  };
-}
-
-async function loadNonFullyManagedCampaignsForFolderCreate({ brandId = '', search = '' } = {}) {
-  const scopedBrandId = cleanStr(brandId);
-  if (!scopedBrandId) return [];
-
-  const brandOr = [{ brandId: scopedBrandId }];
-
-  if (mongoose.Types.ObjectId.isValid(scopedBrandId)) {
-    brandOr.push({ brandId: new mongoose.Types.ObjectId(scopedBrandId) });
-  }
-
-  const docs = await Campaign.find({ $or: brandOr })
-    .select(
-      [
-        '_id',
-        'campaignsId',
-        'brandId',
-        'brandName',
-        'productOrServiceName',
-        'campaignTitle',
-        'title',
-        'name',
-        'status',
-        'campaignType',
-        'type',
-        'planType',
-        'planName',
-        'plan',
-        'packageType',
-        'packageName',
-        'subscriptionPlan',
-        'managementType',
-        'serviceType',
-        'creatorManagement',
-        'campaignMode',
-        'mode',
-        'source',
-        'createdBy',
-        'creatorType',
-        'category',
-        'isFullyManaged',
-        'fullyManaged',
-        'fullManaged',
-        'isFullManaged',
-        'is_full_managed',
-        'isManaged',
-        'managedByAdmin',
-        'updatedAt',
-        'createdAt',
-      ].join(' ')
-    )
-    .sort({ updatedAt: -1, createdAt: -1 })
-    .lean();
-
-  const map = new Map();
-
-  docs
-    .filter((campaign) => !campaignLooksFullyManaged(campaign))
-    .filter((campaign) => campaignMatchesFolderSearch(campaign, search))
-    .forEach((campaign) => {
-      const item = serializeCampaignForFolderCreate(campaign);
-      if (!item.id || map.has(item.id)) return;
-      map.set(item.id, item);
-    });
-
-  return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-}
-
 
 async function loadBookmarkFoldersForFolderList({ brandId = '', search = '' } = {}) {
   if (!BookmarkFolder || typeof BookmarkFolder.find !== 'function') {
@@ -2287,14 +2281,6 @@ exports.getFolderList = async (req, res) => {
       ...fullyManagedFolders,
     ];
 
-    const createCampaigns =
-      !hasAdminScope && !campaignId
-        ? await loadNonFullyManagedCampaignsForFolderCreate({
-            brandId: authedBrandId,
-            search: '',
-          })
-        : [];
-
     return res.json({
       success: true,
       message: 'Folders fetched successfully',
@@ -2303,20 +2289,65 @@ exports.getFolderList = async (req, res) => {
         pitchSheetCount: pitchSheetFolders.length,
         bookmarkCount: bookmarkFolders.length,
         fullyManagedCount: fullyManagedFolders.length,
-        createCampaignCount: createCampaigns.length,
         folders,
-        createCampaigns,
-        availableCampaignsForFolderCreate: createCampaigns,
         groups: {
           pitchSheets: pitchSheetFolders,
           bookmarks: bookmarkFolders,
           fullyManagedCampaigns: fullyManagedFolders,
-          createCampaigns,
         },
       },
     });
   } catch (err) {
     console.error('[getFolderList] Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Internal error',
+    });
+  }
+};
+
+
+exports.generateSelectionReason = async (req, res) => {
+  try {
+    if (!canCreateOrManagePitchFolders(req.admin)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not allowed to generate selection reasons',
+      });
+    }
+
+    const ctx = buildSelectionReasonContext(req.body || {});
+
+    if (!hasEnoughSelectionReasonContext(ctx)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Add at least one creator detail such as name, handle, followers, niche, country, rate card, or campaign before generating a selection reason.',
+      });
+    }
+
+    const result = await generateSelectionReasonWithAI(ctx);
+    const selectionReason = cleanStr(result.selectionReason);
+
+    if (!selectionReason) {
+      return res.status(500).json({
+        success: false,
+        error: 'Selection reason could not be generated',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Selection reason generated successfully',
+      source: result.source,
+      selectionReason,
+      data: {
+        selectionReason,
+        source: result.source,
+      },
+    });
+  } catch (err) {
+    console.error('[generateSelectionReason] Error:', err);
     return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
@@ -2566,8 +2597,8 @@ exports.createFolder = async (req, res) => {
 
     const requestedFolderKind = normalizeFolderKind(body.type || body.folderType || body.kind || 'pitch_sheet');
 
-    const requestedTitle = cleanStr(body.title || body.name);
-    if (!requestedTitle) {
+    const title = cleanStr(body.title || body.name);
+    if (!title) {
       return res.status(400).json({ error: 'title is required' });
     }
 
@@ -2576,9 +2607,9 @@ exports.createFolder = async (req, res) => {
     if (requestedFolderKind === 'bookmark') {
       if (BookmarkFolder && typeof BookmarkFolder.create === 'function') {
         const bookmarkPayload = {
-          title: requestedTitle,
-          name: requestedTitle,
-          slug: await buildUniqueFolderSlug(requestedTitle),
+          title,
+          name: title,
+          slug: await buildUniqueFolderSlug(title),
           description,
           brandId,
           brandRef,
@@ -2607,17 +2638,15 @@ exports.createFolder = async (req, res) => {
     }
 
     const rawCampaignId = cleanStr(body.campaignId || body.campaignsId);
-    const shouldCreateFullyManagedFolder = requestedFolderKind === 'fully_managed';
-    const shouldAssignCampaign = shouldCreateFullyManagedFolder || !!rawCampaignId;
+    const shouldCreateCampaignFolder = requestedFolderKind === 'fully_managed' || !!rawCampaignId;
 
     let assignedCampaign = null;
-    let assignedCampaignDoc = null;
 
-    if (shouldAssignCampaign) {
+    if (shouldCreateCampaignFolder) {
       if (!rawCampaignId) {
         return res.status(400).json({
           success: false,
-          error: 'campaignId is required for campaign folders',
+          error: 'campaignId is required for fully managed campaign folders',
         });
       }
 
@@ -2637,13 +2666,8 @@ exports.createFolder = async (req, res) => {
         });
       }
 
-      assignedCampaignDoc = campaign;
       assignedCampaign = buildAssignedCampaignPayload(campaign, actorId);
     }
-
-    const title = shouldCreateFullyManagedFolder && assignedCampaignDoc
-      ? campaignTitleForFolder(assignedCampaignDoc, requestedTitle)
-      : requestedTitle;
 
     const slug = await buildUniqueFolderSlug(title);
 
@@ -2676,7 +2700,7 @@ exports.createFolder = async (req, res) => {
       description,
       brandId,
       brandRef,
-      folderType: shouldCreateFullyManagedFolder ? 'fully_managed' : 'pitch_sheet',
+      folderType: shouldCreateCampaignFolder ? 'fully_managed' : 'pitch_sheet',
       source: hasAdminScope ? 'admin' : 'brand',
       brandVisibleItemCount: hasOwn(body, 'brandVisibleItemCount')
         ? toNullableInteger(body.brandVisibleItemCount)
@@ -2696,11 +2720,9 @@ exports.createFolder = async (req, res) => {
 
     return res.json({
       success: true,
-      message: shouldCreateFullyManagedFolder
+      message: shouldCreateCampaignFolder
         ? 'Fully managed campaign folder created successfully'
-        : assignedCampaign
-          ? 'Campaign folder created successfully'
-          : 'Pitch folder created successfully',
+        : 'Pitch folder created successfully',
       data: serializeFolderDetail(hydrated),
     });
   } catch (err) {
@@ -3788,156 +3810,6 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
     });
   }
 };
-
-function buildFallbackSelectionReasonForItem(item = {}, folder = {}, campaign = {}) {
-  const name = cleanStr(
-    item.name ||
-      item.fullname ||
-      item.username ||
-      item.handle ||
-      'This creator'
-  );
-
-  const handle = cleanStr(item.handle || item.username);
-  const provider = cleanStr(item.provider || item.platform);
-  const followers = Number(item.followers || 0);
-  const country = cleanStr(item.country);
-  const niche = Array.isArray(item.niche)
-    ? item.niche.filter(Boolean).join(', ')
-    : cleanStr(item.niche);
-  const campaignName = cleanStr(
-    campaign.campaignTitle ||
-      campaign.title ||
-      campaign.name ||
-      campaign.productOrServiceName ||
-      folder.title
-  );
-
-  const parts = [];
-
-  parts.push(
-    `${name}${handle ? ` (${handle})` : ''} is a strong fit${
-      campaignName ? ` for ${campaignName}` : ''
-    }`
-  );
-
-  const proof = [];
-
-  if (provider) proof.push(`platform: ${provider}`);
-  if (followers > 0) proof.push(`${followers.toLocaleString()} followers`);
-  if (niche) proof.push(`relevant niche: ${niche}`);
-  if (country) proof.push(`market/location: ${country}`);
-
-  if (proof.length) {
-    parts.push(`Key fit signals include ${proof.join(', ')}.`);
-  }
-
-  parts.push(
-    'This creator has been hand-picked as a Good Fit because their audience, content focus, and profile signals align with the campaign goals.'
-  );
-
-  return parts.join(' ');
-}
-
-exports.generateSelectionReason = async (req, res) => {
-  try {
-    if (!canCreateOrManagePitchFolders(req.admin)) {
-      return res.status(403).json({
-        success: false,
-        error: 'You are not allowed to update pitch folders',
-      });
-    }
-
-    const actorId = getActorAdminId(req.admin);
-    const folderId = cleanStr(req.body?.folderId || req.body?.id);
-    const itemId = cleanStr(req.body?.itemId);
-    const bodyItem = req.body?.item || req.body?.influencer || {};
-    const bodyCampaign = req.body?.campaign || {};
-
-    let doc = null;
-    let item = null;
-
-    if (folderId || itemId) {
-      if (
-        !mongoose.Types.ObjectId.isValid(folderId) ||
-        !mongoose.Types.ObjectId.isValid(itemId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: 'Valid folderId and itemId are required',
-        });
-      }
-
-      doc = await findAccessibleFolder(folderId, req.admin);
-
-      if (!doc) {
-        return res.status(404).json({
-          success: false,
-          error: 'Pitch folder not found',
-        });
-      }
-
-      item = doc.items.id(itemId);
-
-      if (!item) {
-        return res.status(404).json({
-          success: false,
-          error: 'Folder item not found',
-        });
-      }
-    }
-
-    const sourceItem = item || bodyItem;
-    const sourceFolder = doc || req.body?.folder || {};
-    const sourceCampaign =
-      bodyCampaign ||
-      doc?.assignedCampaign ||
-      sourceFolder?.assignedCampaign ||
-      {};
-
-    const selectionReason =
-      cleanStr(req.body?.selectionReason || req.body?.reason) ||
-      buildFallbackSelectionReasonForItem(
-        sourceItem || {},
-        sourceFolder || {},
-        sourceCampaign || {}
-      );
-
-    if (item && doc) {
-      item.selectionReason = selectionReason;
-      doc.updatedByAdmin = actorId || null;
-
-      const hydrated = await saveAndHydrateFolder(doc);
-
-      return res.json({
-        success: true,
-        message: 'Selection reason generated successfully',
-        data: {
-          selectionReason,
-          itemId: String(item._id),
-          folder: serializeFolderDetail(hydrated),
-        },
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: 'Selection reason generated successfully',
-      data: {
-        selectionReason,
-      },
-    });
-  } catch (err) {
-    console.error('[generateSelectionReason] Error:', err);
-
-    return res.status(500).json({
-      success: false,
-      error: err?.message || 'Internal error',
-    });
-  }
-};
-
-
 exports.updateSharedFolderGoodFit = async (req, res) => {
   try {
     const token = cleanStr(req.params.token);
@@ -4736,921 +4608,6 @@ const getInfluencerUniqueKey = (item = {}) => {
   return `item:${String(item._id || "")}`;
 };
 
-function normalizeModashLookupValue(value = '') {
-  return cleanStr(value)
-    .toLowerCase()
-    .replace(/^@+/, '')
-    .replace(/\/+$/, '');
-}
-
-function normalizeModashUrl(value = '') {
-  return cleanStr(value).toLowerCase().replace(/\/+$/, '');
-}
-
-function getModashCategoryNames(categories = []) {
-  if (!Array.isArray(categories)) return [];
-
-  return uniqStrings(
-    categories
-      .flatMap((category) => {
-        if (!category) return [];
-        if (typeof category === 'string') return [category];
-
-        return [
-          category.categoryName,
-          category.subcategoryName,
-          category.name,
-          category.title,
-          category.label,
-        ];
-      })
-      .filter(Boolean)
-  );
-}
-
-function normalizeModashLanguage(language) {
-  if (!language) return '';
-
-  if (typeof language === 'string') {
-    return cleanStr(language);
-  }
-
-  if (Array.isArray(language)) {
-    return pickWeightedLabel(language);
-  }
-
-  if (typeof language === 'object') {
-    return cleanStr(
-      language.name ||
-        language.languageName ||
-        language.label ||
-        language.code ||
-        language.value
-    );
-  }
-
-  return '';
-}
-
-function pickWeightedLabel(values = []) {
-  if (!Array.isArray(values) || !values.length) return '';
-
-  const sorted = values
-    .filter(Boolean)
-    .slice()
-    .sort((a, b) => Number(b?.weight || 0) - Number(a?.weight || 0));
-
-  for (const item of sorted) {
-    if (!item) continue;
-
-    if (typeof item === 'string') {
-      const clean = cleanStr(item);
-      if (clean) return clean;
-      continue;
-    }
-
-    const clean = cleanStr(
-      item.name ||
-        item.countryName ||
-        item.languageName ||
-        item.label ||
-        item.code ||
-        item.value
-    );
-
-    if (clean) return clean;
-  }
-
-  return '';
-}
-
-function getNestedArray(value, path = []) {
-  let current = value;
-
-  for (const key of path) {
-    if (!current || typeof current !== 'object') return [];
-    current = current[key];
-  }
-
-  return Array.isArray(current) ? current : [];
-}
-
-function deriveModashCountry(doc = {}) {
-  return (
-    cleanStr(doc.country) ||
-    pickWeightedLabel(doc.audience?.geoCountries) ||
-    pickWeightedLabel(doc.audienceCommenters?.geoCountries) ||
-    pickWeightedLabel(getNestedArray(doc, ['audience', 'geo', 'countries'])) ||
-    pickWeightedLabel(getNestedArray(doc, ['audience', 'geo', 'topCountries'])) ||
-    pickWeightedLabel(getNestedArray(doc, ['audienceExtra', 'geoCountries'])) ||
-    ''
-  );
-}
-
-function deriveModashLanguage(doc = {}) {
-  return (
-    normalizeModashLanguage(doc.language) ||
-    pickWeightedLabel(doc.audience?.languages) ||
-    pickWeightedLabel(doc.audienceCommenters?.languages) ||
-    pickWeightedLabel(getNestedArray(doc, ['audience', 'topLanguages'])) ||
-    pickWeightedLabel(getNestedArray(doc, ['audienceExtra', 'languages'])) ||
-    ''
-  );
-}
-
-function pickModashPublicFields(doc = {}) {
-  if (!doc || typeof doc !== 'object') return null;
-
-  const categories = getModashCategoryNames(doc.categories);
-  const country = deriveModashCountry(doc);
-  const language = deriveModashLanguage(doc);
-
-  return {
-    _id: doc._id ? String(doc._id) : '',
-    influencerId: cleanStr(doc.influencerId),
-    provider: cleanStr(doc.provider),
-    userId: cleanStr(doc.userId),
-    username: cleanStr(doc.username),
-    fullname: cleanStr(doc.fullname),
-    handle: cleanStr(doc.handle) || (doc.username ? `@${cleanStr(doc.username).replace(/^@+/, '')}` : ''),
-    url: cleanStr(doc.url),
-    picture: cleanStr(doc.picture),
-
-    followers: Number.isFinite(Number(doc.followers)) ? Number(doc.followers) : null,
-    engagements: Number.isFinite(Number(doc.engagements)) ? Number(doc.engagements) : null,
-    engagementRate: Number.isFinite(Number(doc.engagementRate)) ? Number(doc.engagementRate) : null,
-    averageViews: Number.isFinite(Number(doc.averageViews)) ? Number(doc.averageViews) : null,
-
-    isVerified: typeof doc.isVerified === 'boolean' ? doc.isVerified : null,
-    isPrivate: typeof doc.isPrivate === 'boolean' ? doc.isPrivate : null,
-
-    city: cleanStr(doc.city),
-    state: cleanStr(doc.state),
-    subdivision: cleanStr(doc.subdivision),
-    country,
-    ageGroup: cleanStr(doc.ageGroup),
-    gender: cleanStr(doc.gender),
-    language,
-
-    categories,
-    categoryObjects: Array.isArray(doc.categories) ? doc.categories : [],
-
-    audience: doc.audience || null,
-    audienceCommenters: doc.audienceCommenters || null,
-    audienceExtra: doc.audienceExtra || null,
-
-    stats: doc.stats || null,
-    statsByContentType: doc.statsByContentType || null,
-    postsCount: doc.postsCount ?? doc.postsCounts ?? null,
-    avgLikes: doc.avgLikes ?? null,
-    avgComments: doc.avgComments ?? null,
-    avgViews: doc.avgViews ?? null,
-    avgReelsPlays: doc.avgReelsPlays ?? null,
-    totalLikes: doc.totalLikes ?? null,
-    totalViews: doc.totalViews ?? null,
-
-    paidPostPerformance: doc.paidPostPerformance ?? null,
-    paidPostPerformanceViews: doc.paidPostPerformanceViews ?? null,
-    sponsoredPostsMedianViews: doc.sponsoredPostsMedianViews ?? null,
-    sponsoredPostsMedianLikes: doc.sponsoredPostsMedianLikes ?? null,
-    nonSponsoredPostsMedianViews: doc.nonSponsoredPostsMedianViews ?? null,
-    nonSponsoredPostsMedianLikes: doc.nonSponsoredPostsMedianLikes ?? null,
-
-    updatedAt: doc.updatedAt || null,
-    createdAt: doc.createdAt || null,
-  };
-}
-
-function collectModashLookupGroups(serializedItems = [], originalItems = []) {
-  const groups = new Map();
-
-  function getGroup(provider) {
-    const cleanProvider = normalizeProvider(provider);
-    if (!cleanProvider) return null;
-
-    if (!groups.has(cleanProvider)) {
-      groups.set(cleanProvider, {
-        userIds: new Set(),
-        usernames: new Set(),
-        handles: new Set(),
-        urls: new Set(),
-      });
-    }
-
-    return groups.get(cleanProvider);
-  }
-
-  serializedItems.forEach((serializedItem, index) => {
-    const originalItem = originalItems[index] || {};
-    const source = {
-      ...originalItem,
-      ...serializedItem,
-    };
-
-    const {
-      provider,
-      usernameCandidates,
-      handleCandidates,
-      idCandidates,
-    } = getProviderUsernameLookupCandidates(source);
-
-    const group = getGroup(provider);
-    if (!group) return;
-
-    idCandidates.forEach((value) => {
-      const clean = cleanStr(value);
-      if (clean) group.userIds.add(clean);
-    });
-
-    usernameCandidates.forEach((value) => {
-      const clean = normalizeModashLookupValue(value);
-      if (clean) group.usernames.add(clean);
-    });
-
-    handleCandidates.forEach((value) => {
-      const clean = normalizeModashLookupValue(value);
-      if (clean) {
-        group.handles.add(clean);
-        group.handles.add(`@${clean}`);
-      }
-    });
-
-    const rawLinks = []
-      .concat(Array.isArray(source.links) ? source.links : [])
-      .concat([
-        source.primaryLink,
-        source.profileUrl,
-        source.url,
-        source.link,
-      ]);
-
-    rawLinks.forEach((value) => {
-      const clean = normalizeModashUrl(value);
-      if (clean) group.urls.add(clean);
-    });
-  });
-
-  return groups;
-}
-
-function indexModashDocs(docs = []) {
-  const byUserId = new Map();
-  const byUsername = new Map();
-  const byHandle = new Map();
-  const byUrl = new Map();
-
-  function set(map, provider, rawValue, doc) {
-    const value = normalizeModashLookupValue(rawValue);
-    if (!provider || !value) return;
-    map.set(`${provider}:${value}`, doc);
-  }
-
-  function setUrl(map, provider, rawValue, doc) {
-    const value = normalizeModashUrl(rawValue);
-    if (!provider || !value) return;
-    map.set(`${provider}:${value}`, doc);
-  }
-
-  docs.forEach((doc) => {
-    const provider = normalizeProvider(doc.provider);
-    if (!provider) return;
-
-    set(byUserId, provider, doc.userId, doc);
-    set(byUsername, provider, doc.username, doc);
-    set(byUsername, provider, doc.handle, doc);
-    set(byHandle, provider, doc.handle, doc);
-    set(byHandle, provider, doc.username, doc);
-    setUrl(byUrl, provider, doc.url, doc);
-  });
-
-  return {
-    byUserId,
-    byUsername,
-    byHandle,
-    byUrl,
-  };
-}
-
-function findModashForPitchItem(indexes, serializedItem = {}, originalItem = {}) {
-  const source = {
-    ...originalItem,
-    ...serializedItem,
-  };
-
-  const {
-    provider,
-    usernameCandidates,
-    handleCandidates,
-    idCandidates,
-  } = getProviderUsernameLookupCandidates(source);
-
-  const cleanProvider = normalizeProvider(provider);
-  if (!cleanProvider) return null;
-
-  for (const id of idCandidates) {
-    const match = indexes.byUserId.get(`${cleanProvider}:${normalizeModashLookupValue(id)}`);
-    if (match) return match;
-  }
-
-  for (const username of usernameCandidates) {
-    const match = indexes.byUsername.get(`${cleanProvider}:${normalizeModashLookupValue(username)}`);
-    if (match) return match;
-  }
-
-  for (const handle of handleCandidates) {
-    const match = indexes.byHandle.get(`${cleanProvider}:${normalizeModashLookupValue(handle)}`);
-    if (match) return match;
-  }
-
-  const rawLinks = []
-    .concat(Array.isArray(source.links) ? source.links : [])
-    .concat([
-      source.primaryLink,
-      source.profileUrl,
-      source.url,
-      source.link,
-    ]);
-
-  for (const link of rawLinks) {
-    const match = indexes.byUrl.get(`${cleanProvider}:${normalizeModashUrl(link)}`);
-    if (match) return match;
-  }
-
-  return null;
-}
-
-function exactOptionalSlashRegex(value = '') {
-  const cleaned = normalizeModashUrl(value);
-  return cleaned ? new RegExp(`^${escapeRegexValue(cleaned)}\\/?$`, 'i') : null;
-}
-
-function pushExactRegexQueries(identityOr, field, values = []) {
-  const seen = new Set();
-
-  for (const value of values) {
-    const clean = cleanStr(value);
-    if (!clean) continue;
-
-    const variants = uniqStrings([
-      clean,
-      normalizeModashLookupValue(clean),
-      clean.startsWith('@') ? clean : `@${clean}`,
-    ]).filter(Boolean);
-
-    for (const variant of variants) {
-      const key = `${field}:${variant.toLowerCase()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const rx = exactRegex(variant);
-      if (rx) identityOr.push({ [field]: rx });
-    }
-  }
-}
-
-function pushExactUrlRegexQueries(identityOr, field, values = []) {
-  const seen = new Set();
-
-  for (const value of values) {
-    const clean = normalizeModashUrl(value);
-    if (!clean) continue;
-
-    const key = `${field}:${clean}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const rx = exactOptionalSlashRegex(clean);
-    if (rx) identityOr.push({ [field]: rx });
-  }
-}
-
-
-async function enrichSerializedItemsWithModash(serializedItems = [], originalItems = []) {
-  if (!Array.isArray(serializedItems) || !serializedItems.length || !Modash) {
-    return serializedItems;
-  }
-
-  const groups = collectModashLookupGroups(serializedItems, originalItems);
-  const or = [];
-
-  groups.forEach((group, provider) => {
-    const identityOr = [];
-
-    if (group.userIds.size) {
-      const ids = Array.from(group.userIds);
-      identityOr.push({ userId: { $in: ids } });
-      identityOr.push({ influencerId: { $in: ids } });
-      pushExactRegexQueries(identityOr, 'userId', ids);
-      pushExactRegexQueries(identityOr, 'influencerId', ids);
-    }
-
-    if (group.usernames.size) {
-      const usernames = Array.from(group.usernames);
-      pushExactRegexQueries(identityOr, 'username', usernames);
-      pushExactRegexQueries(identityOr, 'handle', usernames);
-    }
-
-    if (group.handles.size) {
-      const handles = Array.from(group.handles);
-      pushExactRegexQueries(identityOr, 'handle', handles);
-      pushExactRegexQueries(identityOr, 'username', handles);
-    }
-
-    if (group.urls.size) {
-      pushExactUrlRegexQueries(identityOr, 'url', Array.from(group.urls));
-    }
-
-    if (identityOr.length) {
-      or.push({
-        provider,
-        $or: identityOr,
-      });
-    }
-  });
-
-  if (!or.length) {
-    return serializedItems.map((item) => ({
-      ...item,
-      modash: null,
-      modashProfile: null,
-      filterData: {
-        followers: Number(item?.followers || 0) || null,
-        provider: cleanStr(item?.provider || item?.platform),
-        country: cleanStr(item?.country),
-        language: cleanStr(item?.language),
-        categories: Array.isArray(item?.niche) ? item.niche : cleanStr(item?.niche) ? [cleanStr(item.niche)] : [],
-      },
-    }));
-  }
-
-  const docs = await Modash.find({ $or: or })
-    .select({
-      provider: 1,
-      userId: 1,
-      influencerId: 1,
-      username: 1,
-      fullname: 1,
-      handle: 1,
-      url: 1,
-      picture: 1,
-      followers: 1,
-      engagements: 1,
-      engagementRate: 1,
-      averageViews: 1,
-      isPrivate: 1,
-      isVerified: 1,
-      city: 1,
-      state: 1,
-      subdivision: 1,
-      country: 1,
-      ageGroup: 1,
-      gender: 1,
-      language: 1,
-      categories: 1,
-      audience: 1,
-      audienceCommenters: 1,
-      audienceExtra: 1,
-      stats: 1,
-      statsByContentType: 1,
-      postsCount: 1,
-      postsCounts: 1,
-      avgLikes: 1,
-      avgComments: 1,
-      avgViews: 1,
-      avgReelsPlays: 1,
-      totalLikes: 1,
-      totalViews: 1,
-      paidPostPerformance: 1,
-      paidPostPerformanceViews: 1,
-      sponsoredPostsMedianViews: 1,
-      sponsoredPostsMedianLikes: 1,
-      nonSponsoredPostsMedianViews: 1,
-      nonSponsoredPostsMedianLikes: 1,
-      createdAt: 1,
-      updatedAt: 1,
-    })
-    .lean();
-
-  const indexes = indexModashDocs(docs);
-
-  return serializedItems.map((item, index) => {
-    const modashDoc = findModashForPitchItem(indexes, item, originalItems[index] || {});
-    const modash = pickModashPublicFields(modashDoc);
-
-    const currentNiche = Array.isArray(item?.niche)
-      ? item.niche
-      : cleanStr(item?.niche)
-        ? [cleanStr(item.niche)]
-        : [];
-
-    const categories = currentNiche.length ? currentNiche : modash?.categories || [];
-    const followers = Number(item?.followers || 0) || modash?.followers || null;
-
-    return {
-      ...item,
-      name: cleanStr(item?.name) || modash?.fullname || modash?.username || item?.name,
-      handle: cleanStr(item?.handle) || modash?.handle || (modash?.username ? `@${modash.username}` : item?.handle),
-      followers,
-      primaryLink: cleanStr(item?.primaryLink) || modash?.url || item?.primaryLink,
-      country: modash?.country || cleanStr(item?.country) || item?.country,
-      niche: categories,
-      picture: cleanStr(item?.picture || item?.avatarUrl || item?.profileImage) || modash?.picture || item?.picture,
-      avatarUrl: cleanStr(item?.avatarUrl || item?.picture || item?.profileImage) || modash?.picture || item?.avatarUrl,
-
-      modash,
-      modashProfile: modash,
-      filterData: {
-        followers,
-        engagements: modash?.engagements ?? null,
-        engagementRate: modash?.engagementRate ?? null,
-        averageViews: modash?.averageViews ?? null,
-        isVerified: modash?.isVerified ?? null,
-        isPrivate: modash?.isPrivate ?? null,
-        provider: cleanStr(item?.provider || modash?.provider),
-        country: modash?.country || cleanStr(item?.country) || '',
-        city: modash?.city || '',
-        state: modash?.state || '',
-        ageGroup: modash?.ageGroup || '',
-        gender: modash?.gender || '',
-        language: modash?.language || cleanStr(item?.language) || '',
-        categories,
-      },
-    };
-  });
-}
-
-
-
-const GOOD_FIT_TIER_RANGES = {
-  nano: { min: 1000, max: 10000 },
-  micro: { min: 10000, max: 100000 },
-  mid: { min: 100000, max: 500000 },
-  macro: { min: 500000, max: 1000000 },
-  mega: { min: 1000000 },
-};
-
-function parseGoodFitNumber(value) {
-  if (value === null || value === undefined || value === '') return null;
-
-  const number = Number(String(value).replace(/,/g, ''));
-
-  return Number.isFinite(number) ? number : null;
-}
-
-function parseGoodFitBoolean(value) {
-  if (value === null || value === undefined || value === '') return null;
-
-  const normalized = cleanStr(value).toLowerCase();
-
-  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
-  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
-
-  return null;
-}
-
-function normalizeGoodFitFilterText(value) {
-  return cleanStr(value).toLowerCase();
-}
-
-function normalizeGoodFitGender(value) {
-  const normalized = normalizeGoodFitFilterText(value);
-
-  if (!normalized || normalized === 'all') return '';
-  if (normalized.startsWith('m')) return 'male';
-  if (normalized.startsWith('f')) return 'female';
-
-  return normalized;
-}
-
-function parseGoodFitAgeRange(value) {
-  const raw = cleanStr(value);
-
-  if (!raw) return null;
-
-  const rangeMatch = raw.match(/(\d{1,2})\s*[-–]\s*(\d{1,2})/);
-  if (rangeMatch) {
-    return {
-      min: Number(rangeMatch[1]),
-      max: Number(rangeMatch[2]),
-    };
-  }
-
-  const plusMatch = raw.match(/(\d{1,2})\s*\+/);
-  if (plusMatch) {
-    return {
-      min: Number(plusMatch[1]),
-      max: 200,
-    };
-  }
-
-  const single = Number(raw);
-
-  if (Number.isFinite(single)) {
-    return {
-      min: single,
-      max: single,
-    };
-  }
-
-  return null;
-}
-
-function goodFitRangesOverlap(left, right) {
-  if (!left || !right) return false;
-
-  const leftMin = left.min ?? Number.NEGATIVE_INFINITY;
-  const leftMax = left.max ?? Number.POSITIVE_INFINITY;
-  const rightMin = right.min ?? Number.NEGATIVE_INFINITY;
-  const rightMax = right.max ?? Number.POSITIVE_INFINITY;
-
-  return leftMin <= rightMax && rightMin <= leftMax;
-}
-
-function buildGoodFitListFilters(query = {}) {
-  const tier = normalizeGoodFitFilterText(query.tier);
-  const explicitFollowersMin = parseGoodFitNumber(query.followersMin);
-  const explicitFollowersMax = parseGoodFitNumber(query.followersMax);
-  const tierRange = GOOD_FIT_TIER_RANGES[tier] || null;
-
-  return {
-    q: cleanStr(query.q || query.search || query.keyword),
-    searchMode: normalizeGoodFitFilterText(query.searchMode || query.mode),
-    tier: tierRange ? tier : '',
-    followersMin:
-      explicitFollowersMin !== null
-        ? explicitFollowersMin
-        : tierRange?.min ?? null,
-    followersMax:
-      explicitFollowersMax !== null
-        ? explicitFollowersMax
-        : tierRange?.max ?? null,
-    isVerified: parseGoodFitBoolean(query.isVerified),
-    isPrivate: parseGoodFitBoolean(query.isPrivate),
-    gender: normalizeGoodFitGender(query.gender),
-    ageMin: parseGoodFitNumber(query.ageMin),
-    ageMax: parseGoodFitNumber(query.ageMax),
-    country: normalizeGoodFitFilterText(query.country),
-    provider: normalizeGoodFitFilterText(query.provider || query.platform),
-    category: normalizeGoodFitFilterText(query.category || query.niche),
-  };
-}
-
-function hasGoodFitBackendFilters(filters = {}) {
-  return Boolean(
-    filters.q ||
-      filters.searchMode ||
-      filters.tier ||
-      filters.followersMin !== null ||
-      filters.followersMax !== null ||
-      filters.isVerified !== null ||
-      filters.isPrivate !== null ||
-      filters.gender ||
-      filters.ageMin !== null ||
-      filters.ageMax !== null ||
-      filters.country ||
-      filters.provider ||
-      filters.category
-  );
-}
-
-function getGoodFitFilterArray(value) {
-  if (!value) return [];
-
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => getGoodFitFilterArray(item));
-  }
-
-  if (typeof value === 'object') {
-    return [
-      value.categoryName,
-      value.subcategoryName,
-      value.name,
-      value.title,
-      value.label,
-    ]
-      .map((item) => cleanStr(item))
-      .filter(Boolean);
-  }
-
-  return [cleanStr(value)].filter(Boolean);
-}
-
-function getGoodFitFilterData(item = {}) {
-  const modash = item.modash || item.modashProfile || {};
-  const filterData = item.filterData || {};
-
-  const categories = uniqStrings(
-    []
-      .concat(getGoodFitFilterArray(filterData.categories))
-      .concat(getGoodFitFilterArray(item.niche))
-      .concat(getGoodFitFilterArray(modash.categories))
-      .concat(getGoodFitFilterArray(modash.categoryObjects))
-  );
-
-  const followers =
-    parseGoodFitNumber(filterData.followers) ??
-    parseGoodFitNumber(item.followers) ??
-    parseGoodFitNumber(modash.followers);
-
-  const country = cleanStr(
-    filterData.country ||
-      item.country ||
-      modash.country ||
-      modash.audience?.geo?.countries?.[0]?.name ||
-      modash.audience?.geo?.countries?.[0]?.code
-  );
-
-  const language = cleanStr(
-    filterData.language ||
-      item.language ||
-      modash.language ||
-      modash.audience?.language?.name ||
-      modash.audience?.language?.code
-  );
-
-  return {
-    followers,
-    engagements:
-      parseGoodFitNumber(filterData.engagements) ??
-      parseGoodFitNumber(modash.engagements),
-    engagementRate:
-      parseGoodFitNumber(filterData.engagementRate) ??
-      parseGoodFitNumber(modash.engagementRate),
-    averageViews:
-      parseGoodFitNumber(filterData.averageViews) ??
-      parseGoodFitNumber(modash.averageViews),
-    isVerified:
-      typeof filterData.isVerified === 'boolean'
-        ? filterData.isVerified
-        : typeof modash.isVerified === 'boolean'
-          ? modash.isVerified
-          : null,
-    isPrivate:
-      typeof filterData.isPrivate === 'boolean'
-        ? filterData.isPrivate
-        : typeof modash.isPrivate === 'boolean'
-          ? modash.isPrivate
-          : null,
-    provider: normalizeGoodFitFilterText(
-      filterData.provider || item.provider || item.platform || modash.provider
-    ),
-    country,
-    countrySearch: normalizeGoodFitFilterText(country),
-    city: cleanStr(filterData.city || modash.city),
-    state: cleanStr(filterData.state || modash.state || modash.subdivision),
-    ageGroup: cleanStr(filterData.ageGroup || modash.ageGroup),
-    gender: normalizeGoodFitGender(filterData.gender || modash.gender),
-    language,
-    categories,
-    categorySearch: normalizeGoodFitFilterText(categories.join(' ')),
-  };
-}
-
-function itemMatchesGoodFitBackendFilters(item = {}, filters = {}) {
-  if (!hasGoodFitBackendFilters(filters)) return true;
-
-  const modash = item.modash || item.modashProfile || {};
-  const filterData = getGoodFitFilterData(item);
-
-  if (
-    filters.provider &&
-    filterData.provider &&
-    filterData.provider !== filters.provider
-  ) {
-    return false;
-  }
-
-  if (
-    filters.followersMin !== null &&
-    (filterData.followers === null || filterData.followers < filters.followersMin)
-  ) {
-    return false;
-  }
-
-  if (
-    filters.followersMax !== null &&
-    (filterData.followers === null || filterData.followers > filters.followersMax)
-  ) {
-    return false;
-  }
-
-  if (
-    filters.isVerified !== null &&
-    filterData.isVerified !== filters.isVerified
-  ) {
-    return false;
-  }
-
-  if (filters.isPrivate !== null && filterData.isPrivate !== filters.isPrivate) {
-    return false;
-  }
-
-  if (filters.gender && filterData.gender !== filters.gender) {
-    return false;
-  }
-
-  if (filters.ageMin !== null || filters.ageMax !== null) {
-    const wantedAgeRange = {
-      min: filters.ageMin ?? undefined,
-      max: filters.ageMax ?? undefined,
-    };
-
-    if (
-      !goodFitRangesOverlap(
-        parseGoodFitAgeRange(filterData.ageGroup),
-        wantedAgeRange
-      )
-    ) {
-      return false;
-    }
-  }
-
-  if (filters.country) {
-    const countrySearch = filterData.countrySearch;
-
-    if (
-      !countrySearch ||
-      (!countrySearch.includes(filters.country) &&
-        !filters.country.includes(countrySearch))
-    ) {
-      return false;
-    }
-  }
-
-  if (filters.category && !filterData.categorySearch.includes(filters.category)) {
-    return false;
-  }
-
-  if (filters.q) {
-    const haystack = [
-      item.name,
-      item.handle,
-      item.email,
-      item.country,
-      item.provider,
-      item.primaryLink,
-      Array.isArray(item.links) ? item.links.join(' ') : '',
-      Array.isArray(item.niche) ? item.niche.join(' ') : cleanStr(item.niche),
-      item.selectionReason,
-      modash.fullname,
-      modash.username,
-      modash.handle,
-      modash.url,
-      modash.country,
-      modash.city,
-      modash.state,
-      modash.subdivision,
-      modash.gender,
-      modash.ageGroup,
-      modash.language,
-      filterData.country,
-      filterData.city,
-      filterData.state,
-      filterData.language,
-      filterData.categories.join(' '),
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-
-    if (!haystack.includes(filters.q.toLowerCase())) return false;
-  }
-
-  return true;
-}
-
-function filterSerializedGoodFitPairs(serializedItems = [], originalItems = [], query = {}) {
-  const filters = buildGoodFitListFilters(query);
-
-  if (!hasGoodFitBackendFilters(filters)) {
-    return {
-      serializedItems,
-      originalItems,
-      filters,
-      filtered: false,
-    };
-  }
-
-  const nextSerializedItems = [];
-  const nextOriginalItems = [];
-
-  serializedItems.forEach((serializedItem, index) => {
-    if (itemMatchesGoodFitBackendFilters(serializedItem, filters)) {
-      nextSerializedItems.push(serializedItem);
-      nextOriginalItems.push(originalItems[index]);
-    }
-  });
-
-  return {
-    serializedItems: nextSerializedItems,
-    originalItems: nextOriginalItems,
-    filters,
-    filtered: true,
-  };
-}
-
-
-
 
 exports.getCampaignGoodFitList = async (req, res) => {
   try {
@@ -5731,7 +4688,6 @@ exports.getCampaignGoodFitList = async (req, res) => {
           campaigns: [campaignPayload],
           folders: [],
           items: [],
-          filters: buildGoodFitListFilters(req.query || {}),
         },
       });
     }
@@ -5756,27 +4712,9 @@ exports.getCampaignGoodFitList = async (req, res) => {
         folderSlug: doc.slug || '',
       };
 
-      let serializedItems = await Promise.all(
+      const serializedItems = await Promise.all(
         goodFitItems.map((item) => serializeFolderItemForShared(item))
       );
-
-      serializedItems = await enrichSerializedItemsWithModash(
-        serializedItems,
-        goodFitItems
-      );
-
-      const filteredPairs = filterSerializedGoodFitPairs(
-        serializedItems,
-        goodFitItems,
-        req.query || {}
-      );
-
-      serializedItems = filteredPairs.serializedItems;
-      const filteredGoodFitItems = filteredPairs.originalItems;
-
-      if (!serializedItems.length) {
-        continue;
-      }
 
       const folderPayload = {
         _id: String(doc._id),
@@ -5801,8 +4739,8 @@ exports.getCampaignGoodFitList = async (req, res) => {
         })),
       });
 
-      for (let i = 0; i < filteredGoodFitItems.length; i += 1) {
-        const originalItem = filteredGoodFitItems[i];
+      for (let i = 0; i < goodFitItems.length; i += 1) {
+        const originalItem = goodFitItems[i];
         const serializedItem = serializedItems[i];
 
         const uniqueKey = getInfluencerUniqueKey({
@@ -5836,7 +4774,6 @@ exports.getCampaignGoodFitList = async (req, res) => {
         campaigns: [campaignPayload],
         folders,
         items,
-        filters: buildGoodFitListFilters(req.query || {}),
       },
     });
   } catch (err) {
@@ -5890,7 +4827,6 @@ exports.getFolderGoodFitListAll = async (req, res) => {
           items: [],
           folders: [],
           campaigns: [],
-          filters: buildGoodFitListFilters(req.query || {}),
         },
       });
     }
@@ -5951,27 +4887,9 @@ exports.getFolderGoodFitListAll = async (req, res) => {
         campaignsMap.set(campaignMapKey, campaignPayload);
       }
 
-      let serializedItems = await Promise.all(
+      const serializedItems = await Promise.all(
         goodFitItems.map((item) => serializeFolderItemForShared(item))
       );
-
-      serializedItems = await enrichSerializedItemsWithModash(
-        serializedItems,
-        goodFitItems
-      );
-
-      const filteredPairs = filterSerializedGoodFitPairs(
-        serializedItems,
-        goodFitItems,
-        req.query || {}
-      );
-
-      serializedItems = filteredPairs.serializedItems;
-      const filteredGoodFitItems = filteredPairs.originalItems;
-
-      if (!serializedItems.length) {
-        continue;
-      }
 
       const folderItems = serializedItems.map((item) => ({
         ...item,
@@ -5991,8 +4909,8 @@ exports.getFolderGoodFitListAll = async (req, res) => {
         items: folderItems,
       });
 
-      for (let i = 0; i < filteredGoodFitItems.length; i += 1) {
-        const originalItem = filteredGoodFitItems[i];
+      for (let i = 0; i < goodFitItems.length; i += 1) {
+        const originalItem = goodFitItems[i];
         const serializedItem = serializedItems[i];
 
         const uniqueKey = getInfluencerUniqueKey({
@@ -6055,7 +4973,6 @@ exports.getFolderGoodFitListAll = async (req, res) => {
         campaigns: Array.from(campaignsMap.values()),
         items: uniqueItems,
         folders,
-        filters: buildGoodFitListFilters(req.query || {}),
       },
     });
   } catch (err) {
