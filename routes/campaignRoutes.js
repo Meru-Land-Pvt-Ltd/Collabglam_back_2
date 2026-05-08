@@ -21,10 +21,9 @@ router.post("/update-manual", brandAuth, campaignController.updateManualCampaign
 
 // 3. Get all campaigns
 router.get("/getAll", brandAuth, campaignController.getAllCampaigns);
-
+router.get("/getNonFullManagedCampaigns", brandAuth, campaignController.getNonFullManagedCampaigns);
 // 4. Get one campaign by its campaignId
 router.get("/get-by-id/:campaignId", verifyBrandOrAdmin, campaignController.getCampaignById);
-
 // 5. Delete a campaign
 router.post("/delete", brandAuth, campaignController.deleteCampaignByCampaignId);
 

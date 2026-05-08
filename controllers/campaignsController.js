@@ -2191,6 +2191,344 @@ exports.prefillCampaignWithAI = async (req, res) => {
   }
 };
 
+
+const FULLY_MANAGED_CAMPAIGN_TEXT_MARKERS = [
+  /^fully[\s_-]*managed$/i,
+  /^full[\s_-]*managed$/i,
+  /^fullymanaged$/i,
+  /^fullmanaged$/i,
+  /^managed$/i,
+  /^done[\s_-]*for[\s_-]*you$/i,
+  /^doneforyou$/i,
+];
+
+function getAuthedBrandIdForCampaignDropdown(req = {}) {
+  return clean(
+    req.brand?._id ||
+      req.brand?.id ||
+      req.brand?.brandId ||
+      req.brandId ||
+      req.user?.brandId ||
+      req.user?.brand?._id ||
+      req.user?.brand?.id ||
+      req.user?._id ||
+      req.user?.id ||
+      req.auth?.brandId ||
+      req.query?.brandId
+  );
+}
+
+function getNonFullManagedCampaignSearchOr(search) {
+  const term = clean(search);
+
+  if (!term) return [];
+
+  return [
+    { campaignTitle: { $regex: term, $options: "i" } },
+    { productOrServiceName: { $regex: term, $options: "i" } },
+    { brandName: { $regex: term, $options: "i" } },
+    { campaignType: { $regex: term, $options: "i" } },
+    { campaignCategory: { $regex: term, $options: "i" } },
+    { campaignSubcategory: { $regex: term, $options: "i" } },
+    { status: { $regex: term, $options: "i" } },
+  ];
+}
+
+function getNonFullManagedCampaignNor() {
+  const textFields = [
+    "campaignType",
+    "type",
+    "planType",
+    "planName",
+    "plan",
+    "packageType",
+    "packageName",
+    "subscriptionPlan",
+    "managementType",
+    "serviceType",
+    "creatorManagement",
+    "campaignMode",
+    "mode",
+    "source",
+    "creatorType",
+  ];
+
+  return [
+    { approvalMode: "admin_review" },
+    { "createdBy.role": "admin" },
+    { isFullyManaged: true },
+    { fullyManaged: true },
+    { fullManaged: true },
+    { isFullManaged: true },
+    { is_full_managed: true },
+    { isManaged: true },
+    { managedByAdmin: true },
+    ...textFields.map((field) => ({
+      [field]: { $in: FULLY_MANAGED_CAMPAIGN_TEXT_MARKERS },
+    })),
+  ];
+}
+
+function isUrlLikeCampaignLabel(value = "") {
+  const text = clean(value);
+
+  if (!text) return false;
+
+  return (
+    /^https?:\/\//i.test(text) ||
+    /^www\./i.test(text) ||
+    text.includes("localhost:") ||
+    text.includes("/brand/") ||
+    text.includes("/campaign/")
+  );
+}
+
+function pickSafeCampaignLabel(candidates = [], fallback = "Campaign") {
+  for (const candidate of candidates) {
+    const text = clean(candidate);
+
+    if (!text) continue;
+    if (["undefined", "null"].includes(text.toLowerCase())) continue;
+    if (isUrlLikeCampaignLabel(text)) continue;
+
+    return text;
+  }
+
+  return fallback;
+}
+
+function serializeNonFullManagedCampaign(campaignDoc = {}) {
+  const id = campaignDoc?._id ? String(campaignDoc._id) : "";
+
+  const label = pickSafeCampaignLabel(
+    [
+      campaignDoc.campaignTitle,
+      campaignDoc.productOrServiceName,
+      campaignDoc.title,
+      campaignDoc.name,
+      campaignDoc.campaignsId,
+    ],
+    id ? `Campaign ${id.slice(-6)}` : "Campaign"
+  );
+
+  return {
+    id,
+    _id: id,
+    campaignId: id,
+    campaignsId: clean(campaignDoc.campaignsId),
+    label: label || id,
+
+    campaignTitle: clean(campaignDoc.campaignTitle || campaignDoc.title || campaignDoc.name),
+    productOrServiceName: clean(campaignDoc.productOrServiceName),
+    description: clean(campaignDoc.description),
+
+    brandId: campaignDoc.brandId ? String(campaignDoc.brandId) : "",
+    brandName: clean(campaignDoc.brandName),
+
+    status: clean(campaignDoc.status),
+    publishStatus: clean(campaignDoc.publishStatus),
+    approvalMode: clean(campaignDoc.approvalMode),
+
+    isActive: campaignDoc.isActive,
+    isDraft: campaignDoc.isDraft,
+    byAi: campaignDoc.byAi,
+
+    campaignType: clean(campaignDoc.campaignType),
+    campaignCategory: clean(campaignDoc.campaignCategory),
+    campaignSubcategory: clean(campaignDoc.campaignSubcategory),
+
+    categoryId: campaignDoc.categoryId ? String(campaignDoc.categoryId) : "",
+    subcategoryIds: Array.isArray(campaignDoc.subcategoryIds)
+      ? campaignDoc.subcategoryIds.map((id) => String(id))
+      : [],
+
+    platformSelection: Array.isArray(campaignDoc.platformSelection)
+      ? campaignDoc.platformSelection
+      : [],
+
+    numberOfInfluencers: campaignDoc.numberOfInfluencers,
+    applicantCount: campaignDoc.applicantCount,
+    campaignBudget: campaignDoc.campaignBudget,
+    budget: campaignDoc.budget,
+
+    createdAt: campaignDoc.createdAt,
+    updatedAt: campaignDoc.updatedAt,
+    publishedAt: campaignDoc.publishedAt,
+    scheduledAt: campaignDoc.scheduledAt,
+    startAt: campaignDoc.startAt,
+    endAt: campaignDoc.endAt,
+    timeline: campaignDoc.timeline || null,
+
+    createdBy: campaignDoc.createdBy || null,
+    details: campaignDoc.details || null,
+
+    isFullyManaged: false,
+  };
+}
+
+exports.getNonFullManagedCampaigns = async (req, res) => {
+  const requestId = getRequestId(req);
+
+  try {
+    const rawBrandId = getAuthedBrandIdForCampaignDropdown(req);
+
+    if (!rawBrandId) {
+      return res.status(401).json({
+        success: false,
+        message: "Brand authentication is required.",
+        campaigns: [],
+        data: {
+          campaigns: [],
+          total: 0,
+        },
+      });
+    }
+
+    const brandDoc = await findBrandDocByAnyId(rawBrandId);
+    const brandObjectId = brandDoc?._id
+      ? String(brandDoc._id)
+      : isOid(rawBrandId)
+        ? rawBrandId
+        : "";
+
+    if (!brandObjectId || !isOid(brandObjectId)) {
+      return res.status(404).json({
+        success: false,
+        message: "Brand not found.",
+        campaigns: [],
+        data: {
+          campaigns: [],
+          total: 0,
+        },
+      });
+    }
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.max(Math.min(parseInt(req.query.limit, 10) || 200, 500), 1);
+    const skip = (page - 1) * limit;
+    const search = clean(req.query.search || req.query.q);
+    const includeDrafts =
+      String(req.query.includeDrafts || req.query.includeDraft || "")
+        .trim()
+        .toLowerCase() === "true";
+
+    const filter = {
+      brandId: toObjectId(brandObjectId),
+      $nor: getNonFullManagedCampaignNor(),
+    };
+
+    if (!includeDrafts) {
+      filter.$and = [
+        {
+          $or: [
+            { isDraft: { $exists: false } },
+            { isDraft: { $ne: 1 } },
+          ],
+        },
+        {
+          $or: [
+            { status: { $exists: false } },
+            { status: { $nin: ["draft", "archived"] } },
+          ],
+        },
+      ];
+    } else {
+      filter.status = { $ne: "archived" };
+    }
+
+    const searchOr = getNonFullManagedCampaignSearchOr(search);
+    if (searchOr.length) {
+      filter.$and = Array.isArray(filter.$and) ? filter.$and : [];
+      filter.$and.push({ $or: searchOr });
+    }
+
+    const sort = { updatedAt: -1, createdAt: -1 };
+
+    const [total, docs] = await Promise.all([
+      Campaign.countDocuments(filter),
+      Campaign.find(filter)
+        .select([
+          "_id",
+          "campaignsId",
+          "brandId",
+          "brandName",
+          "campaignTitle",
+          "productOrServiceName",
+          "description",
+          "status",
+          "publishStatus",
+          "approvalMode",
+          "isActive",
+          "isDraft",
+          "byAi",
+          "campaignType",
+          "campaignCategory",
+          "campaignSubcategory",
+          "categoryId",
+          "subcategoryIds",
+          "platformSelection",
+          "numberOfInfluencers",
+          "applicantCount",
+          "campaignBudget",
+          "budget",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "publishedAt",
+          "scheduledAt",
+          "startAt",
+          "endAt",
+          "timeline",
+        ].join(" "))
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    let enrichedDocs = docs;
+
+    try {
+      enrichedDocs = await enrichCampaigns(docs);
+    } catch (enrichErr) {
+      console.warn(
+        "[getNonFullManagedCampaigns] enrichCampaigns failed:",
+        enrichErr?.message || enrichErr
+      );
+    }
+
+    const campaigns = enrichedDocs.map(serializeNonFullManagedCampaign);
+
+    return res.status(200).json({
+      success: true,
+      message: "Non fully managed campaigns fetched successfully.",
+      campaigns,
+      data: {
+        campaigns,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      },
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      },
+      requestId,
+    });
+  } catch (err) {
+    console.error("[getNonFullManagedCampaigns] Error:", err);
+    return sendControllerError(res, requestId, err);
+  }
+};
+
+
 // ===============================
 // GET ALL
 // ===============================
@@ -6106,4 +6444,3 @@ exports.uploadImagesToS3 = async (req, res) => {
     });
   }
 };
-
