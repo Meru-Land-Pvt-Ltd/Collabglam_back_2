@@ -12,6 +12,7 @@ const {
   getAllDeliverablesByBrandOrInfluencerPost,
   getAllDeliverablesByMilestoneIdPost,
   getDeliverableStatusByInfluencerIdPost,
+  getDeliverablesByMilestoneHistoryIdPost
 } = require("../controllers/delieverableController");
 
 const { influencerAuth } = require("../auth/influencerAuth");
@@ -51,6 +52,11 @@ router.post("/by-milestone", getAllDeliverablesByMilestoneIdPost);
 router.post(
   "/status/by-influencer",
   getDeliverableStatusByInfluencerIdPost
+);
+
+router.post(
+  "/by-milestonehistoryId",
+  getDeliverablesByMilestoneHistoryIdPost
 );
 
 module.exports = router;

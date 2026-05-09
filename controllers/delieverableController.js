@@ -1377,3 +1377,117 @@ exports.adminCreateDeliverableApproval = async (req, res) => {
     });
   }
 };
+
+
+// POST: Get deliverables by milestoneHistoryId
+// Body: milestoneId, milestoneHistoryId, campaignId, influencerId
+exports.getDeliverablesByMilestoneHistoryIdPost = async (req, res) => {
+  try {
+    const {
+      milestoneId,
+      milestoneHistoryId,
+      campaignId,
+      influencerId,
+      status,
+      page = 1,
+      limit = 20,
+    } = req.body || {};
+
+    if (!milestoneId || !milestoneHistoryId || !campaignId || !influencerId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "milestoneId, milestoneHistoryId, campaignId, and influencerId are required.",
+      });
+    }
+
+    if (
+      !isValidObjectId(milestoneId) ||
+      !isValidObjectId(milestoneHistoryId) ||
+      !isValidObjectId(campaignId) ||
+      !isValidObjectId(influencerId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more ids are invalid.",
+      });
+    }
+
+    const milestoneObjectId = toObjectId(milestoneId);
+    const milestoneHistoryObjectId = toObjectId(milestoneHistoryId);
+    const campaignObjectId = toObjectId(campaignId);
+    const influencerObjectId = toObjectId(influencerId);
+
+    // Verify milestone history belongs to this milestone, campaign, and influencer
+    const msDoc = await Milestone.findOne({
+      _id: milestoneObjectId,
+      "milestoneHistory._id": milestoneHistoryObjectId,
+    })
+      .select("_id milestoneHistory")
+      .lean();
+
+    if (!msDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history not found for given milestoneId and milestoneHistoryId.",
+      });
+    }
+
+    const historyItem = (msDoc.milestoneHistory || []).find(
+      (h) => String(h._id) === String(milestoneHistoryObjectId)
+    );
+
+    if (!historyItem) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history item not found.",
+      });
+    }
+
+    if (String(historyItem.campaignId) !== String(campaignObjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "campaignId does not match milestone history campaignId.",
+      });
+    }
+
+    if (String(historyItem.influencerId) !== String(influencerObjectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "influencerId does not match milestone history influencerId.",
+      });
+    }
+
+    const query = {
+      milestoneId: milestoneObjectId,
+      milestoneHistoryId: milestoneHistoryObjectId,
+      campaignId: campaignObjectId,
+      influencerId: influencerObjectId,
+    };
+
+    if (status) {
+      query.status = String(status).trim();
+    }
+
+    const result = await buildDeliverablesResponse(query, page, limit);
+
+    return res.status(200).json({
+      success: true,
+      message: "Deliverables fetched successfully by milestoneHistoryId.",
+      ...result,
+      filters: {
+        milestoneId,
+        milestoneHistoryId,
+        campaignId,
+        influencerId,
+        ...(status ? { status } : {}),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch deliverables by milestoneHistoryId.",
+      error: err.message,
+    });
+  }
+};
