@@ -1584,3 +1584,370 @@ exports.setApplicantDecisionStatus = async (req, res) => {
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
+  const { brandId } = req.body || {};
+
+  if (!brandId) {
+    return res.status(400).json({
+      success: false,
+      message: "brandId is required",
+    });
+  }
+
+  try {
+    const normalizeId = (value) => String(value || "").trim();
+
+    const toNumber = (value) => {
+      if (value == null) return 0;
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+
+      const cleaned = String(value).replace(/[%,$\s,]/g, "");
+      const num = Number(cleaned);
+
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const getNested = (obj, path) => {
+      try {
+        return path
+          .split(".")
+          .reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+      } catch {
+        return undefined;
+      }
+    };
+
+    const getFirstText = (obj, paths = []) => {
+      for (const path of paths) {
+        const value = getNested(obj, path);
+
+        if (value != null && String(value).trim()) {
+          return String(value).trim();
+        }
+      }
+
+      return "";
+    };
+
+    const getFirstNumber = (obj, paths = []) => {
+      for (const path of paths) {
+        const value = getNested(obj, path);
+        const num = toNumber(value);
+
+        if (num) return num;
+      }
+
+      return 0;
+    };
+
+    const normalizeHandle = (value) => {
+      const handle = String(value || "").trim();
+
+      if (!handle) return "";
+      return handle.startsWith("@") ? handle : `@${handle}`;
+    };
+
+    const getFollowersFromProfile = (profile) => {
+      return getFirstNumber(profile, [
+        "followers",
+        "followerCount",
+        "followersCount",
+        "audienceSize",
+        "audience_size",
+        "stats.followers",
+        "metrics.followers",
+        "profile.followers",
+      ]);
+    };
+
+    const getEngagementRateFromProfile = (profile) => {
+      let value = getFirstNumber(profile, [
+        "engagementRate",
+        "engagement_rate",
+        "avgEngagementRate",
+        "avg_engagement_rate",
+        "er",
+        "stats.engagementRate",
+        "metrics.engagementRate",
+        "engagement.rate",
+      ]);
+
+      if (!value) return 0;
+
+      if (value > 0 && value <= 1) {
+        value = value * 100;
+      }
+
+      return Number(value.toFixed(2));
+    };
+
+    const getPlatformFromProfile = (profile) => {
+      return getFirstText(profile, [
+        "provider",
+        "platform",
+        "channel",
+        "source",
+        "network",
+      ]);
+    };
+
+    const getProfileImage = (inf, profile) => {
+      return (
+        getFirstText(inf, [
+          "profileImage",
+          "profile_image",
+          "image",
+          "avatar",
+          "avatarUrl",
+          "profilePicture",
+          "profilePic",
+          "photo",
+          "photoUrl",
+        ]) ||
+        getFirstText(profile, [
+          "profileImage",
+          "profile_image",
+          "image",
+          "avatar",
+          "avatarUrl",
+          "picture",
+          "pictureUrl",
+          "profile.picture",
+          "profile.image",
+        ])
+      );
+    };
+
+    const getInfluencerHandle = (inf, profile) => {
+      const raw =
+        getFirstText(profile, [
+          "handle",
+          "username",
+          "fullname",
+          "profile.username",
+          "profile.handle",
+        ]) ||
+        getFirstText(inf, [
+          "handle",
+          "username",
+          "instagramHandle",
+          "youtubeHandle",
+          "tiktokHandle",
+          "socialHandle",
+        ]);
+
+      return normalizeHandle(raw);
+    };
+
+    const pickBestModashProfile = (profiles = []) => {
+      if (!Array.isArray(profiles) || !profiles.length) return null;
+
+      return (
+        profiles
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(getFollowersFromProfile(b) || 0) -
+              Number(getFollowersFromProfile(a) || 0)
+          )[0] || null
+      );
+    };
+
+    const brandObjectIdFilters = [];
+
+    if (mongoose.Types.ObjectId.isValid(String(brandId))) {
+      brandObjectIdFilters.push({
+        brandId: new mongoose.Types.ObjectId(String(brandId)),
+      });
+    }
+
+    const brandDoc = await Brand.findOne({
+      $or: [
+        { _id: mongoose.Types.ObjectId.isValid(String(brandId)) ? new mongoose.Types.ObjectId(String(brandId)) : brandId },
+        { brandId: String(brandId) },
+      ],
+    })
+      .select("_id brandId name brandName email")
+      .lean();
+
+    const brandIdCandidates = [
+      String(brandId),
+      brandDoc?._id ? String(brandDoc._id) : "",
+      brandDoc?.brandId ? String(brandDoc.brandId) : "",
+    ].filter(Boolean);
+
+    const campaignBrandFilters = [
+      { brandId: { $in: brandIdCandidates } },
+      { brandId: String(brandId) },
+      ...brandObjectIdFilters,
+    ];
+
+    const campaigns = await Campaign.find({
+      $or: campaignBrandFilters,
+    })
+      .select(
+        "_id campaignsId campaignId brandId brandName productOrServiceName campaignTitle title name createdAt"
+      )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!campaigns.length) {
+      return res.status(200).json({
+        success: true,
+        brand: {
+          brandId: String(brandId),
+          name: brandDoc?.name || brandDoc?.brandName || "",
+          campaigns: [],
+        },
+      });
+    }
+
+    const campaignCandidateIds = [];
+
+    for (const campaign of campaigns) {
+      if (campaign?._id) campaignCandidateIds.push(String(campaign._id));
+      if (campaign?.campaignsId) campaignCandidateIds.push(String(campaign.campaignsId));
+      if (campaign?.campaignId) campaignCandidateIds.push(String(campaign.campaignId));
+    }
+
+    const applyRecords = await ApplyCampaign.find({
+      campaignId: { $in: campaignCandidateIds },
+    }).lean();
+
+    const applyByCampaignId = new Map();
+
+    for (const record of applyRecords) {
+      const key = String(record.campaignId || "");
+      if (!key) continue;
+
+      applyByCampaignId.set(key, record);
+    }
+
+    const influencerIdsSet = new Set();
+
+    for (const record of applyRecords) {
+      const applicants = Array.isArray(record?.applicants) ? record.applicants : [];
+
+      for (const applicant of applicants) {
+        if (applicant?.influencerId && mongoose.Types.ObjectId.isValid(String(applicant.influencerId))) {
+          influencerIdsSet.add(String(applicant.influencerId));
+        }
+      }
+    }
+
+    const influencerIds = Array.from(influencerIdsSet);
+
+    const influencers = influencerIds.length
+      ? await InfluencerModel.find({
+          _id: {
+            $in: influencerIds.map((id) => new mongoose.Types.ObjectId(id)),
+          },
+        }).lean()
+      : [];
+
+    const influencerById = new Map(
+      influencers.map((inf) => [String(inf._id), inf])
+    );
+
+    const modashProfiles = influencerIds.length
+      ? await Modash.find({
+          influencerId: { $in: influencerIds },
+        }).lean()
+      : [];
+
+    const modashByInfluencerId = new Map();
+
+    for (const profile of modashProfiles) {
+      const key = String(profile.influencerId || "");
+      if (!key) continue;
+
+      if (!modashByInfluencerId.has(key)) {
+        modashByInfluencerId.set(key, []);
+      }
+
+      modashByInfluencerId.get(key).push(profile);
+    }
+
+    const formattedCampaigns = campaigns.map((campaign) => {
+      const campaignIds = [
+        campaign?._id ? String(campaign._id) : "",
+        campaign?.campaignsId ? String(campaign.campaignsId) : "",
+        campaign?.campaignId ? String(campaign.campaignId) : "",
+      ].filter(Boolean);
+
+      let applyRecord = null;
+
+      for (const id of campaignIds) {
+        if (applyByCampaignId.has(id)) {
+          applyRecord = applyByCampaignId.get(id);
+          break;
+        }
+      }
+
+      const applicants = Array.isArray(applyRecord?.applicants)
+        ? applyRecord.applicants
+        : [];
+
+      const appliedInfluencers = applicants
+        .map((applicant) => {
+          const influencerId = String(applicant?.influencerId || "");
+          const inf = influencerById.get(influencerId);
+
+          if (!inf) return null;
+
+          const profiles = modashByInfluencerId.get(influencerId) || [];
+          const bestProfile = pickBestModashProfile(profiles);
+
+          const name = inf.name || applicant.name || "";
+          const handle = getInfluencerHandle(inf, bestProfile);
+          const profileImage = getProfileImage(inf, bestProfile);
+          const platform = getPlatformFromProfile(bestProfile);
+          const followers = getFollowersFromProfile(bestProfile);
+          const engagementRate = getEngagementRateFromProfile(bestProfile);
+
+          return {
+            influencerId,
+            name,
+            handle,
+            profileImage,
+            platform,
+            followers,
+            engagementRate,
+            appliedAt: applicant?.appliedAt || null,
+          };
+        })
+        .filter(Boolean);
+
+      return {
+        campaignId: String(campaign._id),
+        campaignsId: campaign.campaignsId || null,
+        campaignTitle:
+          campaign.campaignTitle ||
+          campaign.productOrServiceName ||
+          campaign.title ||
+          campaign.name ||
+          "",
+        productOrServiceName: campaign.productOrServiceName || "",
+        appliedInfluencerCount: appliedInfluencers.length,
+        appliedInfluencers,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      brand: {
+        brandId: String(brandId),
+        name: brandDoc?.name || brandDoc?.brandName || campaigns?.[0]?.brandName || "",
+        campaigns: formattedCampaigns,
+      },
+    });
+  } catch (err) {
+    console.error("Error in getBrandCampaignsWithAppliedInfluencers:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};

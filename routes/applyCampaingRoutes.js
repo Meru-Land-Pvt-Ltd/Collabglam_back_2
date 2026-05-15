@@ -4,7 +4,8 @@ const {
   applyToCampaign,
   getListByCampaign,
   approveInfluencer,
-  setApplicantDecisionStatus
+  setApplicantDecisionStatus,
+  getBrandCampaignsWithAppliedInfluencers
 } = require('../controllers/applyCampaignsController');
 
 // influencer applies to a campaign (requires valid token)
@@ -17,5 +18,7 @@ router.post(
   '/update-status',
  setApplicantDecisionStatus
 );
+
+router.post('/brand-campaigns', getBrandCampaignsWithAppliedInfluencers);
 
 module.exports = router;

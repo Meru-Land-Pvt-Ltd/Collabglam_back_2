@@ -161,24 +161,225 @@ exports.getDashboardInf = async (req, res) => {
 exports.getBrandDashboardHome = async (req, res) => {
   try {
     const brandIdRaw = req.body?.brandId || req.user?.brandId;
+
     if (!brandIdRaw) {
       return res.status(400).json({ error: "brandId is required" });
     }
 
     const brandObjectId = toObjectIdStrict(brandIdRaw, "brandId");
 
-    // 1) Brand
     const brand = await Brand.findById(brandObjectId, "name brandName").lean();
+
     if (!brand) {
       return res.status(404).json({ error: "Brand not found" });
     }
 
-    // 2) All campaigns (non-draft)
+    const getCampaignKeys = (campaign = {}) => {
+      return [
+        campaign?._id ? String(campaign._id) : "",
+        campaign?.campaignsId ? String(campaign.campaignsId) : "",
+        campaign?.campaignId ? String(campaign.campaignId) : "",
+      ].filter(Boolean);
+    };
+
+    const unique = (arr = []) => [...new Set(arr.filter(Boolean))];
+
+    const getNested = (obj, path) => {
+      try {
+        return path
+          .split(".")
+          .reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+      } catch {
+        return undefined;
+      }
+    };
+
+    const toNumber = (value) => {
+      if (value == null) return 0;
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+
+      const cleaned = String(value).replace(/[%,$\s,]/g, "");
+      const num = Number(cleaned);
+
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const getFirstText = (obj, paths = []) => {
+      for (const path of paths) {
+        const value = getNested(obj, path);
+
+        if (value != null && String(value).trim()) {
+          return String(value).trim();
+        }
+      }
+
+      return "";
+    };
+
+    const getFirstNumber = (obj, paths = []) => {
+      for (const path of paths) {
+        const value = getNested(obj, path);
+        const num = toNumber(value);
+
+        if (num) return num;
+      }
+
+      return 0;
+    };
+
+    const normalizeHandle = (value) => {
+      const handle = String(value || "").trim();
+
+      if (!handle) return "";
+      return handle.startsWith("@") ? handle : `@${handle}`;
+    };
+
+    const getCampaignStartAt = (campaign = {}) => {
+      return (
+        campaign.startAt ||
+        campaign.startDate ||
+        campaign.campaignStartAt ||
+        campaign.campaignStartDate ||
+        campaign.timelineStartAt ||
+        campaign.timelineStartDate ||
+        campaign.timeline?.startAt ||
+        campaign.timeline?.startDate ||
+        campaign.duration?.startAt ||
+        campaign.duration?.startDate ||
+        null
+      );
+    };
+
+    const getCampaignEndAt = (campaign = {}) => {
+      return (
+        campaign.endAt ||
+        campaign.endDate ||
+        campaign.campaignEndAt ||
+        campaign.campaignEndDate ||
+        campaign.timelineEndAt ||
+        campaign.timelineEndDate ||
+        campaign.timeline?.endAt ||
+        campaign.timeline?.endDate ||
+        campaign.duration?.endAt ||
+        campaign.duration?.endDate ||
+        null
+      );
+    };
+
+    const getFollowersFromProfile = (profile) => {
+      return getFirstNumber(profile, [
+        "followers",
+        "followerCount",
+        "followersCount",
+        "audienceSize",
+        "audience_size",
+        "stats.followers",
+        "metrics.followers",
+        "profile.followers",
+      ]);
+    };
+
+    const getEngagementRateFromProfile = (profile) => {
+      let value = getFirstNumber(profile, [
+        "engagementRate",
+        "engagement_rate",
+        "avgEngagementRate",
+        "avg_engagement_rate",
+        "er",
+        "stats.engagementRate",
+        "metrics.engagementRate",
+        "engagement.rate",
+      ]);
+
+      if (!value) return 0;
+
+      if (value > 0 && value <= 1) {
+        value = value * 100;
+      }
+
+      return Number(value.toFixed(2));
+    };
+
+    const getPlatformFromProfile = (profile) => {
+      return getFirstText(profile, [
+        "provider",
+        "platform",
+        "channel",
+        "source",
+        "network",
+      ]);
+    };
+
+    const getProfileImage = (influencer, profile) => {
+      return (
+        getFirstText(influencer, [
+          "profileImage",
+          "profile_image",
+          "image",
+          "avatar",
+          "avatarUrl",
+          "profilePicture",
+          "profilePic",
+          "photo",
+          "photoUrl",
+        ]) ||
+        getFirstText(profile, [
+          "profileImage",
+          "profile_image",
+          "image",
+          "avatar",
+          "avatarUrl",
+          "picture",
+          "pictureUrl",
+          "profile.picture",
+          "profile.image",
+        ])
+      );
+    };
+
+    const getInfluencerHandle = (influencer, profile) => {
+      const raw =
+        getFirstText(profile, [
+          "handle",
+          "username",
+          "fullname",
+          "profile.username",
+          "profile.handle",
+        ]) ||
+        getFirstText(influencer, [
+          "handle",
+          "username",
+          "instagramHandle",
+          "youtubeHandle",
+          "tiktokHandle",
+          "socialHandle",
+        ]);
+
+      return normalizeHandle(raw);
+    };
+
+    const pickBestModashProfile = (profiles = []) => {
+      if (!Array.isArray(profiles) || !profiles.length) return null;
+
+      return (
+        profiles
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(getFollowersFromProfile(b) || 0) -
+              Number(getFollowersFromProfile(a) || 0)
+          )[0] || null
+      );
+    };
+
     const allCampaigns = await Campaign.find(
       { ...brandFilter("brandId", brandObjectId), isDraft: { $ne: 1 } },
       `
         _id
+        campaignsId
+        campaignId
         campaignTitle
+        productOrServiceName
         campaignGoals
         campaignBudget
         budget
@@ -187,6 +388,21 @@ exports.getBrandDashboardHome = async (req, res) => {
         campaignStatus
         isActive
         createdAt
+        updatedAt
+        startAt
+        endAt
+        startDate
+        endDate
+        campaignStartAt
+        campaignEndAt
+        campaignStartDate
+        campaignEndDate
+        timelineStartAt
+        timelineEndAt
+        timelineStartDate
+        timelineEndDate
+        timeline
+        duration
         numberOfInfluencers
         platformSelection
       `
@@ -197,60 +413,190 @@ exports.getBrandDashboardHome = async (req, res) => {
     const totalCreatedCampaigns = allCampaigns.length;
 
     const campaignIds = allCampaigns
-      .map((c) => String(c._id || ""))
+      .map((campaign) => String(campaign._id || ""))
       .filter(Boolean);
 
-    // 2.1) Resolve campaign goal names
+    const campaignKeys = unique(allCampaigns.flatMap(getCampaignKeys));
+
     const goalIds = [
       ...new Set(
         allCampaigns
-          .flatMap((c) => (Array.isArray(c.campaignGoals) ? c.campaignGoals : []))
+          .flatMap((campaign) =>
+            Array.isArray(campaign.campaignGoals) ? campaign.campaignGoals : []
+          )
           .map((id) => String(id))
           .filter(Boolean)
       ),
     ];
 
     let goalMap = new Map();
+
     if (goalIds.length) {
       const goals = await ProductServiceGoalModel.find(
         { _id: { $in: goalIds.map((id) => new mongoose.Types.ObjectId(id)) } },
         "_id goal"
       ).lean();
 
-      goalMap = new Map(goals.map((g) => [String(g._id), g.goal]));
+      goalMap = new Map(goals.map((goal) => [String(goal._id), goal.goal]));
     }
 
-    // 3) Accepted contracts -> latest per campaign
     const acceptedContracts = await Contract.find(
       acceptedContractFilter({ ...brandFilter("brandId", brandObjectId) }),
-      "campaignId contractId influencerId lastActionAt createdAt"
+      `
+        _id
+        contractId
+        campaignId
+        influencerId
+        status
+        contractStatus
+        lifecycleStatus
+        currentStatus
+        isAssigned
+        isAccepted
+        lastActionAt
+        createdAt
+        updatedAt
+      `
     )
       .sort({ lastActionAt: -1, createdAt: -1 })
       .lean();
 
-    const contractByCampaign = new Map();
-    for (const c of acceptedContracts) {
-      const key = String(c.campaignId || "");
+    const contractsByCampaignKey = new Map();
+
+    for (const contract of acceptedContracts) {
+      const key = String(contract.campaignId || "");
+
       if (!key) continue;
 
-      if (!contractByCampaign.has(key)) {
-        contractByCampaign.set(key, {
-          contractId: c.contractId || null,
-          influencerId: c.influencerId || null,
-        });
+      if (!contractsByCampaignKey.has(key)) {
+        contractsByCampaignKey.set(key, []);
+      }
+
+      contractsByCampaignKey.get(key).push(contract);
+    }
+
+    const acceptedCampaignIds = new Set(
+      Array.from(contractsByCampaignKey.keys())
+    );
+
+    const acceptedCount = acceptedCampaignIds.size;
+
+    const activeInfluencerIds = unique(
+      acceptedContracts
+        .map((contract) => String(contract.influencerId || ""))
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    );
+
+    const activeInfluencerObjectIds = activeInfluencerIds.map(
+      (id) => new mongoose.Types.ObjectId(id)
+    );
+
+    const [activeInfluencerDocs, modashProfiles] = await Promise.all([
+      activeInfluencerObjectIds.length
+        ? Influencer.find({
+            $or: [
+              { _id: { $in: activeInfluencerObjectIds } },
+              { influencerId: { $in: activeInfluencerIds } },
+            ],
+          })
+            .select(
+              `
+                _id
+                influencerId
+                name
+                email
+                handle
+                username
+                instagramHandle
+                youtubeHandle
+                tiktokHandle
+                socialHandle
+                profileImage
+                profile_image
+                image
+                avatar
+                avatarUrl
+                profilePicture
+                profilePic
+                photo
+                photoUrl
+              `
+            )
+            .lean()
+        : [],
+
+      activeInfluencerIds.length
+        ? Modash.find({
+            $or: [
+              { influencerId: { $in: activeInfluencerIds } },
+              { influencer: { $in: activeInfluencerObjectIds } },
+            ],
+          }).lean()
+        : [],
+    ]);
+
+    const influencerById = new Map();
+
+    activeInfluencerDocs.forEach((influencer) => {
+      influencerById.set(String(influencer._id), influencer);
+
+      if (influencer.influencerId) {
+        influencerById.set(String(influencer.influencerId), influencer);
+      }
+    });
+
+    const modashByInfluencerId = new Map();
+
+    for (const profile of modashProfiles) {
+      const keys = [
+        profile.influencerId ? String(profile.influencerId) : "",
+        profile.influencer ? String(profile.influencer) : "",
+      ].filter(Boolean);
+
+      for (const key of keys) {
+        if (!modashByInfluencerId.has(key)) {
+          modashByInfluencerId.set(key, []);
+        }
+
+        modashByInfluencerId.get(key).push(profile);
       }
     }
 
-    const acceptedCampaignIds = new Set(Array.from(contractByCampaign.keys()));
-    const acceptedCount = acceptedCampaignIds.size;
+    const serializeActiveInfluencer = (contract) => {
+      const influencerId = String(contract.influencerId || "");
+      const influencer = influencerById.get(influencerId) || null;
+      const profiles = modashByInfluencerId.get(influencerId) || [];
+      const profile = pickBestModashProfile(profiles);
 
-    // 4) Applied influencers per campaign + total
+      return {
+        influencerId,
+        name: influencer?.name || "",
+        handle: getInfluencerHandle(influencer, profile),
+        profileImage: getProfileImage(influencer, profile),
+        platform: getPlatformFromProfile(profile),
+        followers: getFollowersFromProfile(profile),
+        engagementRate: getEngagementRateFromProfile(profile),
+
+        contractId: contract.contractId || null,
+        contractMongoId: contract._id ? String(contract._id) : null,
+        contractStatus:
+          contract.status ||
+          contract.contractStatus ||
+          contract.lifecycleStatus ||
+          contract.currentStatus ||
+          null,
+
+        lastActionAt: contract.lastActionAt || null,
+        assignedAt: contract.createdAt || null,
+      };
+    };
+
     const appliedCountMap = new Map();
     let totalAppliedInfluencers = 0;
 
-    if (campaignIds.length) {
+    if (campaignKeys.length) {
       const agg = await ApplyCampaign.aggregate([
-        { $match: { campaignId: { $in: campaignIds } } },
+        { $match: { campaignId: { $in: campaignKeys } } },
         { $unwind: "$applicants" },
         {
           $group: {
@@ -268,12 +614,16 @@ exports.getBrandDashboardHome = async (req, res) => {
         },
         {
           $facet: {
-            perCampaign: [{ $project: { _id: 1, appliedInfluencersCount: 1 } }],
+            perCampaign: [
+              { $project: { _id: 1, appliedInfluencersCount: 1 } },
+            ],
             total: [
               {
                 $group: {
                   _id: null,
-                  totalAppliedInfluencers: { $sum: "$appliedInfluencersCount" },
+                  totalAppliedInfluencers: {
+                    $sum: "$appliedInfluencersCount",
+                  },
                 },
               },
             ],
@@ -285,15 +635,47 @@ exports.getBrandDashboardHome = async (req, res) => {
       const total = agg?.[0]?.total?.[0]?.totalAppliedInfluencers || 0;
 
       totalAppliedInfluencers = Number(total) || 0;
+
       perCampaign.forEach((row) => {
-        appliedCountMap.set(String(row._id), Number(row.appliedInfluencersCount || 0));
+        appliedCountMap.set(
+          String(row._id),
+          Number(row.appliedInfluencersCount || 0)
+        );
       });
     }
 
-    // 5) Show list rule
-    const anyUnaccepted = allCampaigns.some((camp) => {
-      const id = String(camp._id || "");
-      return id && !acceptedCampaignIds.has(id);
+    const getContractsForCampaign = (campaign) => {
+      const keys = getCampaignKeys(campaign);
+      const map = new Map();
+
+      keys.forEach((key) => {
+        const contracts = contractsByCampaignKey.get(key) || [];
+
+        contracts.forEach((contract) => {
+          const contractKey = String(contract._id || contract.contractId || "");
+          if (!contractKey) return;
+
+          if (!map.has(contractKey)) {
+            map.set(contractKey, contract);
+          }
+        });
+      });
+
+      return Array.from(map.values());
+    };
+
+    const getAppliedCountForCampaign = (campaign) => {
+      return getCampaignKeys(campaign).reduce((sum, key) => {
+        return sum + Number(appliedCountMap.get(key) || 0);
+      }, 0);
+    };
+
+    const hasAcceptedCampaign = (campaign) => {
+      return getCampaignKeys(campaign).some((key) => acceptedCampaignIds.has(key));
+    };
+
+    const anyUnaccepted = allCampaigns.some((campaign) => {
+      return !hasAcceptedCampaign(campaign);
     });
 
     const showAll = acceptedCount === 0 || anyUnaccepted;
@@ -301,75 +683,101 @@ exports.getBrandDashboardHome = async (req, res) => {
 
     const baseList = showAll
       ? allCampaigns
-      : allCampaigns.filter((c) => acceptedCampaignIds.has(String(c._id || "")));
+      : allCampaigns.filter((campaign) => hasAcceptedCampaign(campaign));
 
-    const campaigns = baseList.map((c) => {
-      const id = String(c._id || "");
-      const meta = contractByCampaign.get(id) || {};
+    const campaigns = baseList.map((campaign) => {
+      const id = String(campaign._id || "");
+      const activeContracts = getContractsForCampaign(campaign);
 
-      const goalNames = (Array.isArray(c.campaignGoals) ? c.campaignGoals : [])
-        .map((gid) => goalMap.get(String(gid)))
+      const activeInfluencerMap = new Map();
+
+      activeContracts.forEach((contract) => {
+        const influencerId = String(contract.influencerId || "");
+        if (!influencerId || activeInfluencerMap.has(influencerId)) return;
+
+        activeInfluencerMap.set(
+          influencerId,
+          serializeActiveInfluencer(contract)
+        );
+      });
+
+      const activeInfluencers = Array.from(activeInfluencerMap.values());
+
+      const firstActiveContract = activeContracts[0] || null;
+
+      const goalNames = (
+        Array.isArray(campaign.campaignGoals) ? campaign.campaignGoals : []
+      )
+        .map((goalId) => goalMap.get(String(goalId)))
         .filter(Boolean);
 
       return {
-        // campaignId: id,
-        id, // optional
+        id,
+        campaignId: id,
+        campaignsId: campaign.campaignsId || null,
 
-        campaignTitle: c.campaignTitle || "",
-        productOrServiceName: c.campaignTitle || "",
+        campaignTitle:
+          campaign.campaignTitle ||
+          campaign.productOrServiceName ||
+          "",
+
+        productOrServiceName:
+          campaign.productOrServiceName ||
+          campaign.campaignTitle ||
+          "",
+
+        startAt: getCampaignStartAt(campaign),
+        endAt: getCampaignEndAt(campaign),
 
         goals: goalNames,
         goal: goalNames[0] || "",
 
-        campaignBudget: Number(c.campaignBudget || 0),
-        budget: Number(c.campaignBudget || c.budget || 0),
+        campaignBudget: Number(campaign.campaignBudget || 0),
+        budget: Number(campaign.campaignBudget || campaign.budget || 0),
 
-        status: c.status || "",
-        publishStatus: c.publishStatus || "",
-        campaignStatus: c.campaignStatus || "",
+        status: campaign.status || "",
+        publishStatus: campaign.publishStatus || "",
+        campaignStatus: campaign.campaignStatus || "",
 
-        isActive: Number(c.isActive || 0),
-        createdAt: c.createdAt || null,
+        isActive: Number(campaign.isActive || 0),
+        createdAt: campaign.createdAt || null,
+        updatedAt: campaign.updatedAt || null,
 
-        numberOfInfluencers: Number(c.numberOfInfluencers || 0),
-        platformSelection: Array.isArray(c.platformSelection) ? c.platformSelection : [],
+        numberOfInfluencers: Number(campaign.numberOfInfluencers || 0),
+        platformSelection: Array.isArray(campaign.platformSelection)
+          ? campaign.platformSelection
+          : [],
 
-        hasAcceptedInfluencer: acceptedCampaignIds.has(id),
-        influencerId: meta.influencerId ?? null,
-        contractId: meta.contractId ?? null,
+        hasAcceptedInfluencer: activeInfluencers.length > 0,
+        influencerId: firstActiveContract?.influencerId || null,
+        contractId: firstActiveContract?.contractId || null,
 
-        appliedInfluencersCount: appliedCountMap.get(id) || 0,
+        appliedInfluencersCount: getAppliedCountForCampaign(campaign),
+
+        activeInfluencerCount: activeInfluencers.length,
+        activeInfluencers,
       };
     });
 
-    // 6) Total hired influencers from ACTIVE campaigns only
-    const activeCampaignIds = allCampaigns
-      .filter(
-        (c) =>
-          Number(c.isActive) === 1 &&
-          c.status !== "draft" &&
-          c.status !== "archived"
-      )
-      .map((c) => String(c._id || ""))
-      .filter(Boolean);
+    const activeCampaignKeySet = new Set(
+      allCampaigns
+        .filter(
+          (campaign) =>
+            Number(campaign.isActive) === 1 &&
+            campaign.status !== "draft" &&
+            campaign.status !== "archived"
+        )
+        .flatMap(getCampaignKeys)
+    );
 
-    let totalHiredInfluencers = 0;
-    if (activeCampaignIds.length) {
-      const hiredAgg = await Contract.aggregate([
-        {
-          $match: acceptedContractFilter({
-            ...brandFilter("brandId", brandObjectId),
-            campaignId: { $in: activeCampaignIds },
-          }),
-        },
-        { $group: { _id: "$influencerId" } },
-        { $count: "total" },
-      ]);
+    const totalHiredInfluencers = unique(
+      acceptedContracts
+        .filter((contract) =>
+          activeCampaignKeySet.has(String(contract.campaignId || ""))
+        )
+        .map((contract) => String(contract.influencerId || ""))
+    ).length;
 
-      totalHiredInfluencers = hiredAgg?.[0]?.total || 0;
-    }
-
-    // 7) Budget remaining
     const milestone = await Milestone.findOne(
       brandFilter("brandId", brandObjectId),
       "walletBalance"
@@ -389,6 +797,7 @@ exports.getBrandDashboardHome = async (req, res) => {
     });
   } catch (err) {
     console.error("getBrandDashboardHome error:", err);
+
     return res
       .status(err?.status || 500)
       .json({ error: err?.message || "Server error" });

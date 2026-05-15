@@ -47,6 +47,26 @@ const getOrCreateBrandWallet = async (brandId, session = null) => {
   return wallet;
 };
 
+const normalizeDeliverableLinks = (input = []) => {
+  const list = Array.isArray(input) ? input : input ? [input] : [];
+
+  return list
+    .map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          label: "",
+          url: String(item || "").trim(),
+        };
+      }
+
+      return {
+        label: String(item?.label || item?.name || `Link ${index + 1}`).trim(),
+        url: String(item?.url || item?.link || "").trim(),
+      };
+    })
+    .filter((item) => item.url);
+};
+
 const getWalletSnapshotByBrandId = async (brandId) => {
   const wallet = await BrandWalletModel.findOne({ brandId });
 
@@ -126,6 +146,150 @@ const syncUsableBalance = (wallet) => {
   };
 };
 
+const clean = (value) => String(value || "").trim();
+
+const toArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === "") return [];
+  return [value];
+};
+
+const toDateOrNull = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date;
+};
+
+const boolValue = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    return ["true", "1", "yes"].includes(value.trim().toLowerCase());
+  }
+  return false;
+};
+
+const isOid = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
+
+const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
+
+const sameId = (a, b) => {
+  if (!a || !b) return false;
+  return String(a) === String(b);
+};
+
+const idVariants = (value) => {
+  const raw = clean(value);
+
+  if (!raw) return [];
+
+  const values = [raw];
+
+  if (isOid(raw)) {
+    values.push(toObjectId(raw));
+  }
+
+  return values;
+};
+
+const getFirstPositiveNumber = (...values) => {
+  for (const value of values) {
+    const num = Number(value);
+
+    if (Number.isFinite(num) && num > 0) {
+      return num;
+    }
+  }
+
+  return 0;
+};
+
+const isSigned = (value) => {
+  if (typeof value === "boolean") return value;
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  return true;
+};
+
+const normalizeAttachments = (input = []) => {
+  return toArray(input)
+    .map((item) => {
+      if (typeof item === "string") {
+        return {
+          name: "",
+          url: clean(item),
+          type: "",
+          size: 0,
+          key: "",
+        };
+      }
+
+      return {
+        name: clean(item?.name || item?.fileName || item?.label),
+        url: clean(item?.url || item?.link || item?.path),
+        type: clean(item?.type || item?.mimeType),
+        size: Number(item?.size || 0),
+        key: clean(item?.key),
+      };
+    })
+    .filter((item) => item.url || item.name);
+};
+
+const normalizeDeliverables = (input = [], bodyDeliverableLink = "") => {
+  return toArray(input)
+    .map((item) => {
+      const deliverableName = clean(
+        item?.deliverableName ||
+        item?.name ||
+        item?.title ||
+        item?.deliverableTitle
+      );
+
+      const deliveries = toArray(
+        item?.deliveries ||
+        item?.delivery ||
+        item?.deliveryTypes ||
+        item?.contentFormats
+      )
+        .map(clean)
+        .filter(Boolean);
+
+      const platforms = toArray(
+        item?.platforms || item?.platform || item?.contentPlatforms
+      )
+        .map(clean)
+        .filter(Boolean);
+
+      const quantityNum = Number(
+        item?.quantity || item?.qty || item?.count || 1
+      );
+
+      return {
+        deliverableName,
+        deliveries,
+        aspectRatio: clean(item?.aspectRatio || item?.ratio),
+        platforms,
+        quantity:
+          Number.isFinite(quantityNum) && quantityNum > 0 ? quantityNum : 1,
+        deliverableLink: clean(
+          item?.deliverableLink ||
+          item?.link ||
+          item?.url ||
+          bodyDeliverableLink
+        ),
+        status: clean(item?.status) || "pending",
+        comments: clean(item?.comments),
+        approvedRole: clean(item?.approvedRole),
+        approvalId: clean(item?.approvalId),
+      };
+    })
+    .filter((item) => item.deliverableName);
+};
+
 exports.createMilestone = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -136,6 +300,24 @@ exports.createMilestone = async (req, res) => {
     throw err;
   };
 
+  const clean = (value) => String(value || "").trim();
+
+  const toArray = (value) => {
+    if (Array.isArray(value)) return value;
+    if (value === undefined || value === null || value === "") return [];
+    return [value];
+  };
+
+  const toDateOrNull = (value) => {
+    if (!value) return null;
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return null;
+
+    return date;
+  };
+
   const isSigned = (value) => {
     if (typeof value === "boolean") return value;
     if (value == null) return false;
@@ -143,28 +325,219 @@ exports.createMilestone = async (req, res) => {
     return true;
   };
 
+  const isOid = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
+
+  const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
+
+  const sameId = (a, b) => {
+    if (!a || !b) return false;
+    return String(a) === String(b);
+  };
+
+  const idVariants = (value) => {
+    const raw = clean(value);
+
+    if (!raw) return [];
+
+    const values = [raw];
+
+    if (isOid(raw)) {
+      values.push(toObjectId(raw));
+    }
+
+    return values;
+  };
+
+  const getFirstPositiveNumber = (...values) => {
+    for (const value of values) {
+      const num = Number(value);
+
+      if (Number.isFinite(num) && num > 0) {
+        return num;
+      }
+    }
+
+    return 0;
+  };
+
+  const normalizeAttachments = (input = []) => {
+    return toArray(input)
+      .map((item) => {
+        if (typeof item === "string") {
+          return {
+            name: "",
+            url: clean(item),
+            type: "",
+            size: 0,
+            key: "",
+          };
+        }
+
+        return {
+          name: clean(item?.name || item?.fileName || item?.label),
+          url: clean(item?.url || item?.link || item?.path),
+          type: clean(item?.type || item?.mimeType),
+          size: Number(item?.size || 0),
+          key: clean(item?.key),
+        };
+      })
+      .filter((item) => item.url || item.name);
+  };
+
+  const normalizeDeliverables = (input = [], bodyDeliverableLink = "") => {
+    return toArray(input)
+      .map((item) => {
+        const deliverableName = clean(
+          item?.deliverableName ||
+          item?.name ||
+          item?.title ||
+          item?.deliverableTitle
+        );
+
+        const deliveries = toArray(
+          item?.deliveries ||
+          item?.delivery ||
+          item?.deliveryTypes ||
+          item?.contentFormats
+        )
+          .map(clean)
+          .filter(Boolean);
+
+        const platforms = toArray(
+          item?.platforms || item?.platform || item?.contentPlatforms
+        )
+          .map(clean)
+          .filter(Boolean);
+
+        const quantityNum = Number(
+          item?.quantity || item?.qty || item?.count || 1
+        );
+
+        return {
+          deliverableName,
+          deliveries,
+          aspectRatio: clean(item?.aspectRatio || item?.ratio),
+          platforms,
+          quantity:
+            Number.isFinite(quantityNum) && quantityNum > 0 ? quantityNum : 1,
+          deliverableLink: clean(
+            item?.deliverableLink ||
+            item?.link ||
+            item?.url ||
+            bodyDeliverableLink
+          ),
+          status: clean(item?.status) || "pending",
+          comments: clean(item?.comments),
+          approvedRole: clean(item?.approvedRole),
+          approvalId: clean(item?.approvalId),
+        };
+      })
+      .filter((item) => item.deliverableName);
+  };
+
   try {
     const {
       brandId,
       influencerId,
       campaignId,
+      contractId,
+
+      milestoneName,
       milestoneTitle,
-      amount,
       milestoneDescription = "",
-    } = req.body;
 
-    const amountNum = Number(amount);
+      milestoneBudget,
+      amount,
 
-    if (!brandId || !influencerId || !campaignId || !milestoneTitle || amount == null) {
+      attachments = [],
+      productImages = [],
+      references = [],
+
+      deliverables = [],
+
+      startDate,
+      endDate,
+      graceDays = 0,
+      submissionLink = "",
+      needDraftFirst = false,
+      draftDate = null,
+    } = req.body || {};
+
+    const resolvedTitle = clean(milestoneTitle || milestoneName);
+    const resolvedContractId = clean(contractId);
+    const amountNum = Number(
+      milestoneBudget !== undefined && milestoneBudget !== null
+        ? milestoneBudget
+        : amount
+    );
+
+    const normalizedAttachments = normalizeAttachments([
+      ...toArray(attachments),
+      ...toArray(productImages),
+      ...toArray(references),
+    ]);
+
+    const normalizedDeliverables = normalizeDeliverables(deliverables);
+
+    if (!brandId || !influencerId || !campaignId || !resolvedContractId) {
       return res.status(400).json({
         message:
-          "brandId, influencerId, campaignId, milestoneTitle and amount are required",
+          "brandId, influencerId, campaignId and contractId are required",
       });
     }
 
-    if (isNaN(amountNum) || amountNum <= 0) {
+    if (!resolvedTitle) {
       return res.status(400).json({
-        message: "amount must be a valid number > 0",
+        message: "milestoneTitle is required",
+      });
+    }
+
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({
+        message: "milestoneBudget must be a valid number > 0",
+      });
+    }
+
+    if (!normalizedDeliverables.length) {
+      return res.status(400).json({
+        message: "At least one deliverable is required",
+      });
+    }
+
+    const parsedStartDate = toDateOrNull(startDate);
+    const parsedEndDate = toDateOrNull(endDate);
+    const parsedDraftDate = toDateOrNull(draftDate);
+    const graceDaysNum = Number(graceDays || 0);
+
+    if (startDate && !parsedStartDate) {
+      return res.status(400).json({
+        message: "Invalid startDate",
+      });
+    }
+
+    if (endDate && !parsedEndDate) {
+      return res.status(400).json({
+        message: "Invalid endDate",
+      });
+    }
+
+    if (parsedStartDate && parsedEndDate && parsedEndDate < parsedStartDate) {
+      return res.status(400).json({
+        message: "endDate cannot be before startDate",
+      });
+    }
+
+    const needsDraft = boolValue(needDraftFirst);
+
+    if (needsDraft && !parsedDraftDate) {
+      return res.status(400).json({
+        message: "draftDate is required when needDraftFirst is true",
+      });
+    }
+
+    if (draftDate && !parsedDraftDate) {
+      return res.status(400).json({
+        message: "Invalid draftDate",
       });
     }
 
@@ -172,53 +545,102 @@ exports.createMilestone = async (req, res) => {
     let emailData = null;
 
     await session.withTransaction(async () => {
-      // 1) Verify campaign
-      const camp = await Campaign.findById(campaignId).session(session).lean();
+      const campaignOr = [{ campaignsId: String(campaignId) }];
+
+      if (isOid(campaignId)) {
+        campaignOr.push({ _id: toObjectId(campaignId) });
+      }
+
+      const camp = await Campaign.findOne({ $or: campaignOr })
+        .session(session)
+        .lean();
+
       if (!camp) {
         abort(404, "Campaign not found");
       }
 
-      // 2) If campaign created by admin, skip contract validation
-      const isAdminCreatedCampaign =
-        String(camp?.createdBy?.role ?? "").trim().toLowerCase() === "admin";
+      const contractOr = [{ contractId: resolvedContractId }];
 
-      // 3) Contract check before any mutation
-      let contractDoc = null;
-
-      if (!isAdminCreatedCampaign) {
-        if (camp.contractId) {
-          try {
-            contractDoc = await Contract.findById(camp.contractId).session(session);
-          } catch {
-            contractDoc = null;
-          }
-        }
-
-        if (!contractDoc) {
-          contractDoc = await Contract.findOne({
-            brandId,
-            influencerId,
-            campaignId,
-          })
-            .sort({ createdAt: -1 })
-            .session(session);
-        }
-
-        if (!contractDoc) {
-          abort(400, "Contract not found. Please create and sign the contract first.");
-        }
-
-        const canCreateMilestone =
-          isSigned(contractDoc.signatureBrand) &&
-          isSigned(contractDoc.signatureInfluencer);
-
-        if (!canCreateMilestone) {
-          abort(400, "Contract must be fully signed before creating milestones.");
-        }
+      if (isOid(resolvedContractId)) {
+        contractOr.push({ _id: toObjectId(resolvedContractId) });
       }
 
-      // 4) milestone doc
+      let contractDoc = await Contract.findOne({
+        $or: contractOr,
+        brandId: { $in: idVariants(brandId) },
+        influencerId: { $in: idVariants(influencerId) },
+        campaignId: { $in: idVariants(campaignId) },
+      }).session(session);
+
+      if (!contractDoc) {
+        contractDoc = await Contract.findOne({
+          brandId: { $in: idVariants(brandId) },
+          influencerId: { $in: idVariants(influencerId) },
+          campaignId: { $in: idVariants(campaignId) },
+        })
+          .sort({ createdAt: -1 })
+          .session(session);
+      }
+
+      if (!contractDoc) {
+        abort(
+          400,
+          "Contract not found for this brand, influencer and campaign."
+        );
+      }
+
+      const contractMatchesRequest =
+        sameId(contractDoc.brandId, brandId) &&
+        sameId(contractDoc.influencerId, influencerId) &&
+        sameId(contractDoc.campaignId, campaignId);
+
+      if (!contractMatchesRequest) {
+        abort(
+          400,
+          "Contract does not match this brand, influencer and campaign."
+        );
+      }
+
+      const canCreateMilestone =
+        isSigned(contractDoc.signatureBrand) &&
+        isSigned(contractDoc.signatureInfluencer);
+
+      if (!canCreateMilestone) {
+        abort(400, "Contract must be fully signed before creating milestones.");
+      }
+
+      const commercial = contractDoc?.content?.scheduleA?.commercial || {};
+
+      const influencerBudget = getFirstPositiveNumber(
+        commercial?.totalCampaignFee,
+        commercial?.influencerBudget,
+        commercial?.feeAmount,
+        contractDoc?.totalCampaignFee,
+        contractDoc?.feeAmount,
+        contractDoc?.influencerBudget,
+        contractDoc?.amount
+      );
+
+      if (!influencerBudget) {
+        abort(
+          400,
+          "Influencer budget not found in contract. Please update the contract amount first."
+        );
+      }
+
+      if (amountNum > influencerBudget) {
+        abort(
+          400,
+          "Milestone budget cannot exceed influencer contract budget.",
+          {
+            milestoneBudget: amountNum,
+            influencerBudget,
+          }
+        );
+      }
+
       let doc = await Milestone.findOne({ brandId }).session(session);
+
       if (!doc) {
         doc = new Milestone({
           brandId,
@@ -229,16 +651,20 @@ exports.createMilestone = async (req, res) => {
 
       doc.totalAmount = Number(doc.totalAmount || 0);
 
-      // 5) Previous milestone check for same influencer + campaign
-      const prev = (doc.milestoneHistory || []).filter(
-        (e) =>
-          String(e.influencerId) === String(influencerId) &&
-          String(e.campaignId) === String(campaignId)
+      const previousMilestonesForInfluencerCampaign = (
+        doc.milestoneHistory || []
+      ).filter(
+        (entry) =>
+          sameId(entry.influencerId, influencerId) &&
+          sameId(entry.campaignId, campaignId)
       );
 
-      if (prev.length > 0) {
-        prev.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        const last = prev[0];
+      if (previousMilestonesForInfluencerCampaign.length > 0) {
+        previousMilestonesForInfluencerCampaign.sort(
+          (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+        );
+
+        const last = previousMilestonesForInfluencerCampaign[0];
 
         if (!last.released) {
           abort(
@@ -248,19 +674,48 @@ exports.createMilestone = async (req, res) => {
         }
       }
 
-      // 6) Campaign budget check
-      const campaignBudget = Number(camp.budget);
-      const hasBudget = !isNaN(campaignBudget) && campaignBudget > 0;
+      const existingTotalForInfluencerContract =
+        previousMilestonesForInfluencerCampaign.reduce(
+          (sum, entry) =>
+            sum +
+            (Number(entry.milestoneBudget) || Number(entry.amount) || 0),
+          0
+        );
 
-      if (hasBudget) {
+      if (existingTotalForInfluencerContract + amountNum > influencerBudget) {
+        abort(
+          400,
+          "Total milestone budget cannot exceed influencer contract budget.",
+          {
+            existingMilestoneBudget: existingTotalForInfluencerContract,
+            newMilestoneBudget: amountNum,
+            influencerBudget,
+            remainingBudget: Math.max(
+              0,
+              influencerBudget - existingTotalForInfluencerContract
+            ),
+          }
+        );
+      }
+
+      const campaignBudget = Number(camp.budget || camp.campaignBudget || 0);
+      const hasCampaignBudget =
+        Number.isFinite(campaignBudget) && campaignBudget > 0;
+
+      if (hasCampaignBudget) {
         const existingTotalForCampaign = (doc.milestoneHistory || [])
-          .filter((e) => String(e.campaignId) === String(campaignId))
-          .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+          .filter((entry) => sameId(entry.campaignId, campaignId))
+          .reduce(
+            (sum, entry) =>
+              sum +
+              (Number(entry.milestoneBudget) || Number(entry.amount) || 0),
+            0
+          );
 
         if (existingTotalForCampaign >= campaignBudget) {
           abort(
             400,
-            "You have added milestone equal to campaign now not able to add now milestone"
+            "You have added milestone equal to campaign budget. You cannot add a new milestone."
           );
         }
 
@@ -269,14 +724,13 @@ exports.createMilestone = async (req, res) => {
         }
       }
 
-      // 7) Wallet campaign freeze check
       const wallet = await getOrCreateBrandWallet(brandId, session);
       wallet.freezes = Array.isArray(wallet.freezes) ? wallet.freezes : [];
 
       const campaignFreeze = wallet.freezes.find(
-        (f) =>
-          String(f.brandId) === String(brandId) &&
-          String(f.campaignId) === String(campaignId)
+        (freeze) =>
+          sameId(freeze.brandId, brandId) &&
+          sameId(freeze.campaignId, campaignId)
       );
 
       if (!campaignFreeze) {
@@ -323,23 +777,44 @@ exports.createMilestone = async (req, res) => {
         );
       }
 
-      // 8) First create milestone entry
       doc.milestoneHistory.push({
         influencerId,
         campaignId,
-        milestoneTitle,
+        contractMongoId: contractDoc?._id || null,
+        contractId: contractDoc?.contractId || resolvedContractId,
+
+        milestoneTitle: resolvedTitle,
+        milestoneDescription: clean(milestoneDescription),
+
+        milestoneBudget: amountNum,
         amount: amountNum,
-        milestoneDescription,
+
+        attachments: normalizedAttachments,
+        deliverables: normalizedDeliverables,
+
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+        graceDays:
+          Number.isFinite(graceDaysNum) && graceDaysNum > 0 ? graceDaysNum : 0,
+
+        // Optional
+        submissionLink: clean(submissionLink),
+
+        needDraftFirst: needsDraft,
+        draftDate: needsDraft ? parsedDraftDate : null,
+
+        isAccepted: 0,
+
         released: false,
         payoutStatus: "pending",
       });
 
       doc.totalAmount = doc.totalAmount + amountNum;
+
       await doc.save({ session });
 
       const createdEntry = doc.milestoneHistory[doc.milestoneHistory.length - 1];
 
-      // 9) Allocate inside the campaign freeze only AFTER milestone save succeeds
       campaignFreeze.influencerAllocations = Array.isArray(
         campaignFreeze.influencerAllocations
       )
@@ -347,7 +822,7 @@ exports.createMilestone = async (req, res) => {
         : [];
 
       const allocationIndex = campaignFreeze.influencerAllocations.findIndex(
-        (a) => String(a.influencerId) === String(influencerId)
+        (allocation) => sameId(allocation.influencerId, influencerId)
       );
 
       if (allocationIndex >= 0) {
@@ -368,7 +843,6 @@ exports.createMilestone = async (req, res) => {
       const walletSnapAfter = syncUsableBalance(wallet);
       await wallet.save({ session });
 
-      // 10) Update contract status only if contract exists
       let updatedContract = null;
 
       if (contractDoc) {
@@ -384,12 +858,20 @@ exports.createMilestone = async (req, res) => {
 
           contractDoc.statusFlags = contractDoc.statusFlags || {};
           contractDoc.statusFlags.awaitingCollabglam = false;
+          contractDoc.statusFlags.hasMilestones = true;
 
           contractDoc.audit = contractDoc.audit || [];
           contractDoc.audit.push({
             type: "MILESTONES_CREATED",
             role: "system",
-            details: { brandId, influencerId, campaignId },
+            details: {
+              brandId,
+              influencerId,
+              campaignId,
+              contractId: contractDoc.contractId || String(contractDoc._id),
+              milestoneHistoryId: String(createdEntry._id),
+              milestoneBudget: amountNum,
+            },
             at: new Date(),
           });
 
@@ -399,13 +881,14 @@ exports.createMilestone = async (req, res) => {
         updatedContract = contractDoc;
 
         await Campaign.updateOne(
-          { _id: campaignId },
+          { _id: camp._id },
           {
             $set: {
               contractId: contractDoc._id || contractDoc.contractId,
               isContracted: 1,
               contractStatus: contractDoc.status,
-              milestonesCreatedAt: contractDoc.milestonesCreatedAt || new Date(),
+              milestonesCreatedAt:
+                contractDoc.milestonesCreatedAt || new Date(),
             },
           },
           { session }
@@ -413,17 +896,48 @@ exports.createMilestone = async (req, res) => {
       }
 
       responsePayload = {
-        ...(responsePayload || {}),
-        message: "Milestone created and amount allocated from campaign wallet successfully",
+        message:
+          "Milestone created and amount allocated from campaign wallet successfully",
         milestoneId: String(doc._id),
+        milestoneHistoryId: String(createdEntry._id),
         totalAmount: doc.totalAmount,
+        influencerBudget,
+        usedInfluencerBudget: existingTotalForInfluencerContract + amountNum,
+        remainingInfluencerBudget: Math.max(
+          0,
+          influencerBudget - existingTotalForInfluencerContract - amountNum
+        ),
         entry: {
           milestoneHistoryId: String(createdEntry._id),
           influencerId: createdEntry.influencerId,
           campaignId: createdEntry.campaignId,
+          contractId: createdEntry.contractId,
+
           milestoneTitle: createdEntry.milestoneTitle,
-          amount: createdEntry.amount,
           milestoneDescription: createdEntry.milestoneDescription,
+
+          milestoneBudget: createdEntry.milestoneBudget,
+          amount: createdEntry.amount,
+
+          attachments: createdEntry.attachments,
+          deliverables: (createdEntry.deliverables || []).map((item) => ({
+            deliverableId: String(item._id),
+            deliverableName: item.deliverableName,
+            deliveries: item.deliveries,
+            aspectRatio: item.aspectRatio,
+            platforms: item.platforms,
+            quantity: item.quantity,
+            status: item.status,
+          })),
+          isAccepted: createdEntry.isAccepted || 0,
+
+          startDate: createdEntry.startDate,
+          endDate: createdEntry.endDate,
+          graceDays: createdEntry.graceDays,
+          submissionLink: createdEntry.submissionLink,
+          needDraftFirst: createdEntry.needDraftFirst,
+          draftDate: createdEntry.draftDate,
+
           released: createdEntry.released,
           payoutStatus: createdEntry.payoutStatus,
           createdAt: createdEntry.createdAt,
@@ -444,14 +958,13 @@ exports.createMilestone = async (req, res) => {
         },
         contractStatus: updatedContract?.status || null,
         milestonesCreatedAt: updatedContract?.milestonesCreatedAt || null,
-        isAdminCreatedCampaign,
       };
 
       emailData = {
         brandId,
         influencerId,
         campaignName: camp.productOrServiceName || camp.campaignTitle || "",
-        milestoneTitle,
+        milestoneTitle: resolvedTitle,
         amount: amountNum,
         milestoneDescription,
       };
@@ -462,8 +975,10 @@ exports.createMilestone = async (req, res) => {
     createAndEmit({
       influencerId: req.body.influencerId,
       type: "milestone.created",
-      title: `New milestone: ${req.body.milestoneTitle}`,
-      message: `An amount of $${Number(req.body.amount).toFixed(2)} was created for this campaign.`,
+      title: `New milestone: ${resolvedTitle}`,
+      message: `An amount of $${Number(amountNum).toFixed(
+        2
+      )} was created for this campaign.`,
       entityType: "campaign",
       entityId: String(req.body.campaignId),
       actionPath: `/influencer/my-campaign`,
@@ -473,7 +988,7 @@ exports.createMilestone = async (req, res) => {
       brandId: req.body.brandId,
       type: "milestone.created",
       title: `Milestone created for influencer ${req.body.influencerId}`,
-      message: `${req.body.milestoneTitle} • $${Number(req.body.amount).toFixed(2)}`,
+      message: `${resolvedTitle} • $${Number(amountNum).toFixed(2)}`,
       entityType: "campaign",
       entityId: String(req.body.campaignId),
       actionPath: `/brand/active-campaign`,
@@ -519,6 +1034,372 @@ exports.createMilestone = async (req, res) => {
   }
 };
 
+exports.editMilestone = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  const abort = (status, message, extra = {}) => {
+    const err = new Error(message);
+    err.status = status;
+    err.extra = extra;
+    throw err;
+  };
+
+  try {
+    const {
+      milestoneId,
+      milestoneHistoryId,
+
+      milestoneName,
+      milestoneTitle,
+      milestoneDescription = "",
+
+      milestoneBudget,
+      amount,
+
+      attachments = [],
+      productImages = [],
+      references = [],
+
+      deliverables = [],
+
+      startDate,
+      endDate,
+      graceDays = 0,
+      submissionLink = "",
+      needDraftFirst = false,
+      draftDate = null,
+    } = req.body || {};
+
+    const resolvedMilestoneId = clean(milestoneId);
+    const resolvedHistoryId = clean(milestoneHistoryId);
+    const resolvedTitle = clean(milestoneTitle || milestoneName);
+
+    if (!resolvedMilestoneId || !resolvedHistoryId) {
+      return res.status(400).json({
+        message: "milestoneId and milestoneHistoryId are required",
+      });
+    }
+
+    if (!resolvedTitle) {
+      return res.status(400).json({
+        message: "milestoneTitle is required",
+      });
+    }
+
+    const amountNum = Number(
+      milestoneBudget !== undefined && milestoneBudget !== null
+        ? milestoneBudget
+        : amount
+    );
+
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({
+        message: "milestoneBudget must be a valid number > 0",
+      });
+    }
+
+    const normalizedAttachments = normalizeAttachments([
+      ...toArray(attachments),
+      ...toArray(productImages),
+      ...toArray(references),
+    ]);
+
+    const normalizedDeliverables = normalizeDeliverables(deliverables);
+
+    if (!normalizedDeliverables.length) {
+      return res.status(400).json({
+        message: "At least one deliverable is required",
+      });
+    }
+
+    const parsedStartDate = toDateOrNull(startDate);
+    const parsedEndDate = toDateOrNull(endDate);
+    const parsedDraftDate = toDateOrNull(draftDate);
+    const graceDaysNum = Number(graceDays || 0);
+    const needsDraft = boolValue(needDraftFirst);
+
+    if (startDate && !parsedStartDate) {
+      return res.status(400).json({
+        message: "Invalid startDate",
+      });
+    }
+
+    if (endDate && !parsedEndDate) {
+      return res.status(400).json({
+        message: "Invalid endDate",
+      });
+    }
+
+    if (parsedStartDate && parsedEndDate && parsedEndDate < parsedStartDate) {
+      return res.status(400).json({
+        message: "endDate cannot be before startDate",
+      });
+    }
+
+    if (needsDraft && !parsedDraftDate) {
+      return res.status(400).json({
+        message: "draftDate is required when needDraftFirst is true",
+      });
+    }
+
+    if (draftDate && !parsedDraftDate) {
+      return res.status(400).json({
+        message: "Invalid draftDate",
+      });
+    }
+
+    let responsePayload = null;
+
+    await session.withTransaction(async () => {
+      const doc = await Milestone.findById(resolvedMilestoneId).session(session);
+
+      if (!doc) {
+        abort(404, "Milestone not found");
+      }
+
+      const entry = doc.milestoneHistory.id(resolvedHistoryId);
+
+      if (!entry) {
+        abort(404, "Milestone history not found");
+      }
+
+      if (Number(entry.isAccepted || 0) === 1) {
+        abort(403, "Milestone has been accepted. Brand cannot edit this milestone.");
+      }
+
+      if (entry.released === true || String(entry.payoutStatus || "") !== "pending") {
+        abort(400, "Released or paid milestone cannot be edited.");
+      }
+
+      const influencerId = entry.influencerId;
+      const campaignId = entry.campaignId;
+      const oldAmount = Number(entry.milestoneBudget || entry.amount || 0);
+      const amountDelta = amountNum - oldAmount;
+
+      const contractOr = [];
+
+      if (entry.contractId) {
+        contractOr.push({ contractId: String(entry.contractId) });
+      }
+
+      if (entry.contractMongoId) {
+        contractOr.push({ _id: entry.contractMongoId });
+      }
+
+      let contractDoc = null;
+
+      if (contractOr.length) {
+        contractDoc = await Contract.findOne({
+          $or: contractOr,
+        }).session(session);
+      }
+
+      if (!contractDoc) {
+        contractDoc = await Contract.findOne({
+          brandId: doc.brandId,
+          influencerId,
+          campaignId,
+        })
+          .sort({ createdAt: -1 })
+          .session(session);
+      }
+
+      if (!contractDoc) {
+        abort(400, "Contract not found for this milestone.");
+      }
+
+      const commercial = contractDoc?.content?.scheduleA?.commercial || {};
+
+      const influencerBudget = getFirstPositiveNumber(
+        commercial?.totalCampaignFee,
+        commercial?.influencerBudget,
+        commercial?.feeAmount,
+        contractDoc?.totalCampaignFee,
+        contractDoc?.feeAmount,
+        contractDoc?.influencerBudget,
+        contractDoc?.amount
+      );
+
+      if (!influencerBudget) {
+        abort(
+          400,
+          "Influencer budget not found in contract. Please update the contract amount first."
+        );
+      }
+
+      const existingTotalExcludingCurrent = (doc.milestoneHistory || [])
+        .filter(
+          (item) =>
+            String(item._id) !== String(entry._id) &&
+            sameId(item.influencerId, influencerId) &&
+            sameId(item.campaignId, campaignId)
+        )
+        .reduce(
+          (sum, item) =>
+            sum + (Number(item.milestoneBudget) || Number(item.amount) || 0),
+          0
+        );
+
+      if (existingTotalExcludingCurrent + amountNum > influencerBudget) {
+        abort(
+          400,
+          "Total milestone budget cannot exceed influencer contract budget.",
+          {
+            influencerBudget,
+            existingMilestoneBudget: existingTotalExcludingCurrent,
+            newMilestoneBudget: amountNum,
+            remainingBudget: Math.max(
+              0,
+              influencerBudget - existingTotalExcludingCurrent
+            ),
+          }
+        );
+      }
+
+      if (amountDelta !== 0) {
+        const wallet = await getOrCreateBrandWallet(doc.brandId, session);
+
+        wallet.freezes = Array.isArray(wallet.freezes) ? wallet.freezes : [];
+
+        const campaignFreeze = wallet.freezes.find(
+          (freeze) =>
+            sameId(freeze.brandId, doc.brandId) &&
+            sameId(freeze.campaignId, campaignId)
+        );
+
+        if (!campaignFreeze) {
+          abort(400, "No campaign wallet found for this campaign.");
+        }
+
+        syncCampaignFreeze(campaignFreeze);
+
+        if (amountDelta > 0) {
+          if (Number(campaignFreeze.availableToAllocate || 0) < amountDelta) {
+            abort(
+              400,
+              `Insufficient campaign frozen balance. Please add $${amountDelta.toFixed(
+                2
+              )} to this campaign wallet.`,
+              {
+                needToAdd: amountDelta,
+                availableToAllocate: Number(
+                  campaignFreeze.availableToAllocate || 0
+                ),
+              }
+            );
+          }
+        }
+
+        campaignFreeze.influencerAllocations = Array.isArray(
+          campaignFreeze.influencerAllocations
+        )
+          ? campaignFreeze.influencerAllocations
+          : [];
+
+        const allocationIndex = campaignFreeze.influencerAllocations.findIndex(
+          (allocation) => sameId(allocation.influencerId, influencerId)
+        );
+
+        if (allocationIndex >= 0) {
+          const currentAllocation = Number(
+            campaignFreeze.influencerAllocations[allocationIndex].amount || 0
+          );
+
+          campaignFreeze.influencerAllocations[allocationIndex].amount =
+            Math.max(0, currentAllocation + amountDelta);
+        } else if (amountDelta > 0) {
+          campaignFreeze.influencerAllocations.push({
+            influencerId,
+            amount: amountDelta,
+            releasedAmount: 0,
+          });
+        }
+
+        syncCampaignFreeze(campaignFreeze);
+        syncUsableBalance(wallet);
+
+        await wallet.save({ session });
+
+        doc.totalAmount = Math.max(0, Number(doc.totalAmount || 0) + amountDelta);
+      }
+
+      entry.milestoneTitle = resolvedTitle;
+      entry.milestoneDescription = clean(milestoneDescription);
+      entry.milestoneBudget = amountNum;
+      entry.amount = amountNum;
+      entry.attachments = normalizedAttachments;
+      entry.deliverables = normalizedDeliverables;
+      entry.startDate = parsedStartDate;
+      entry.endDate = parsedEndDate;
+      entry.graceDays =
+        Number.isFinite(graceDaysNum) && graceDaysNum > 0 ? graceDaysNum : 0;
+      entry.submissionLink = clean(submissionLink);
+      entry.needDraftFirst = needsDraft;
+      entry.draftDate = needsDraft ? parsedDraftDate : null;
+
+      await doc.save({ session });
+
+      responsePayload = {
+        message: "Milestone updated successfully",
+        milestoneId: String(doc._id),
+        milestoneHistoryId: String(entry._id),
+        entry: {
+          milestoneHistoryId: String(entry._id),
+          influencerId: entry.influencerId,
+          campaignId: entry.campaignId,
+          contractId: entry.contractId,
+
+          milestoneTitle: entry.milestoneTitle,
+          milestoneDescription: entry.milestoneDescription,
+
+          milestoneBudget: entry.milestoneBudget,
+          amount: entry.amount,
+
+          attachments: entry.attachments,
+          deliverables: (entry.deliverables || []).map((item) => ({
+            deliverableId: String(item._id),
+            deliverableName: item.deliverableName,
+            deliveries: item.deliveries,
+            aspectRatio: item.aspectRatio,
+            platforms: item.platforms,
+            quantity: item.quantity,
+            status: item.status,
+          })),
+
+          startDate: entry.startDate,
+          endDate: entry.endDate,
+          graceDays: entry.graceDays,
+          submissionLink: entry.submissionLink,
+          needDraftFirst: entry.needDraftFirst,
+          draftDate: entry.draftDate,
+          isAccepted: entry.isAccepted || 0,
+          released: entry.released,
+          payoutStatus: entry.payoutStatus,
+          updatedAt: entry.updatedAt,
+        },
+      };
+    });
+
+    session.endSession();
+
+    return res.status(200).json(responsePayload);
+  } catch (err) {
+    await session.abortTransaction().catch(() => { });
+    session.endSession();
+
+    console.error("Error in editMilestone:", err);
+
+    if (err.status) {
+      return res.status(err.status).json({
+        message: err.message,
+        ...(err.extra || {}),
+      });
+    }
+
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 // ======================================================================
 // POST /milestone/listByCampaign
 // body: { campaignId }
@@ -538,12 +1419,19 @@ exports.getMilestonesByCampaign = async (req, res) => {
     const entries = docs.flatMap((doc) =>
       (doc.milestoneHistory || [])
         .filter((e) => String(e.campaignId) === String(campaignId))
-        .map((e) => ({
-          ...e,
-          milestoneHistoryId: String(e._id),
-          brandId: String(doc.brandId),
-          milestoneId: String(doc._id),
-        }))
+        .map((e) => {
+          const deliverablesCount = Array.isArray(e.deliverables)
+            ? e.deliverables.length
+            : 0;
+
+          return {
+            ...e,
+            milestoneHistoryId: String(e._id),
+            brandId: String(doc.brandId),
+            milestoneId: String(doc._id),
+            deliverablesCount,
+          };
+        })
     );
 
     const influencerIds = [
@@ -1452,5 +2340,638 @@ exports.getPayoutDetailsByInfluencer = async (req, res) => {
   } catch (err) {
     console.error("Error in getPayoutDetailsByInfluencer:", err);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+
+// ======================================================================
+// POST /milestone/getAllDeliverables
+// body: { milestoneId, milestoneHistoryId }
+// ======================================================================
+exports.getAllDeliverablesByMilestone = async (req, res) => {
+  try {
+    const { milestoneId, milestoneHistoryId } = req.body || {};
+
+    if (!milestoneId || !milestoneHistoryId) {
+      return res.status(400).json({
+        success: false,
+        message: "milestoneId and milestoneHistoryId are required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(milestoneId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneId",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(milestoneHistoryId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneHistoryId",
+      });
+    }
+
+    const milestoneDoc = await Milestone.findById(milestoneId).lean();
+
+    if (!milestoneDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone not found",
+      });
+    }
+
+    const milestoneHistory = (milestoneDoc.milestoneHistory || []).find(
+      (item) => String(item._id) === String(milestoneHistoryId)
+    );
+
+    if (!milestoneHistory) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history not found",
+      });
+    }
+
+    const data = (milestoneHistory.deliverables || []).map((item) => ({
+      deliverableId: String(item._id),
+
+      milestoneId: String(milestoneDoc._id),
+      milestoneHistoryId: String(milestoneHistory._id),
+
+      brandId: String(milestoneDoc.brandId || ""),
+      influencerId: String(milestoneHistory.influencerId || ""),
+      campaignId: String(milestoneHistory.campaignId || ""),
+
+      milestoneTitle: milestoneHistory.milestoneTitle || "",
+
+      deliverableName: item.deliverableName || "",
+      title: item.deliverableName || "",
+
+      deliveries: item.deliveries || [],
+      aspectRatio: item.aspectRatio || "",
+      platforms: item.platforms || [],
+      quantity: item.quantity || 1,
+
+      deliverableLinks: Array.isArray(item.deliverableLinks)
+        ? item.deliverableLinks.map((link) => ({
+          label: link.label || "",
+          url: link.url || "",
+        }))
+        : [],
+
+      url: Array.isArray(item.deliverableLinks)
+        ? item.deliverableLinks.map((link) => ({
+          label: link.label || "",
+          url: link.url || "",
+        }))
+        : [],
+
+      status: item.status || "pending",
+      submittedAt: item.submittedAt || null,
+
+      comments: item.comments || "",
+      approvedRole: item.approvedRole || "",
+      approvalId: item.approvalId || "",
+      approvedAt: item.approvedAt || null,
+      revisionRequestedAt: item.revisionRequestedAt || null,
+
+      revisions: Array.isArray(item.revisions)
+        ? item.revisions.map((revision) => ({
+          revisionId: String(revision._id),
+          deliverableId: String(revision.deliverableId || item._id),
+          issueName: revision.issueName || "",
+          revisionType: revision.revisionType || "free",
+          revisionBudget: Number(revision.revisionBudget || 0),
+          deliveryName: revision.deliveryName || "",
+          issueDeliverableLink: revision.issueDeliverableLink || "",
+          notes: revision.notes || "",
+          attachments: revision.attachments || [],
+          submissionDate: revision.submissionDate || null,
+          status: revision.status || "pending",
+          raisedByRole: revision.raisedByRole || "Brand",
+          raisedAt: revision.raisedAt || null,
+          createdAt: revision.createdAt || null,
+          updatedAt: revision.updatedAt || null,
+        }))
+        : [],
+
+      createdAt: item.createdAt || null,
+      updatedAt: item.updatedAt || null,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Deliverables fetched successfully by milestone.",
+      total: data.length,
+      count: data.length,
+      data: data,
+      filters: {
+        milestoneId: String(milestoneDoc._id),
+        milestoneHistoryId: String(milestoneHistory._id),
+      },
+    });
+  } catch (err) {
+    console.error("Error in getAllDeliverablesByMilestone:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+
+
+exports.addRevision = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  const abort = (status, message, extra = {}) => {
+    const err = new Error(message);
+    err.status = status;
+    err.extra = extra;
+    throw err;
+  };
+
+  try {
+    const {
+      milestoneId,
+      milestoneHistoryId,
+      deliverableId,
+
+      issueName,
+      revisionType = "free",
+      revisionBudget = 0,
+      deliveryName,
+      issueDeliverableLink,
+      notes = "",
+      attachments = [],
+      productImages = [],
+      references = [],
+      submissionDate,
+      raisedByRole = "Brand",
+    } = req.body || {};
+
+    if (!milestoneId || !milestoneHistoryId || !deliverableId) {
+      return res.status(400).json({
+        success: false,
+        message: "milestoneId, milestoneHistoryId and deliverableId are required",
+      });
+    }
+
+    if (!issueName || !clean(issueName)) {
+      return res.status(400).json({
+        success: false,
+        message: "issueName is required",
+      });
+    }
+
+    if (!["free", "paid"].includes(String(revisionType).toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: "revisionType must be either free or paid",
+      });
+    }
+
+    const normalizedRevisionType = String(revisionType).toLowerCase();
+    const revisionBudgetNum =
+      normalizedRevisionType === "paid" ? Number(revisionBudget) : 0;
+
+    if (
+      normalizedRevisionType === "paid" &&
+      (!Number.isFinite(revisionBudgetNum) || revisionBudgetNum <= 0)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "revisionBudget is required when revisionType is paid",
+      });
+    }
+
+    if (!deliveryName || !clean(deliveryName)) {
+      return res.status(400).json({
+        success: false,
+        message: "deliveryName is required",
+      });
+    }
+
+    if (!issueDeliverableLink || !clean(issueDeliverableLink)) {
+      return res.status(400).json({
+        success: false,
+        message: "issueDeliverableLink is required",
+      });
+    }
+
+    const parsedSubmissionDate = toDateOrNull(submissionDate);
+
+    if (!parsedSubmissionDate) {
+      return res.status(400).json({
+        success: false,
+        message: "submissionDate is required",
+      });
+    }
+
+    const normalizedAttachments = normalizeAttachments([
+      ...toArray(attachments),
+      ...toArray(productImages),
+      ...toArray(references),
+    ]);
+
+    let responsePayload = null;
+
+    await session.withTransaction(async () => {
+      const milestoneDoc = await Milestone.findById(milestoneId).session(session);
+
+      if (!milestoneDoc) {
+        abort(404, "Milestone not found");
+      }
+
+      const milestoneHistory = milestoneDoc.milestoneHistory.id(milestoneHistoryId);
+
+      if (!milestoneHistory) {
+        abort(404, "Milestone history not found");
+      }
+
+      const deliverable = milestoneHistory.deliverables.id(deliverableId);
+
+      if (!deliverable) {
+        abort(404, "Deliverable not found");
+      }
+
+      const contractOr = [];
+
+      if (milestoneHistory.contractMongoId) {
+        contractOr.push({ _id: milestoneHistory.contractMongoId });
+      }
+
+      if (milestoneHistory.contractId) {
+        contractOr.push({ contractId: String(milestoneHistory.contractId) });
+      }
+
+      let contractDoc = null;
+
+      if (contractOr.length > 0) {
+        contractDoc = await Contract.findOne({
+          $or: contractOr,
+        }).session(session);
+      }
+
+      if (!contractDoc) {
+        contractDoc = await Contract.findOne({
+          brandId: milestoneDoc.brandId,
+          influencerId: milestoneHistory.influencerId,
+          campaignId: milestoneHistory.campaignId,
+        })
+          .sort({ createdAt: -1 })
+          .session(session);
+      }
+
+      if (!contractDoc) {
+        abort(400, "Contract not found for this milestone");
+      }
+
+      const commercial = contractDoc?.content?.scheduleA?.commercial || {};
+
+      const influencerBudget = getFirstPositiveNumber(
+        commercial?.totalCampaignFee,
+        commercial?.influencerBudget,
+        commercial?.feeAmount,
+        contractDoc?.totalCampaignFee,
+        contractDoc?.feeAmount,
+        contractDoc?.influencerBudget,
+        contractDoc?.amount
+      );
+
+      if (!influencerBudget) {
+        abort(
+          400,
+          "Influencer budget not found in contract. Please update the contract amount first."
+        );
+      }
+
+      const usedMilestoneBudget = (milestoneDoc.milestoneHistory || [])
+        .filter(
+          (entry) =>
+            sameId(entry.influencerId, milestoneHistory.influencerId) &&
+            sameId(entry.campaignId, milestoneHistory.campaignId)
+        )
+        .reduce(
+          (sum, entry) =>
+            sum + (Number(entry.milestoneBudget) || Number(entry.amount) || 0),
+          0
+        );
+
+      const usedPaidRevisionBudget = (milestoneDoc.milestoneHistory || [])
+        .filter(
+          (entry) =>
+            sameId(entry.influencerId, milestoneHistory.influencerId) &&
+            sameId(entry.campaignId, milestoneHistory.campaignId)
+        )
+        .reduce((historySum, entry) => {
+          const deliverables = Array.isArray(entry.deliverables)
+            ? entry.deliverables
+            : [];
+
+          const revisionSum = deliverables.reduce((deliverableSum, del) => {
+            const revisions = Array.isArray(del.revisions) ? del.revisions : [];
+
+            return (
+              deliverableSum +
+              revisions.reduce((sum, revision) => {
+                if (String(revision.revisionType).toLowerCase() !== "paid") {
+                  return sum;
+                }
+
+                return sum + Number(revision.revisionBudget || 0);
+              }, 0)
+            );
+          }, 0);
+
+          return historySum + revisionSum;
+        }, 0);
+
+      const totalUsedBudget = usedMilestoneBudget + usedPaidRevisionBudget;
+      const remainingBudget = Math.max(0, influencerBudget - totalUsedBudget);
+
+      if (
+        normalizedRevisionType === "paid" &&
+        revisionBudgetNum > remainingBudget
+      ) {
+        abort(
+          400,
+          "Revision budget cannot be greater than remaining influencer budget.",
+          {
+            influencerBudget,
+            usedMilestoneBudget,
+            usedPaidRevisionBudget,
+            totalUsedBudget,
+            remainingBudget,
+            requestedRevisionBudget: revisionBudgetNum,
+          }
+        );
+      }
+
+      deliverable.revisions.push({
+        deliverableId: deliverable._id,
+
+        issueName: clean(issueName),
+        revisionType: normalizedRevisionType,
+        revisionBudget: revisionBudgetNum,
+
+        deliveryName: clean(deliveryName),
+        issueDeliverableLink: clean(issueDeliverableLink),
+        notes: clean(notes),
+
+        attachments: normalizedAttachments,
+        submissionDate: parsedSubmissionDate,
+
+        status: "pending",
+        raisedByRole,
+        raisedAt: new Date(),
+      });
+
+      deliverable.status = "revision";
+      deliverable.revisionRequestedAt = new Date();
+      deliverable.comments = clean(notes) || deliverable.comments || "";
+
+      await milestoneDoc.save({ session });
+
+      const createdRevision =
+        deliverable.revisions[deliverable.revisions.length - 1];
+
+      responsePayload = {
+        success: true,
+        message: "Revision raised successfully",
+        milestoneId: String(milestoneDoc._id),
+        milestoneHistoryId: String(milestoneHistory._id),
+        deliverableId: String(deliverable._id),
+
+        revision: {
+          revisionId: String(createdRevision._id),
+          deliverableId: String(createdRevision.deliverableId),
+
+          issueName: createdRevision.issueName,
+          revisionType: createdRevision.revisionType,
+          revisionBudget: createdRevision.revisionBudget,
+
+          deliveryName: createdRevision.deliveryName,
+          issueDeliverableLink: createdRevision.issueDeliverableLink,
+          notes: createdRevision.notes,
+
+          attachments: createdRevision.attachments,
+          submissionDate: createdRevision.submissionDate,
+
+          status: createdRevision.status,
+          raisedByRole: createdRevision.raisedByRole,
+          raisedAt: createdRevision.raisedAt,
+
+          createdAt: createdRevision.createdAt,
+          updatedAt: createdRevision.updatedAt,
+        },
+
+        deliverable: {
+          deliverableId: String(deliverable._id),
+          deliverableName: deliverable.deliverableName,
+          status: deliverable.status,
+          revisionRequestedAt: deliverable.revisionRequestedAt,
+          comments: deliverable.comments,
+        },
+
+        budget: {
+          influencerBudget,
+          usedMilestoneBudget,
+          usedPaidRevisionBudget,
+          totalUsedBudget: totalUsedBudget + revisionBudgetNum,
+          remainingBudget:
+            normalizedRevisionType === "paid"
+              ? Math.max(0, remainingBudget - revisionBudgetNum)
+              : remainingBudget,
+        },
+      };
+    });
+
+    session.endSession();
+
+    return res.status(201).json(responsePayload);
+  } catch (err) {
+    await session.abortTransaction().catch(() => { });
+    session.endSession();
+
+    console.error("Error in addRevision:", err);
+
+    if (err.status) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        ...(err.extra || {}),
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+exports.submitDeliverable = async (req, res) => {
+  try {
+    const {
+      influencerId,
+      milestoneId,
+      milestoneHistoryId,
+      deliverableId,
+      deliverableLink,
+      deliverableLinks,
+    } = req.body || {};
+
+    if (!influencerId) {
+      return res.status(400).json({
+        success: false,
+        message: "influencerId is required",
+      });
+    }
+
+    if (!milestoneId) {
+      return res.status(400).json({
+        success: false,
+        message: "milestoneId is required",
+      });
+    }
+
+    if (!milestoneHistoryId) {
+      return res.status(400).json({
+        success: false,
+        message: "milestoneHistoryId is required",
+      });
+    }
+
+    if (!deliverableId) {
+      return res.status(400).json({
+        success: false,
+        message: "deliverableId is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(milestoneId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneId",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(milestoneHistoryId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneHistoryId",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(deliverableId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid deliverableId",
+      });
+    }
+
+    const normalizedLinks = normalizeDeliverableLinks(
+      deliverableLinks && Array.isArray(deliverableLinks)
+        ? deliverableLinks
+        : deliverableLink
+          ? [deliverableLink]
+          : []
+    );
+
+    if (!normalizedLinks.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one deliverable link is required",
+      });
+    }
+
+    const milestoneDoc = await Milestone.findById(milestoneId);
+
+    if (!milestoneDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone not found",
+      });
+    }
+
+    const milestoneHistory = milestoneDoc.milestoneHistory.id(milestoneHistoryId);
+
+    if (!milestoneHistory) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history not found",
+      });
+    }
+
+    if (String(milestoneHistory.influencerId) !== String(influencerId)) {
+      return res.status(403).json({
+        success: false,
+        message: "This deliverable does not belong to this influencer",
+      });
+    }
+
+    const deliverable = milestoneHistory.deliverables.id(deliverableId);
+
+    if (!deliverable) {
+      return res.status(404).json({
+        success: false,
+        message: "Deliverable not found",
+      });
+    }
+
+    if (String(deliverable.status || "").toLowerCase() === "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Approved deliverable cannot be submitted again",
+      });
+    }
+
+    deliverable.deliverableLinks = normalizedLinks;
+    deliverable.status = "submitted";
+    deliverable.submittedAt = new Date();
+
+    await milestoneDoc.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Deliverable submitted successfully",
+      milestoneId: String(milestoneDoc._id),
+      milestoneHistoryId: String(milestoneHistory._id),
+      deliverableId: String(deliverable._id),
+      deliverable: {
+        deliverableId: String(deliverable._id),
+        deliverableName: deliverable.deliverableName,
+        deliveries: deliverable.deliveries || [],
+        aspectRatio: deliverable.aspectRatio || "",
+        platforms: deliverable.platforms || [],
+        quantity: deliverable.quantity || 1,
+        deliverableLinks: (deliverable.deliverableLinks || []).map((item) => ({
+          linkId: String(item._id),
+          label: item.label || "",
+          url: item.url || "",
+        })),
+        status: deliverable.status,
+        submittedAt: deliverable.submittedAt,
+        comments: deliverable.comments || "",
+        approvedRole: deliverable.approvedRole || "",
+        approvalId: deliverable.approvalId || "",
+        approvedAt: deliverable.approvedAt || null,
+        revisionRequestedAt: deliverable.revisionRequestedAt || null,
+        updatedAt: deliverable.updatedAt,
+      },
+    });
+  } catch (err) {
+    console.error("Error in submitDeliverable:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
