@@ -2823,7 +2823,7 @@ exports.submitDeliverable = async (req, res) => {
       milestoneId,
       milestoneHistoryId,
       deliverableId,
-      deliverableLink,
+      revisionId,
       deliverableLinks,
     } = req.body || {};
 
@@ -2876,12 +2876,15 @@ exports.submitDeliverable = async (req, res) => {
       });
     }
 
+    if (revisionId && !mongoose.Types.ObjectId.isValid(String(revisionId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid revisionId",
+      });
+    }
+
     const normalizedLinks = normalizeDeliverableLinks(
-      deliverableLinks && Array.isArray(deliverableLinks)
-        ? deliverableLinks
-        : deliverableLink
-          ? [deliverableLink]
-          : []
+      Array.isArray(deliverableLinks) ? deliverableLinks : []
     );
 
     if (!normalizedLinks.length) {
@@ -2932,6 +2935,50 @@ exports.submitDeliverable = async (req, res) => {
       });
     }
 
+    const requiredLinks = Math.max(1, Number(deliverable.quantity || 1));
+
+    if (normalizedLinks.length !== requiredLinks) {
+      return res.status(400).json({
+        success: false,
+        message: `Please submit exactly ${requiredLinks} deliverable link${
+          requiredLinks === 1 ? "" : "s"
+        }.`,
+      });
+    }
+
+    let updatedRevision = null;
+
+    const isRevisionSubmission =
+      String(deliverable.status || "").toLowerCase() === "revision";
+
+    if (isRevisionSubmission) {
+      const revisions = Array.isArray(deliverable.revisions)
+        ? deliverable.revisions
+        : [];
+
+      if (revisionId) {
+        updatedRevision = deliverable.revisions.id(revisionId);
+      } else {
+        updatedRevision = [...revisions]
+          .reverse()
+          .find((item) =>
+            ["pending", "revision"].includes(
+              String(item.status || "").toLowerCase()
+            )
+          );
+      }
+
+      if (!updatedRevision) {
+        return res.status(404).json({
+          success: false,
+          message: "Revision not found for this deliverable",
+        });
+      }
+
+      updatedRevision.status = "submitted";
+      updatedRevision.submittedAt = new Date();
+    }
+
     deliverable.deliverableLinks = normalizedLinks;
     deliverable.status = "submitted";
     deliverable.submittedAt = new Date();
@@ -2940,10 +2987,13 @@ exports.submitDeliverable = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Deliverable submitted successfully",
+      message: isRevisionSubmission
+        ? "Revision deliverable submitted successfully"
+        : "Deliverable submitted successfully",
       milestoneId: String(milestoneDoc._id),
       milestoneHistoryId: String(milestoneHistory._id),
       deliverableId: String(deliverable._id),
+      revisionId: updatedRevision?._id ? String(updatedRevision._id) : "",
       deliverable: {
         deliverableId: String(deliverable._id),
         deliverableName: deliverable.deliverableName,
@@ -2963,11 +3013,212 @@ exports.submitDeliverable = async (req, res) => {
         approvalId: deliverable.approvalId || "",
         approvedAt: deliverable.approvedAt || null,
         revisionRequestedAt: deliverable.revisionRequestedAt || null,
+        revisions: (deliverable.revisions || []).map((revision) => ({
+          revisionId: String(revision._id),
+          deliverableId: String(revision.deliverableId || deliverable._id),
+          issueName: revision.issueName || "",
+          revisionType: revision.revisionType || "free",
+          revisionBudget: Number(revision.revisionBudget || 0),
+          deliveryName: revision.deliveryName || "",
+          issueDeliverableLink: revision.issueDeliverableLink || "",
+          notes: revision.notes || "",
+          attachments: revision.attachments || [],
+          submissionDate: revision.submissionDate || null,
+          status: revision.status || "pending",
+          submittedAt: revision.submittedAt || null,
+          raisedByRole: revision.raisedByRole || "Brand",
+          raisedAt: revision.raisedAt || null,
+          createdAt: revision.createdAt || null,
+          updatedAt: revision.updatedAt || null,
+        })),
         updatedAt: deliverable.updatedAt,
       },
     });
   } catch (err) {
     console.error("Error in submitDeliverable:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+exports.approveDeliverable = async (req, res) => {
+  try {
+    const {
+      deliverableId,
+      milestoneId,
+      milestoneHistoryId,
+      comments = "",
+      approvedRole = "Brand",
+      approvalId = "",
+    } = req.body || {};
+
+    if (!deliverableId) {
+      return res.status(400).json({
+        success: false,
+        message: "deliverableId is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(deliverableId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid deliverableId",
+      });
+    }
+
+    if (milestoneId && !mongoose.Types.ObjectId.isValid(String(milestoneId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneId",
+      });
+    }
+
+    if (
+      milestoneHistoryId &&
+      !mongoose.Types.ObjectId.isValid(String(milestoneHistoryId))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneHistoryId",
+      });
+    }
+
+    const query = milestoneId
+      ? { _id: milestoneId, "milestoneHistory.deliverables._id": deliverableId }
+      : { "milestoneHistory.deliverables._id": deliverableId };
+
+    const milestoneDoc = await Milestone.findOne(query);
+
+    if (!milestoneDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Deliverable not found",
+      });
+    }
+
+    let milestoneHistory = null;
+    let deliverable = null;
+
+    for (const history of milestoneDoc.milestoneHistory || []) {
+      if (
+        milestoneHistoryId &&
+        String(history._id) !== String(milestoneHistoryId)
+      ) {
+        continue;
+      }
+
+      const foundDeliverable = history.deliverables.id(deliverableId);
+
+      if (foundDeliverable) {
+        milestoneHistory = history;
+        deliverable = foundDeliverable;
+        break;
+      }
+    }
+
+    if (!milestoneHistory || !deliverable) {
+      return res.status(404).json({
+        success: false,
+        message: "Deliverable not found in milestone history",
+      });
+    }
+
+    const currentStatus = String(deliverable.status || "").toLowerCase();
+
+    if (currentStatus === "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Deliverable is already approved",
+      });
+    }
+
+    if (currentStatus !== "submitted") {
+      return res.status(400).json({
+        success: false,
+        message: "Only submitted deliverables can be approved",
+      });
+    }
+
+    deliverable.status = "approved";
+    deliverable.approvedAt = new Date();
+    deliverable.approvedRole = approvedRole;
+    deliverable.approvalId = approvalId;
+    deliverable.comments = comments || deliverable.comments || "";
+
+    const submittedRevision = Array.isArray(deliverable.revisions)
+      ? [...deliverable.revisions]
+          .reverse()
+          .find(
+            (revision) =>
+              String(revision.status || "").toLowerCase() === "submitted"
+          )
+      : null;
+
+    if (submittedRevision) {
+      submittedRevision.status = "approved";
+      submittedRevision.approvedAt = new Date();
+      submittedRevision.approvedRole = approvedRole;
+      submittedRevision.approvalId = approvalId;
+      submittedRevision.comments = comments || submittedRevision.comments || "";
+    }
+
+    await milestoneDoc.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Deliverable approved successfully",
+      milestoneId: String(milestoneDoc._id),
+      milestoneHistoryId: String(milestoneHistory._id),
+      deliverableId: String(deliverable._id),
+      deliverable: {
+        deliverableId: String(deliverable._id),
+        deliverableName: deliverable.deliverableName,
+        deliveries: deliverable.deliveries || [],
+        aspectRatio: deliverable.aspectRatio || "",
+        platforms: deliverable.platforms || [],
+        quantity: deliverable.quantity || 1,
+        deliverableLinks: (deliverable.deliverableLinks || []).map((item) => ({
+          linkId: String(item._id),
+          label: item.label || "",
+          url: item.url || "",
+        })),
+        status: deliverable.status,
+        submittedAt: deliverable.submittedAt || null,
+        comments: deliverable.comments || "",
+        approvedRole: deliverable.approvedRole || "",
+        approvalId: deliverable.approvalId || "",
+        approvedAt: deliverable.approvedAt || null,
+        revisionRequestedAt: deliverable.revisionRequestedAt || null,
+        revisions: (deliverable.revisions || []).map((revision) => ({
+          revisionId: String(revision._id),
+          deliverableId: String(revision.deliverableId || deliverable._id),
+          issueName: revision.issueName || "",
+          revisionType: revision.revisionType || "free",
+          revisionBudget: Number(revision.revisionBudget || 0),
+          deliveryName: revision.deliveryName || "",
+          issueDeliverableLink: revision.issueDeliverableLink || "",
+          notes: revision.notes || "",
+          attachments: revision.attachments || [],
+          submissionDate: revision.submissionDate || null,
+          status: revision.status || "pending",
+          submittedAt: revision.submittedAt || null,
+          approvedAt: revision.approvedAt || null,
+          approvedRole: revision.approvedRole || "",
+          approvalId: revision.approvalId || "",
+          comments: revision.comments || "",
+          raisedByRole: revision.raisedByRole || "Brand",
+          raisedAt: revision.raisedAt || null,
+          createdAt: revision.createdAt || null,
+          updatedAt: revision.updatedAt || null,
+        })),
+        updatedAt: deliverable.updatedAt,
+      },
+    });
+  } catch (err) {
+    console.error("Error in approveDeliverable:", err);
 
     return res.status(500).json({
       success: false,

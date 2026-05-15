@@ -1533,19 +1533,19 @@ function buildSubscriptionFromPlan(plan) {
 
     features: Array.isArray(plan.features)
       ? plan.features.map((feature) => ({
-          key: feature.key,
-          value: feature.value ?? null,
-          limit:
-            typeof feature.value === "number"
-              ? feature.value
-              : typeof feature.limit === "number"
-                ? feature.limit
-                : 0,
-          used: 0,
-          note: feature.note || null,
-          resetsEvery: feature.resetsEvery || null,
-          resetsAt: null,
-        }))
+        key: feature.key,
+        value: feature.value ?? null,
+        limit:
+          typeof feature.value === "number"
+            ? feature.value
+            : typeof feature.limit === "number"
+              ? feature.limit
+              : 0,
+        used: 0,
+        note: feature.note || null,
+        resetsEvery: feature.resetsEvery || null,
+        resetsAt: null,
+      }))
       : [],
 
     internalCredits: {
@@ -1654,30 +1654,30 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
 
     const cleanLanguages = Array.isArray(payload?.languages)
       ? payload.languages
-          .filter(
-            (item) =>
-              item &&
-              typeof item.name === "string" &&
-              item.name.trim().length > 0
-          )
-          .map((item) => ({
-            _id: item._id || undefined,
-            name: String(item.name).trim(),
-          }))
+        .filter(
+          (item) =>
+            item &&
+            typeof item.name === "string" &&
+            item.name.trim().length > 0
+        )
+        .map((item) => ({
+          _id: item._id || undefined,
+          name: String(item.name).trim(),
+        }))
       : [];
 
     const cleanCategories = Array.isArray(payload?.categories)
       ? payload.categories
-          .filter(
-            (item) =>
-              item &&
-              typeof item.name === "string" &&
-              item.name.trim().length > 0
-          )
-          .map((item) => ({
-            _id: item._id || undefined,
-            name: String(item.name).trim(),
-          }))
+        .filter(
+          (item) =>
+            item &&
+            typeof item.name === "string" &&
+            item.name.trim().length > 0
+        )
+        .map((item) => ({
+          _id: item._id || undefined,
+          name: String(item.name).trim(),
+        }))
       : [];
 
     let proxyEmail = existingInfluencer?.proxyEmail || "";
@@ -2495,8 +2495,7 @@ exports.getLiteInfluencerByIdPost = async (req, res) => {
 exports.getCampaignsByInfluencer = async (req, res) => {
   try {
     const {
-      _id,
-      id,
+      influencerId,
       page = 1,
       limit = 10,
       search = "",
@@ -2504,17 +2503,17 @@ exports.getCampaignsByInfluencer = async (req, res) => {
       sortOrder = "desc",
     } = req.body || {};
 
-    const influencerMongoId = String(_id || id || "").trim();
+    const influencerMongoId = String(influencerId || "").trim();
 
     if (!influencerMongoId) {
       return res.status(400).json({
-        message: "influencer _id is required",
+        message: "influencerId is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(influencerMongoId)) {
       return res.status(400).json({
-        message: "Valid influencer _id is required",
+        message: "Valid influencerId is required",
       });
     }
 
