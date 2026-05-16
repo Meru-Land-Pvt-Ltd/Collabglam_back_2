@@ -1,0 +1,257 @@
+'use strict';
+
+const mongoose = require('mongoose');
+const YoutubeInsightReport = require('../models/youtubeInsightReport');
+const { createInsightReport } = require('../services/youtubeInsight.service');
+const {
+  formatYoutubeInsightReport,
+  getYoutubeLinkInsightSummary
+} = require('../services/youtubeReportDashboard.service');
+
+const ADMIN_ROLES_WITH_FULL_REPORT_ACCESS = new Set(['super_admin', 'revenue_head']);
+
+function escapeRegex(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function clean(value) {
+  return String(value || '').trim();
+}
+
+function getRequestActor(req = {}) {
+  const admin = req.admin || null;
+  const user = req.user || null;
+  const adminId = clean(admin?.adminId || admin?._id);
+  const userId = clean(user?._id || user?.id);
+  return {
+    adminId: adminId || null,
+    userId: userId || null,
+    id: adminId || userId || null,
+    role: clean(admin?.role || user?.role).toLowerCase(),
+    email: clean(admin?.email || user?.email).toLowerCase(),
+    name: clean(admin?.name || user?.name),
+    isAdmin: Boolean(adminId)
+  };
+}
+
+function getYoutubeLinkFromRequest(req = {}) {
+  const body = req.body || {};
+  const query = req.query || {};
+  return clean(
+    body.videoUrl ||
+      body.youtubeVideoUrl ||
+      body.youtubeUrl ||
+      body.videoLink ||
+      body.link ||
+      body.url ||
+      body.videoId ||
+      query.videoUrl ||
+      query.youtubeUrl ||
+      query.link ||
+      query.url ||
+      query.videoId
+  );
+}
+
+function canViewAllReports(req = {}) {
+  const actor = getRequestActor(req);
+  return actor.isAdmin && ADMIN_ROLES_WITH_FULL_REPORT_ACCESS.has(actor.role);
+}
+
+function buildAccessFilter(req = {}) {
+  const actor = getRequestActor(req);
+  if (canViewAllReports(req)) return {};
+  if (actor.adminId && mongoose.Types.ObjectId.isValid(actor.adminId)) return { createdByAdminId: actor.adminId };
+  if (actor.userId && mongoose.Types.ObjectId.isValid(actor.userId)) return { userId: actor.userId };
+  return { _id: null };
+}
+
+function getListInput(req = {}) {
+  return { ...(req.query || {}), ...(req.body || {}) };
+}
+
+function addOptionalFilters(filter, input = {}) {
+  if (input.videoId) filter.videoId = clean(input.videoId);
+  if (input.channelId) filter['channelMetrics.channelId'] = clean(input.channelId);
+  if (input.reportStatus) filter.reportStatus = clean(input.reportStatus);
+  if (input.category) filter['creatorInsights.primaryCategory'] = new RegExp(escapeRegex(clean(input.category)), 'i');
+  if (input.influencerName) filter['hero.influencerName'] = new RegExp(escapeRegex(clean(input.influencerName)), 'i');
+  if (input.search) {
+    const search = new RegExp(escapeRegex(clean(input.search)), 'i');
+    filter.$or = [
+      { 'hero.influencerName': search },
+      { 'videoMetrics.title': search },
+      { 'channelMetrics.title': search },
+      { 'creatorInsights.primaryCategory': search }
+    ];
+  }
+  if (input.fromDate || input.toDate) {
+    filter.createdAt = {};
+    if (input.fromDate) filter.createdAt.$gte = new Date(input.fromDate);
+    if (input.toDate) filter.createdAt.$lte = new Date(input.toDate);
+  }
+  return filter;
+}
+
+function formatYoutubeInsightListItem(report = {}) {
+  const dashboard = report.dashboard || {};
+  const hero = dashboard.hero || report.hero || {};
+  const profile = dashboard.profile || {};
+  const video = report.videoMetrics || {};
+  const channel = report.channelMetrics || {};
+  const finalVerdict = dashboard.finalVerdict || report.finalVerdict || {};
+  const revenue = dashboard.estimatedRevenue || {};
+  const watch = dashboard.estimatedWatchTime || {};
+  const creator = dashboard.creatorFit || dashboard.influencerCategory || report.creatorInsights || {};
+
+  return {
+    reportId: String(report._id || report.reportId || ''),
+    reportType: report.reportType || 'YouTube Link Intelligence Report',
+    platform: 'YouTube',
+    reportStatus: report.reportStatus || 'Published',
+    generatedAt: report.createdAt || report.generatedAt || null,
+    influencerName: profile.name || hero.influencerName || channel.title || '',
+    influencerCategory: creator.primaryCategory || video.categoryName || '',
+    videoTitle: dashboard.videoOverview?.title || hero.videoTitle || video.title || '',
+    thumbnailUrl: dashboard.videoOverview?.thumbnailUrl || hero.thumbnailUrl || video.thumbnailUrl || '',
+    channelLogo: profile.avatarUrl || hero.channelThumbnailUrl || channel.thumbnailUrl || '',
+    videoUrl: dashboard.videoOverview?.videoUrl || hero.livePublishedLink || report.videoUrl || '',
+    channelUrl: profile.channelUrl || hero.channelUrl || channel.channelUrl || '',
+    subscribersDisplay: profile.subscriberCountDisplay || channel.subscriberCountDisplay || '',
+    channelTotalViewsDisplay: profile.totalViewCountDisplay || channel.totalViewCountDisplay || '',
+    channelTotalVideosDisplay: profile.videoCountDisplay || channel.videoCountDisplay || '',
+    views: video.viewCount || 0,
+    likes: video.likeCount || 0,
+    comments: video.commentCount || 0,
+    engagementRate: video.engagementRate || 0,
+    durationDisplay: video.durationDisplay || dashboard.videoOverview?.durationDisplay || '',
+    estimatedCtrDisplay: report.performanceEstimates?.estimatedCtr?.displayValue || '',
+    estimatedConversionRateDisplay: report.performanceEstimates?.estimatedConversionRate?.displayValue || '',
+    estimatedWatchTimeHoursDisplay: watch.totalWatchTimeHours?.displayValue || '',
+    estimatedRevenueRangeDisplay: revenue.estimatedRevenueRangeDisplay || '',
+    finalAiScore: finalVerdict.finalScore || report.aiScores?.finalAiScore || 0,
+    verdict: finalVerdict.verdict || ''
+  };
+}
+
+async function analyzeYoutubeVideo(req, res, next) {
+  try {
+    const actor = getRequestActor(req);
+    const videoUrl = getYoutubeLinkFromRequest(req);
+    const body = req.body || {};
+
+    const report = await createInsightReport({
+      actor,
+      payload: {
+        videoUrl,
+        maxComments: body.maxComments,
+        creatorAverageLimit: body.creatorAverageLimit,
+        includeReplies: body.includeReplies,
+        includeRepliesInAnalysis: body.includeRepliesInAnalysis,
+        maxRepliesPerThread: body.maxRepliesPerThread,
+        commentOrder: body.commentOrder,
+        rpmLow: body.rpmLow,
+        rpmHigh: body.rpmHigh
+      }
+    });
+
+    const formattedReport = formatYoutubeInsightReport(report, {
+      includeRawData: req.query.includeRaw === 'true',
+      includeRawReport: req.query.includeRaw === 'true',
+      includeDebug: req.query.debug === 'true'
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'YouTube link insight generated successfully.',
+      data: formattedReport,
+      reportId: formattedReport.reportId,
+      frontendReport: formattedReport.frontendReport,
+      dashboard: formattedReport.dashboard,
+      aiSummary: formattedReport.aiSummary,
+      aiInsights: formattedReport.aiInsights,
+      finalVerdict: formattedReport.finalVerdict
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getYoutubeInsightReports(req, res, next) {
+  try {
+    const input = getListInput(req);
+    const page = Math.max(Number(input.page || 1), 1);
+    const limit = Math.min(Math.max(Number(input.limit || 20), 1), 100);
+    const skip = (page - 1) * limit;
+    const sortBy = clean(input.sortBy) || 'createdAt';
+    const sortOrder = clean(input.sortOrder).toLowerCase() === 'asc' ? 1 : -1;
+    const allowedSorts = new Set(['createdAt', 'updatedAt', 'videoId', 'videoMetrics.viewCount', 'videoMetrics.likeCount', 'videoMetrics.commentCount', 'videoMetrics.engagementRate', 'channelMetrics.subscriberCount', 'channelMetrics.totalViewCount', 'aiScores.finalAiScore', 'creatorInsights.primaryCategory']);
+    const filter = addOptionalFilters(buildAccessFilter(req), input);
+    const sort = { [allowedSorts.has(sortBy) ? sortBy : 'createdAt']: sortOrder };
+    const [items, total] = await Promise.all([
+      YoutubeInsightReport.find(filter).sort(sort).skip(skip).limit(limit).lean(),
+      YoutubeInsightReport.countDocuments(filter)
+    ]);
+    return res.status(200).json({ success: true, data: items.map(formatYoutubeInsightListItem), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getYoutubeInsightReportById(req, res, next) {
+  try {
+    const reportId = clean(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(reportId)) return res.status(400).json({ success: false, message: 'Invalid YouTube insight report id.' });
+    const report = await YoutubeInsightReport.findOne({ ...buildAccessFilter(req), _id: reportId }).lean();
+    if (!report) return res.status(404).json({ success: false, message: 'YouTube insight report not found.' });
+    const formattedReport = formatYoutubeInsightReport(report, {
+      includeRawData: req.query.includeRaw === 'true',
+      includeRawReport: req.query.includeRaw === 'true',
+      includeDebug: req.query.debug === 'true'
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: formattedReport,
+      reportId: formattedReport.reportId,
+      frontendReport: formattedReport.frontendReport,
+      dashboard: formattedReport.dashboard,
+      aiSummary: formattedReport.aiSummary,
+      aiInsights: formattedReport.aiInsights,
+      finalVerdict: formattedReport.finalVerdict
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getYoutubeInsightSummary(req, res, next) {
+  try {
+    const input = getListInput(req);
+    const filter = addOptionalFilters(buildAccessFilter(req), input);
+    const summary = await getYoutubeLinkInsightSummary({ filter, limit: input.limit || 500 });
+    return res.status(200).json({ success: true, data: summary });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function deleteYoutubeInsightReport(req, res, next) {
+  try {
+    const reportId = clean(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(reportId)) return res.status(400).json({ success: false, message: 'Invalid YouTube insight report id.' });
+    const report = await YoutubeInsightReport.findOneAndDelete({ ...buildAccessFilter(req), _id: reportId });
+    if (!report) return res.status(404).json({ success: false, message: 'YouTube insight report not found.' });
+    return res.status(200).json({ success: true, message: 'YouTube insight report deleted successfully.' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = {
+  analyzeYoutubeVideo,
+  getYoutubeInsightReports,
+  getYoutubeInsightReportById,
+  getYoutubeInsightSummary,
+  deleteYoutubeInsightReport
+};
