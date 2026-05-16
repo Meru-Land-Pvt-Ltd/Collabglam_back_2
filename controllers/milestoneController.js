@@ -2483,8 +2483,6 @@ exports.getAllDeliverablesByMilestone = async (req, res) => {
 };
 
 
-
-
 exports.addRevision = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -2517,7 +2515,8 @@ exports.addRevision = async (req, res) => {
     if (!milestoneId || !milestoneHistoryId || !deliverableId) {
       return res.status(400).json({
         success: false,
-        message: "milestoneId, milestoneHistoryId and deliverableId are required",
+        message:
+          "milestoneId, milestoneHistoryId and deliverableId are required",
       });
     }
 
@@ -2536,6 +2535,7 @@ exports.addRevision = async (req, res) => {
     }
 
     const normalizedRevisionType = String(revisionType).toLowerCase();
+
     const revisionBudgetNum =
       normalizedRevisionType === "paid" ? Number(revisionBudget) : 0;
 
@@ -2579,15 +2579,19 @@ exports.addRevision = async (req, res) => {
     ]);
 
     let responsePayload = null;
+    let walletPayload = null;
 
     await session.withTransaction(async () => {
-      const milestoneDoc = await Milestone.findById(milestoneId).session(session);
+      const milestoneDoc = await Milestone.findById(milestoneId).session(
+        session
+      );
 
       if (!milestoneDoc) {
         abort(404, "Milestone not found");
       }
 
-      const milestoneHistory = milestoneDoc.milestoneHistory.id(milestoneHistoryId);
+      const milestoneHistory =
+        milestoneDoc.milestoneHistory.id(milestoneHistoryId);
 
       if (!milestoneHistory) {
         abort(404, "Milestone history not found");
@@ -2597,6 +2601,14 @@ exports.addRevision = async (req, res) => {
 
       if (!deliverable) {
         abort(404, "Deliverable not found");
+      }
+
+      if (milestoneHistory.released === true) {
+        abort(400, "Released milestone cannot be revised.");
+      }
+
+      if (String(milestoneHistory.payoutStatus || "pending") !== "pending") {
+        abort(400, "Milestone payout is already initiated. Revision cannot be raised.");
       }
 
       const contractOr = [];
@@ -2650,7 +2662,11 @@ exports.addRevision = async (req, res) => {
         );
       }
 
-      const usedMilestoneBudget = (milestoneDoc.milestoneHistory || [])
+      const currentMilestoneBudget = Number(
+        milestoneHistory.milestoneBudget || milestoneHistory.amount || 0
+      );
+
+      const usedMilestoneBudgetBefore = (milestoneDoc.milestoneHistory || [])
         .filter(
           (entry) =>
             sameId(entry.influencerId, milestoneHistory.influencerId) &&
@@ -2662,54 +2678,161 @@ exports.addRevision = async (req, res) => {
           0
         );
 
-      const usedPaidRevisionBudget = (milestoneDoc.milestoneHistory || [])
-        .filter(
-          (entry) =>
-            sameId(entry.influencerId, milestoneHistory.influencerId) &&
-            sameId(entry.campaignId, milestoneHistory.campaignId)
-        )
-        .reduce((historySum, entry) => {
-          const deliverables = Array.isArray(entry.deliverables)
-            ? entry.deliverables
-            : [];
-
-          const revisionSum = deliverables.reduce((deliverableSum, del) => {
-            const revisions = Array.isArray(del.revisions) ? del.revisions : [];
-
-            return (
-              deliverableSum +
-              revisions.reduce((sum, revision) => {
-                if (String(revision.revisionType).toLowerCase() !== "paid") {
-                  return sum;
-                }
-
-                return sum + Number(revision.revisionBudget || 0);
-              }, 0)
-            );
-          }, 0);
-
-          return historySum + revisionSum;
-        }, 0);
-
-      const totalUsedBudget = usedMilestoneBudget + usedPaidRevisionBudget;
-      const remainingBudget = Math.max(0, influencerBudget - totalUsedBudget);
+      const remainingInfluencerBudgetBefore = Math.max(
+        0,
+        influencerBudget - usedMilestoneBudgetBefore
+      );
 
       if (
         normalizedRevisionType === "paid" &&
-        revisionBudgetNum > remainingBudget
+        revisionBudgetNum > remainingInfluencerBudgetBefore
       ) {
         abort(
           400,
           "Revision budget cannot be greater than remaining influencer budget.",
           {
             influencerBudget,
-            usedMilestoneBudget,
-            usedPaidRevisionBudget,
-            totalUsedBudget,
-            remainingBudget,
+            usedMilestoneBudget: usedMilestoneBudgetBefore,
+            remainingBudget: remainingInfluencerBudgetBefore,
             requestedRevisionBudget: revisionBudgetNum,
           }
         );
+      }
+
+      if (normalizedRevisionType === "paid") {
+        const wallet = await getOrCreateBrandWallet(
+          milestoneDoc.brandId,
+          session
+        );
+
+        wallet.freezes = Array.isArray(wallet.freezes) ? wallet.freezes : [];
+
+        const campaignFreeze = wallet.freezes.find(
+          (freeze) =>
+            sameId(freeze.brandId, milestoneDoc.brandId) &&
+            sameId(freeze.campaignId, milestoneHistory.campaignId)
+        );
+
+        if (!campaignFreeze) {
+          abort(
+            400,
+            "No campaign wallet found. Please add funds for this campaign to raise a paid revision.",
+            {
+              walletBalance: Number(wallet.walletBalance || 0),
+              frozenBalance: calcFrozenAll(wallet.freezes || []),
+              usableBalance: Number(wallet.usableBalance || 0),
+              campaignId: String(milestoneHistory.campaignId),
+              availableToAllocate: 0,
+              needToAdd: revisionBudgetNum,
+              requestedRevisionBudget: revisionBudgetNum,
+            }
+          );
+        }
+
+        syncCampaignFreeze(campaignFreeze);
+
+        const walletSnapBefore = syncUsableBalance(wallet);
+        const availableToAllocate = Number(
+          campaignFreeze.availableToAllocate || 0
+        );
+
+        if (availableToAllocate < revisionBudgetNum) {
+          const needToAdd = Math.max(
+            0,
+            revisionBudgetNum - availableToAllocate
+          );
+
+          abort(
+            400,
+            `Insufficient campaign frozen balance. Please add $${needToAdd.toFixed(
+              2
+            )} to this campaign wallet to raise revision.`,
+            {
+              walletBalance: walletSnapBefore.walletBalance,
+              frozenBalance: walletSnapBefore.frozenBalance,
+              usableBalance: walletSnapBefore.usableBalance,
+              campaignId: String(milestoneHistory.campaignId),
+              totalFrozenAmount: Number(campaignFreeze.totalFrozenAmount || 0),
+              currentFrozenAmount: Number(
+                campaignFreeze.currentFrozenAmount || 0
+              ),
+              totalAllocatedAmount: Number(
+                campaignFreeze.totalAllocatedAmount || 0
+              ),
+              totalReleasedAmount: Number(
+                campaignFreeze.totalReleasedAmount || 0
+              ),
+              availableToAllocate,
+              needToAdd,
+              requestedRevisionBudget: revisionBudgetNum,
+            }
+          );
+        }
+
+        campaignFreeze.influencerAllocations = Array.isArray(
+          campaignFreeze.influencerAllocations
+        )
+          ? campaignFreeze.influencerAllocations
+          : [];
+
+        const allocationIndex =
+          campaignFreeze.influencerAllocations.findIndex((allocation) =>
+            sameId(allocation.influencerId, milestoneHistory.influencerId)
+          );
+
+        if (allocationIndex >= 0) {
+          campaignFreeze.influencerAllocations[allocationIndex].amount =
+            Number(
+              campaignFreeze.influencerAllocations[allocationIndex].amount || 0
+            ) + revisionBudgetNum;
+        } else {
+          campaignFreeze.influencerAllocations.push({
+            influencerId: milestoneHistory.influencerId,
+            amount: revisionBudgetNum,
+            releasedAmount: 0,
+          });
+        }
+
+        const updatedMilestoneBudget =
+          currentMilestoneBudget + revisionBudgetNum;
+
+        milestoneHistory.milestoneBudget = updatedMilestoneBudget;
+        milestoneHistory.amount = updatedMilestoneBudget;
+
+        milestoneDoc.totalAmount =
+          Number(milestoneDoc.totalAmount || 0) + revisionBudgetNum;
+
+        syncCampaignFreeze(campaignFreeze);
+
+        const walletSnapAfter = syncUsableBalance(wallet);
+
+        await wallet.save({ session });
+
+        walletPayload = {
+          wallet: {
+            walletBalance: walletSnapAfter.walletBalance,
+            frozenBalance: walletSnapAfter.frozenBalance,
+            usableBalance: walletSnapAfter.usableBalance,
+          },
+          campaignWallet: {
+            campaignId: String(milestoneHistory.campaignId),
+            totalFrozenAmount: Number(campaignFreeze.totalFrozenAmount || 0),
+            currentFrozenAmount: Number(
+              campaignFreeze.currentFrozenAmount || 0
+            ),
+            totalAllocatedAmount: Number(
+              campaignFreeze.totalAllocatedAmount || 0
+            ),
+            totalReleasedAmount: Number(
+              campaignFreeze.totalReleasedAmount || 0
+            ),
+            availableToAllocate: Number(
+              campaignFreeze.availableToAllocate || 0
+            ),
+            influencerAllocations:
+              campaignFreeze.influencerAllocations || [],
+          },
+        };
       }
 
       deliverable.revisions.push({
@@ -2740,9 +2863,20 @@ exports.addRevision = async (req, res) => {
       const createdRevision =
         deliverable.revisions[deliverable.revisions.length - 1];
 
+      const updatedMilestoneBudget = Number(
+        milestoneHistory.milestoneBudget || milestoneHistory.amount || 0
+      );
+
+      const usedMilestoneBudgetAfter =
+        usedMilestoneBudgetBefore + revisionBudgetNum;
+
       responsePayload = {
         success: true,
-        message: "Revision raised successfully",
+        message:
+          normalizedRevisionType === "paid"
+            ? "Paid revision raised and added to milestone budget successfully"
+            : "Revision raised successfully",
+
         milestoneId: String(milestoneDoc._id),
         milestoneHistoryId: String(milestoneHistory._id),
         deliverableId: String(deliverable._id),
@@ -2778,16 +2912,26 @@ exports.addRevision = async (req, res) => {
           comments: deliverable.comments,
         },
 
+        milestone: {
+          milestoneBudget: updatedMilestoneBudget,
+          amount: updatedMilestoneBudget,
+          addedRevisionBudget:
+            normalizedRevisionType === "paid" ? revisionBudgetNum : 0,
+        },
+
         budget: {
           influencerBudget,
-          usedMilestoneBudget,
-          usedPaidRevisionBudget,
-          totalUsedBudget: totalUsedBudget + revisionBudgetNum,
+          usedMilestoneBudgetBefore,
+          usedMilestoneBudgetAfter,
           remainingBudget:
             normalizedRevisionType === "paid"
-              ? Math.max(0, remainingBudget - revisionBudgetNum)
-              : remainingBudget,
+              ? Math.max(0, influencerBudget - usedMilestoneBudgetAfter)
+              : remainingInfluencerBudgetBefore,
+          requestedRevisionBudget: revisionBudgetNum,
         },
+
+        wallet: walletPayload?.wallet || null,
+        campaignWallet: walletPayload?.campaignWallet || null,
       };
     });
 
@@ -2940,9 +3084,8 @@ exports.submitDeliverable = async (req, res) => {
     if (normalizedLinks.length !== requiredLinks) {
       return res.status(400).json({
         success: false,
-        message: `Please submit exactly ${requiredLinks} deliverable link${
-          requiredLinks === 1 ? "" : "s"
-        }.`,
+        message: `Please submit exactly ${requiredLinks} deliverable link${requiredLinks === 1 ? "" : "s"
+          }.`,
       });
     }
 
@@ -3150,11 +3293,11 @@ exports.approveDeliverable = async (req, res) => {
 
     const submittedRevision = Array.isArray(deliverable.revisions)
       ? [...deliverable.revisions]
-          .reverse()
-          .find(
-            (revision) =>
-              String(revision.status || "").toLowerCase() === "submitted"
-          )
+        .reverse()
+        .find(
+          (revision) =>
+            String(revision.status || "").toLowerCase() === "submitted"
+        )
       : null;
 
     if (submittedRevision) {
@@ -3219,6 +3362,137 @@ exports.approveDeliverable = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in approveDeliverable:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+
+exports.acceptMilestoneByInfluencer = async (req, res) => {
+  try {
+    const { milestoneId, milestoneHistoryId, influencerId } = req.body || {};
+
+    if (!milestoneId || !milestoneHistoryId || !influencerId) {
+      return res.status(400).json({
+        success: false,
+        message: "milestoneId, milestoneHistoryId and influencerId are required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(milestoneId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneId",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(milestoneHistoryId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid milestoneHistoryId",
+      });
+    }
+
+    const milestoneDoc = await Milestone.findById(milestoneId);
+
+    if (!milestoneDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone not found",
+      });
+    }
+
+    const milestoneHistory = milestoneDoc.milestoneHistory.id(milestoneHistoryId);
+
+    if (!milestoneHistory) {
+      return res.status(404).json({
+        success: false,
+        message: "Milestone history not found",
+      });
+    }
+
+    if (!sameId(milestoneHistory.influencerId, influencerId)) {
+      return res.status(403).json({
+        success: false,
+        message: "This milestone does not belong to this influencer",
+      });
+    }
+
+    if (Number(milestoneHistory.isAccepted || 0) === 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Milestone is already accepted",
+      });
+    }
+
+    if (milestoneHistory.released === true) {
+      return res.status(400).json({
+        success: false,
+        message: "Released milestone cannot be accepted again",
+      });
+    }
+
+    if (String(milestoneHistory.payoutStatus || "pending") !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "Milestone payout is already initiated",
+      });
+    }
+
+    milestoneHistory.isAccepted = 1;
+
+    await milestoneDoc.save();
+
+    createAndEmit({
+      brandId: milestoneDoc.brandId,
+      type: "milestone.accepted",
+      title: `Milestone accepted: ${milestoneHistory.milestoneTitle || "Milestone"}`,
+      message: "Influencer has accepted the milestone.",
+      entityType: "campaign",
+      entityId: String(milestoneHistory.campaignId),
+      actionPath: `/brand/active-campaign`,
+    }).catch((e) => console.error("notify brand (milestone accepted) failed:", e));
+
+    createAndEmit({
+      influencerId: milestoneHistory.influencerId,
+      type: "milestone.accepted",
+      title: `Milestone accepted: ${milestoneHistory.milestoneTitle || "Milestone"}`,
+      message: "You have accepted this milestone.",
+      entityType: "campaign",
+      entityId: String(milestoneHistory.campaignId),
+      actionPath: `/influencer/my-campaign`,
+    }).catch((e) =>
+      console.error("notify influencer (milestone accepted) failed:", e)
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Milestone accepted successfully",
+      milestoneId: String(milestoneDoc._id),
+      milestoneHistoryId: String(milestoneHistory._id),
+      isAccepted: milestoneHistory.isAccepted,
+      milestone: {
+        milestoneHistoryId: String(milestoneHistory._id),
+        influencerId: String(milestoneHistory.influencerId || ""),
+        campaignId: String(milestoneHistory.campaignId || ""),
+        milestoneTitle: milestoneHistory.milestoneTitle || "",
+        milestoneDescription: milestoneHistory.milestoneDescription || "",
+        milestoneBudget: Number(
+          milestoneHistory.milestoneBudget || milestoneHistory.amount || 0
+        ),
+        amount: Number(milestoneHistory.amount || milestoneHistory.milestoneBudget || 0),
+        isAccepted: milestoneHistory.isAccepted,
+        released: Boolean(milestoneHistory.released),
+        payoutStatus: milestoneHistory.payoutStatus || "pending",
+        updatedAt: milestoneHistory.updatedAt || null,
+      },
+    });
+  } catch (err) {
+    console.error("Error in acceptMilestoneByInfluencer:", err);
 
     return res.status(500).json({
       success: false,

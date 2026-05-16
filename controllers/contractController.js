@@ -5191,3 +5191,37 @@ exports.influencerManage = async (req, res) => {
     });
   }
 };
+
+exports.getContractDetails = async (req, res) => {
+  try {
+    const mongoose = require("mongoose");
+
+    const contractId =
+      req.params.contractId || req.query.contractId || req.body.contractId;
+
+    if (!contractId) {
+      return respondError(res, "contractId is required", 400);
+    }
+
+    const query = {
+      $or: [{ contractId: String(contractId) }],
+    };
+
+    if (mongoose.Types.ObjectId.isValid(contractId)) {
+      query.$or.push({ _id: contractId });
+    }
+
+    const contract = await Contract.findOne(query).lean();
+
+    if (!contract) {
+      return respondError(res, "Contract not found", 404);
+    }
+
+    return respondOK(res, {
+      message: "Contract details fetched successfully",
+      contract,
+    });
+  } catch (err) {
+    return respondError(res, "Error fetching contract details", 500, err);
+  }
+};

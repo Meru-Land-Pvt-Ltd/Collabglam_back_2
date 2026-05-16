@@ -18,6 +18,7 @@ const {
   addRevision,
   submitDeliverable,
   approveDeliverable,
+  acceptMilestoneByInfluencer,
 } = require("../controllers/milestoneController");
 
 // Brand: create milestone and freeze amount in BrandWallet
@@ -43,7 +44,7 @@ router.post("/adminListPayouts", adminListPayouts);
 
 router.post("/adminMarkMilestonePaid", adminMarkMilestonePaid);
 
-router.post("/getPayoutDetailsByInfluencer",getPayoutDetailsByInfluencer);
+router.post("/getPayoutDetailsByInfluencer", getPayoutDetailsByInfluencer);
 
 router.post("/getAllDeliverables", getAllDeliverablesByMilestone);
 
@@ -52,5 +53,7 @@ router.post("/addRevision", addRevision);
 router.post("/submitDeliverable", submitDeliverable);
 
 router.post("/approveDeliverable", approveDeliverable);
+
+router.post("/acceptByInfluencer", acceptMilestoneByInfluencer);
 
 module.exports = router;
