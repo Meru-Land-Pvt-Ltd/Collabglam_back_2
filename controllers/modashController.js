@@ -9,6 +9,8 @@
       sanitizeModashDocForViewer,
     } = require('../utils/emailRedactor');
     const ModashProfile = require('../models/modash');
+    const ModashCountry = require("../models/modashCountries");
+    const countriesSeed = require("../models/test.countries.json");
     const Creator = require('../models/creator'); // kept for future compatibility
     const Influencer = require('../models/influencer'); // kept for future compatibility
     const BrandProfileView = require('../models/brandProfileView');
@@ -19,6 +21,7 @@
     /* -------------------------------------------------------------------------- */
 
     const MODASH_API_KEY = process.env.MODASH_API_KEY;
+    console.log("MODASH_API_KEY",MODASH_API_KEY )
     const MODASH_BASE_URL = process.env.MODASH_BASE_URL || 'https://api.modash.io/v1';
     const MODASH_AUTH_HEADER = cleanStr(process.env.MODASH_AUTH_HEADER || 'authorization').toLowerCase();
 
@@ -3807,7 +3810,17 @@
         const platform = normalizePlatform((req.body && req.body.platform) || '');
         let username = cleanStr((req.body && req.body.username) || '');
         let handle = cleanStr((req.body && req.body.handle) || username || '');
+          username = username
+      .trim()
+      .replace(/^@+/, '')
+      .replace(/["'`]/g, '')
+      .trim();
 
+    handle = handle
+      .trim()
+      .replace(/^@+/, '')
+      .replace(/["'`]/g, '')
+      .trim();
         if (username.startsWith('@')) username = username.slice(1);
         if (handle.startsWith('@')) handle = handle.slice(1);
 
@@ -3825,6 +3838,7 @@
         // BLOCK if same provider + handle already exists
         const existingProfile = await ModashProfile.findOne({
           provider: platform,
+          influencer: { $exists: true, $ne: null },
           $or: [{ handle }, { username: handle }, { 'profile.username': handle }],
         }).select('_id provider userId handle username');
 
@@ -4778,162 +4792,567 @@
       });
     }
 
-    async function getModashLocations({ platform, query, limit = 20 }) {
-      const token = cleanParam(process.env.MODASH_API_KEY, "");
+//   async function getModashLocations({ platform, query, limit = 20 }) {
+//   const token = cleanParam(process.env.MODASH_API_KEY, "");
 
-      if (!token) {
-        const error = new Error("MODASH_API_KEY is missing in .env");
-        error.statusCode = 500;
-        throw error;
-      }
+//   if (!token) {
+//     const error = new Error("MODASH_API_KEY is missing in .env");
+//     error.statusCode = 500;
+//     throw error;
+//   }
 
-      const cleanPlatform = normalizeModashPlatform(platform);
-      const cleanQuery = cleanParam(query, "");
-      const cleanLimit = safeNumber(limit, 20);
+//   const cleanPlatform = normalizeModashPlatform(platform);
+//   const cleanQuery = cleanParam(query, "");
+//   const cleanLimit = safeNumber(limit, 20);
 
-      if (!cleanQuery) {
-        const error = new Error("query is required");
-        error.statusCode = 400;
-        throw error;
-      }
+//   if (!cleanQuery) {
+//     const error = new Error("query is required");
+//     error.statusCode = 400;
+//     throw error;
+//   }
 
-      const baseUrl = getModashBaseUrl();
+//   const baseUrl = getModashBaseUrl();
 
-      const url =
-        `${baseUrl}/${cleanPlatform}/locations` +
-        `?query=${encodeURIComponent(cleanQuery)}` +
-        `&limit=${encodeURIComponent(String(cleanLimit))}`;
+//   const url =
+//     `${baseUrl}/${cleanPlatform}/locations` +
+//     `?query=${encodeURIComponent(cleanQuery)}` +
+//     `&limit=${encodeURIComponent(String(cleanLimit))}`;
 
-      console.log("[Modash Locations] URL:", url);
+//   console.log("[Modash Locations] URL:", url);
 
-      const response = await fetchWithTimeout(
-        url,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-          },
-        },
-        12000
-      );
+//   const response = await fetchWithTimeout(
+//     url,
+//     {
+//       method: "GET",
+//       headers: {
+//         Authorization: `Bearer ${token}`,
+//         Accept: "application/json",
+//       },
+//     },
+//     12000
+//   );
 
-      const text = await response.text();
+//   const text = await response.text();
 
-      let data = null;
+//   let data = null;
 
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        data = { raw: text };
-      }
+//   try {
+//     data = text ? JSON.parse(text) : null;
+//   } catch {
+//     data = { raw: text };
+//   }
 
-      if (!response.ok) {
-        const error = new Error(
-          data?.message || data?.error || "Failed to fetch locations from Modash"
-        );
+//   if (!response.ok) {
+//     const error = new Error(
+//       data?.message || data?.error || "Failed to fetch locations from Modash"
+//     );
 
-        error.statusCode = response.status;
-        error.data = data;
+//     error.statusCode = response.status;
+//     error.data = data;
 
-        throw error;
-      }
+//     throw error;
+//   }
 
-      const locations = Array.isArray(data?.locations)
-        ? data.locations
-        : Array.isArray(data?.results)
-          ? data.results
-          : Array.isArray(data?.items)
-            ? data.items
-            : [];
+//   const locations = Array.isArray(data?.locations)
+//     ? data.locations
+//     : Array.isArray(data?.results)
+//       ? data.results
+//       : Array.isArray(data?.items)
+//         ? data.items
+//         : [];
 
-      return {
-        platform: cleanPlatform,
-        query: cleanQuery,
-        total: data?.total || locations.length || 0,
-        locations,
-      };
+//   return {
+//     platform: cleanPlatform,
+//     query: cleanQuery,
+//     total: data?.total || locations.length || 0,
+//     locations,
+//   };
+// }
+
+// async function getModashLocationController(req, res) {
+//   console.log("✅ [Location API] controller hit");
+
+//   let controllerTimeout;
+
+//   try {
+//     controllerTimeout = setTimeout(() => {
+//       if (!res.headersSent) {
+//         return res.status(504).json({
+//           success: false,
+//           message: "Controller timeout after 15 seconds",
+//           hint: "Route is hit, but Modash request or backend process is hanging.",
+//         });
+//       }
+//     }, 15000);
+
+//     const platform = getUrlParam(req, "platform", "instagram");
+//     const query = getUrlParam(req, "query", "");
+//     const limit = getUrlParam(req, "limit", "20");
+
+//     console.log("[Location API] parsed params:", {
+//       platform,
+//       query,
+//       limit,
+//     });
+
+//     const data = await getModashLocations({
+//       platform,
+//       query,
+//       limit,
+//     });
+
+//     clearTimeout(controllerTimeout);
+
+//     if (res.headersSent) return;
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Locations fetched successfully",
+//       platform: data.platform,
+//       query: data.query,
+//       total: data.total,
+//       locations: data.locations,
+//     });
+//   } catch (error) {
+//     if (controllerTimeout) clearTimeout(controllerTimeout);
+
+//     console.error("[Location API] error:", error);
+//     console.error("[Location API] stack:", error.stack);
+
+//     if (res.headersSent) return;
+
+//     return res.status(error.statusCode || 400).json({
+//       success: false,
+//       message: error.message || "Internal server error",
+//       data: error.data || null,
+//     });
+//   }
+// }
+    
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pickBestCountryLocation(locations, countryName) {
+  if (!Array.isArray(locations) || !locations.length) return null;
+
+  const cleanCountry = cleanStr(countryName).toLowerCase();
+
+  // Best: exact title match
+  let found = locations.find((item) => {
+    return cleanStr(item.title).toLowerCase() === cleanCountry;
+  });
+
+  if (found) return found;
+
+  // Second: exact name match but avoid city/state result
+  // Example wrong result: Anguilla, Mississippi, United States
+  found = locations.find((item) => {
+    const name = cleanStr(item.name).toLowerCase();
+    const title = cleanStr(item.title);
+
+    return name === cleanCountry && !title.includes(",");
+  });
+
+  if (found) return found;
+
+  // Last fallback: exact name match
+  found = locations.find((item) => {
+    return cleanStr(item.name).toLowerCase() === cleanCountry;
+  });
+
+  if (found) return found;
+
+  return null;
+}
+
+async function fetchModashCountryLocation({ platform, countryName, limit = 20 }) {
+  const token = cleanStr(process.env.MODASH_API_KEY);
+
+  if (!token) {
+    const error = new Error("MODASH_API_KEY is missing in .env");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const cleanPlatform = cleanStr(platform || "instagram").toLowerCase();
+  const cleanCountryName = cleanStr(countryName);
+
+  if (!["instagram", "tiktok", "youtube"].includes(cleanPlatform)) {
+    const error = new Error("platform must be instagram, tiktok, or youtube");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!cleanCountryName) {
+    const error = new Error("countryName is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const baseUrl = process.env.MODASH_BASE_URL || "https://api.modash.io/v1";
+
+  const url =
+    `${baseUrl}/${cleanPlatform}/locations` +
+    `?query=${encodeURIComponent(cleanCountryName)}` +
+    `&limit=${encodeURIComponent(String(limit))}`;
+
+  console.log("[Modash Country Sync] Calling:", url);
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  const text = await response.text();
+
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.message || data?.error || "Failed to fetch country from Modash"
+    );
+
+    error.statusCode = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  const locations = Array.isArray(data?.locations)
+    ? data.locations
+    : Array.isArray(data?.results)
+      ? data.results
+      : Array.isArray(data?.items)
+        ? data.items
+        : [];
+
+  return {
+    platform: cleanPlatform,
+    countryName: cleanCountryName,
+    total: data?.total || locations.length || 0,
+    locations,
+  };
+}
+
+async function syncModashCountries(req, res) {
+  try {
+    const platform = cleanStr(
+      req.body.platform || req.query.platform || "instagram"
+    ).toLowerCase();
+
+    const delayMs = Number(req.body.delayMs || req.query.delayMs || 700);
+    const limit = Number(req.body.limit || req.query.limit || 20);
+
+    if (!["instagram", "tiktok", "youtube"].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: "platform must be instagram, tiktok, or youtube",
+      });
     }
 
-    exports.getModashLocationController = async (req, res) => {
-      console.log("✅ [Location API] controller hit");
-
-      let controllerTimeout;
-
-      try {
-        controllerTimeout = setTimeout(() => {
-          if (!res.headersSent) {
-            return res.status(504).json({
-              success: false,
-              message: "Controller timeout after 15 seconds",
-              hint: "Route is hit, but Modash request or backend process is hanging.",
-            });
-          }
-        }, 15000);
-
-        const platform = getUrlParam(req, "platform", "tiktok");
-        const query = getUrlParam(req, "query", "");
-        const limit = getUrlParam(req, "limit", "20");
-
-        console.log("[Location API] parsed params:", {
-          platform,
-          query,
-          limit,
-        });
-
-        const data = await getModashLocations({
-          platform,
-          query,
-          limit,
-        });
-
-        clearTimeout(controllerTimeout);
-
-        if (res.headersSent) return;
-
-        return res.status(200).json({
-          success: true,
-          message: "Locations fetched successfully",
-          platform: data.platform,
-          query: data.query,
-          total: data.total,
-          locations: data.locations,
-        });
-      } catch (error) {
-        if (controllerTimeout) clearTimeout(controllerTimeout);
-
-        console.error("[Location API] error:", error);
-        console.error("[Location API] stack:", error.stack);
-
-        if (res.headersSent) return;
-
-        return res.status(error.statusCode || 400).json({
-          success: false,
-          message: error.message || "Internal server error",
-          data: error.data || null,
-        });
-      }
+    const summary = {
+      platform,
+      total: countriesSeed.length,
+      saved: 0,
+      skipped: 0,
+      duplicateModashId: 0,
+      notFound: 0,
+      failed: 0,
+      results: [],
     };
 
+    for (const country of countriesSeed) {
+      const countryName = cleanStr(country.countryName);
+      const countryCode = cleanStr(country.countryCode).toUpperCase();
+      const flag = cleanStr(country.flag);
+
+      try {
+        if (!countryName || !countryCode) {
+          summary.failed += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            status: "invalid_country_data",
+          });
+          continue;
+        }
+
+        // Skip if this same country already exists for this platform
+        const existingCountry = await ModashCountry.findOne({
+          countryCode,
+          platform,
+        }).lean();
+
+        if (existingCountry) {
+          summary.skipped += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            modashId: existingCountry.modashId,
+            status: "skipped_existing_country_platform",
+          });
+          continue;
+        }
+
+        // Modash API call one by one for each country
+        const data = await fetchModashCountryLocation({
+          platform,
+          countryName,
+          limit,
+        });
+
+        const selectedLocation = pickBestCountryLocation(
+          data.locations,
+          countryName
+        );
+
+        if (!selectedLocation || !selectedLocation.id) {
+          summary.notFound += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            status: "not_found",
+          });
+
+          if (delayMs > 0) await sleep(delayMs);
+          continue;
+        }
+
+        const modashId = Number(selectedLocation.id);
+
+        if (!Number.isFinite(modashId)) {
+          summary.failed += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            status: "invalid_modash_id",
+          });
+
+          if (delayMs > 0) await sleep(delayMs);
+          continue;
+        }
+
+        // IMPORTANT:
+        // If same modashId already exists in ANY platform, do not save again.
+        const existingModashId = await ModashCountry.findOne({
+          modashId,
+        }).lean();
+
+        if (existingModashId) {
+          summary.duplicateModashId += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            modashId,
+            status: "duplicate_modash_id",
+            existing: {
+              countryName: existingModashId.countryName,
+              countryCode: existingModashId.countryCode,
+              platform: existingModashId.platform,
+              modashId: existingModashId.modashId,
+            },
+          });
+
+          if (delayMs > 0) await sleep(delayMs);
+          continue;
+        }
+
+        const savedCountry = await ModashCountry.create({
+          countryName,
+          countryCode,
+          flag,
+          modashId,
+          platform,
+        });
+
+        summary.saved += 1;
+
+        summary.results.push({
+          countryName: savedCountry.countryName,
+          countryCode: savedCountry.countryCode,
+          flag: savedCountry.flag,
+          modashId: savedCountry.modashId,
+          platform: savedCountry.platform,
+          status: "saved",
+        });
+
+        if (delayMs > 0) await sleep(delayMs);
+      } catch (error) {
+        if (error && error.code === 11000) {
+          summary.duplicateModashId += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            status: "duplicate_key",
+            error: "modashId or countryCode/platform already exists",
+            details: error.keyValue || null,
+          });
+        } else {
+          summary.failed += 1;
+          summary.results.push({
+            countryName,
+            countryCode,
+            flag,
+            platform,
+            status: "error",
+            error: error.message,
+          });
+        }
+
+        if (delayMs > 0) await sleep(delayMs);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Country sync completed",
+      summary,
+    });
+  } catch (error) {
+    console.error("[syncModashCountries] error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Country sync failed",
+    });
+  }
+}
+
+async function getModashCountries(req, res) {
+  try {
+    const q = cleanStr(req.query.q || req.query.query || "");
+
+    const platform = cleanStr(
+      req.query.platform || "instagram"
+    ).toLowerCase();
+
+    if (!["instagram", "tiktok", "youtube"].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: "platform must be instagram, tiktok, or youtube",
+      });
+    }
+
+    const filter = { platform };
+
+    if (q) {
+      filter.$or = [
+        { countryName: new RegExp(q, "i") },
+        { countryCode: new RegExp(q, "i") },
+      ];
+    }
+
+    const countries = await ModashCountry.find(filter)
+      .select("countryName countryCode flag modashId platform")
+      .sort({ countryName: 1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      platform,
+      total: countries.length,
+      countries,
+    });
+  } catch (error) {
+    console.error("[getModashCountries] error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch countries",
+    });
+  }
+}
+
+async function getModashCountryByCode(req, res) {
+  try {
+    const countryCode = cleanStr(req.params.countryCode).toUpperCase();
+
+    const platform = cleanStr(
+      req.query.platform || "instagram"
+    ).toLowerCase();
+
+    if (!["instagram", "tiktok", "youtube"].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: "platform must be instagram, tiktok, or youtube",
+      });
+    }
+
+    const country = await ModashCountry.findOne({
+      countryCode,
+      platform,
+    })
+      .select("countryName countryCode flag modashId platform")
+      .lean();
+
+    if (!country) {
+      return res.status(404).json({
+        success: false,
+        message: "Country not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      country,
+    });
+  } catch (error) {
+    console.error("[getModashCountryByCode] error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch country",
+    });
+  }
+}
     /* -------------------------------------------------------------------------- */
     /*                                   Exports                                  */
     /* -------------------------------------------------------------------------- */
 
-    module.exports = {
-      frontendUsers,
-      frontendSearch,
-      frontendUnifiedSearch,
-      frontendReport,
-      resolveProfile,
-      search: legacySearch,
-    upsertCreator,
-    getCreatorByUserId,
-      normalizeReportData,
-      upsertModashProfileFromReport,
-      findCachedReport,
-      getSavedInfluencers,
-      getRandomInfluencers,
-      getModashLocations,
-      exportSavedInfluencersCsv,
-      getMediaKitLink,
-    };
+   module.exports = {
+  frontendUsers,
+  frontendSearch,
+  frontendUnifiedSearch,
+  frontendReport,
+  resolveProfile,
+  search: legacySearch,
+
+  upsertCreator,
+  getCreatorByUserId,
+
+  normalizeReportData,
+  upsertModashProfileFromReport,
+  findCachedReport,
+
+  getSavedInfluencers,
+  getRandomInfluencers,
+
+  // getModashLocations,
+  // getModashLocationController,
+syncModashCountries,
+getModashCountries,
+getModashCountryByCode,
+  exportSavedInfluencersCsv,
+  getMediaKitLink,
+};

@@ -1,0 +1,2520 @@
+[{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9e4"
+  },
+  "countryName": "Andorra",
+  "callingCode": "+376",
+  "countryCode": "AD",
+  "flag": "🇦🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9e5"
+  },
+  "countryName": "Afghanistan",
+  "callingCode": "+93",
+  "countryCode": "AF",
+  "flag": "🇦🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9e6"
+  },
+  "countryName": "Antigua and Barbuda",
+  "callingCode": "+1268",
+  "countryCode": "AG",
+  "flag": "🇦🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9e7"
+  },
+  "countryName": "Anguilla",
+  "callingCode": "+1264",
+  "countryCode": "AI",
+  "flag": "🇦🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9e8"
+  },
+  "countryName": "Albania",
+  "callingCode": "+355",
+  "countryCode": "AL",
+  "flag": "🇦🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9e9"
+  },
+  "countryName": "Armenia",
+  "callingCode": "+374",
+  "countryCode": "AM",
+  "flag": "🇦🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9ea"
+  },
+  "countryName": "Angola",
+  "callingCode": "+244",
+  "countryCode": "AO",
+  "flag": "🇦🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9eb"
+  },
+  "countryName": "Antarctica",
+  "callingCode": "+672",
+  "countryCode": "AQ",
+  "flag": "🇦🇶",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9ec"
+  },
+  "countryName": "Argentina",
+  "callingCode": "+54",
+  "countryCode": "AR",
+  "flag": "🇦🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9ed"
+  },
+  "countryName": "American Samoa",
+  "callingCode": "+1684",
+  "countryCode": "AS",
+  "flag": "🇦🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9ee"
+  },
+  "countryName": "Austria",
+  "callingCode": "+43",
+  "countryCode": "AT",
+  "flag": "🇦🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9ef"
+  },
+  "countryName": "Australia",
+  "callingCode": "+61",
+  "countryCode": "AU",
+  "flag": "🇦🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f0"
+  },
+  "countryName": "Aruba",
+  "callingCode": "+297",
+  "countryCode": "AW",
+  "flag": "🇦🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f1"
+  },
+  "countryName": "Åland Islands",
+  "callingCode": "+358",
+  "countryCode": "AX",
+  "flag": "🇦🇽",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f2"
+  },
+  "countryName": "Azerbaijan",
+  "callingCode": "+994",
+  "countryCode": "AZ",
+  "flag": "🇦🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f3"
+  },
+  "countryName": "Bosnia and Herzegovina",
+  "callingCode": "+387",
+  "countryCode": "BA",
+  "flag": "🇧🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f4"
+  },
+  "countryName": "Barbados",
+  "callingCode": "+1246",
+  "countryCode": "BB",
+  "flag": "🇧🇧",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f5"
+  },
+  "countryName": "Bangladesh",
+  "callingCode": "+880",
+  "countryCode": "BD",
+  "flag": "🇧🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f6"
+  },
+  "countryName": "Belgium",
+  "callingCode": "+32",
+  "countryCode": "BE",
+  "flag": "🇧🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f7"
+  },
+  "countryName": "Burkina Faso",
+  "callingCode": "+226",
+  "countryCode": "BF",
+  "flag": "🇧🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f8"
+  },
+  "countryName": "Bulgaria",
+  "callingCode": "+359",
+  "countryCode": "BG",
+  "flag": "🇧🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9f9"
+  },
+  "countryName": "Bahrain",
+  "callingCode": "+973",
+  "countryCode": "BH",
+  "flag": "🇧🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9fa"
+  },
+  "countryName": "Burundi",
+  "callingCode": "+257",
+  "countryCode": "BI",
+  "flag": "🇧🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9fb"
+  },
+  "countryName": "Benin",
+  "callingCode": "+229",
+  "countryCode": "BJ",
+  "flag": "🇧🇯",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9fc"
+  },
+  "countryName": "Saint Barthélemy",
+  "callingCode": "+590",
+  "countryCode": "BL",
+  "flag": "🇧🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9fd"
+  },
+  "countryName": "Bermuda",
+  "callingCode": "+1441",
+  "countryCode": "BM",
+  "flag": "🇧🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9fe"
+  },
+  "countryName": "Brunei Darussalam",
+  "callingCode": "+673",
+  "countryCode": "BN",
+  "flag": "🇧🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244d9ff"
+  },
+  "countryName": "Bolivia (Plurinational State of)",
+  "callingCode": "+591",
+  "countryCode": "BO",
+  "flag": "🇧🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da00"
+  },
+  "countryName": "Bonaire, Sint Eustatius and Saba",
+  "callingCode": "+5997",
+  "countryCode": "BQ",
+  "flag": "🇧🇶",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da01"
+  },
+  "countryName": "Brazil",
+  "callingCode": "+55",
+  "countryCode": "BR",
+  "flag": "🇧🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da02"
+  },
+  "countryName": "Bhutan",
+  "callingCode": "+975",
+  "countryCode": "BT",
+  "flag": "🇧🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da03"
+  },
+  "countryName": "Bouvet Island",
+  "callingCode": "+47",
+  "countryCode": "BV",
+  "flag": "🇧🇻",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da04"
+  },
+  "countryName": "Botswana",
+  "callingCode": "+267",
+  "countryCode": "BW",
+  "flag": "🇧🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da05"
+  },
+  "countryName": "Belarus",
+  "callingCode": "+375",
+  "countryCode": "BY",
+  "flag": "🇧🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da06"
+  },
+  "countryName": "Belize",
+  "callingCode": "+501",
+  "countryCode": "BZ",
+  "flag": "🇧🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da07"
+  },
+  "countryName": "Canada",
+  "callingCode": "+1",
+  "countryCode": "CA",
+  "flag": "🇨🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da08"
+  },
+  "countryName": "Switzerland",
+  "callingCode": "+41",
+  "countryCode": "CH",
+  "flag": "🇨🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da09"
+  },
+  "countryName": "Côte d'Ivoire",
+  "callingCode": "+225",
+  "countryCode": "CI",
+  "flag": "🇨🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da0a"
+  },
+  "countryName": "Chile",
+  "callingCode": "+56",
+  "countryCode": "CL",
+  "flag": "🇨🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da0b"
+  },
+  "countryName": "Cameroon",
+  "callingCode": "+237",
+  "countryCode": "CM",
+  "flag": "🇨🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da0c"
+  },
+  "countryName": "China",
+  "callingCode": "+86",
+  "countryCode": "CN",
+  "flag": "🇨🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da0d"
+  },
+  "countryName": "Colombia",
+  "callingCode": "+57",
+  "countryCode": "CO",
+  "flag": "🇨🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da0e"
+  },
+  "countryName": "Costa Rica",
+  "callingCode": "+506",
+  "countryCode": "CR",
+  "flag": "🇨🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da0f"
+  },
+  "countryName": "Cuba",
+  "callingCode": "+53",
+  "countryCode": "CU",
+  "flag": "🇨🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da10"
+  },
+  "countryName": "Cabo Verde",
+  "callingCode": "+238",
+  "countryCode": "CV",
+  "flag": "🇨🇻",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da11"
+  },
+  "countryName": "Curaçao",
+  "callingCode": "+599",
+  "countryCode": "CW",
+  "flag": "🇨🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da12"
+  },
+  "countryName": "Christmas Island",
+  "callingCode": "+61",
+  "countryCode": "CX",
+  "flag": "🇨🇽",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da13"
+  },
+  "countryName": "Cyprus",
+  "callingCode": "+357",
+  "countryCode": "CY",
+  "flag": "🇨🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da14"
+  },
+  "countryName": "Germany",
+  "callingCode": "+49",
+  "countryCode": "DE",
+  "flag": "🇩🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da15"
+  },
+  "countryName": "Djibouti",
+  "callingCode": "+253",
+  "countryCode": "DJ",
+  "flag": "🇩🇯",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da16"
+  },
+  "countryName": "Denmark",
+  "callingCode": "+45",
+  "countryCode": "DK",
+  "flag": "🇩🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da17"
+  },
+  "countryName": "Dominica",
+  "callingCode": "+767",
+  "countryCode": "DM",
+  "flag": "🇩🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da18"
+  },
+  "countryName": "Algeria",
+  "callingCode": "+213",
+  "countryCode": "DZ",
+  "flag": "🇩🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da19"
+  },
+  "countryName": "Ecuador",
+  "callingCode": "+593",
+  "countryCode": "EC",
+  "flag": "🇪🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da1a"
+  },
+  "countryName": "Estonia",
+  "callingCode": "+372",
+  "countryCode": "EE",
+  "flag": "🇪🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da1b"
+  },
+  "countryName": "Egypt",
+  "callingCode": "+20",
+  "countryCode": "EG",
+  "flag": "🇪🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da1c"
+  },
+  "countryName": "Western Sahara",
+  "callingCode": "+212",
+  "countryCode": "EH",
+  "flag": "🇪🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da1d"
+  },
+  "countryName": "Eritrea",
+  "callingCode": "+291",
+  "countryCode": "ER",
+  "flag": "🇪🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da1e"
+  },
+  "countryName": "Spain",
+  "callingCode": "+34",
+  "countryCode": "ES",
+  "flag": "🇪🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da1f"
+  },
+  "countryName": "Ethiopia",
+  "callingCode": "+251",
+  "countryCode": "ET",
+  "flag": "🇪🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da20"
+  },
+  "countryName": "Finland",
+  "callingCode": "+358",
+  "countryCode": "FI",
+  "flag": "🇫🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da21"
+  },
+  "countryName": "Fiji",
+  "callingCode": "+679",
+  "countryCode": "FJ",
+  "flag": "🇫🇯",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da22"
+  },
+  "countryName": "Micronesia (Federated States of)",
+  "callingCode": "+691",
+  "countryCode": "FM",
+  "flag": "🇫🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da23"
+  },
+  "countryName": "France",
+  "callingCode": "+33",
+  "countryCode": "FR",
+  "flag": "🇫🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da24"
+  },
+  "countryName": "Gabon",
+  "callingCode": "+241",
+  "countryCode": "GA",
+  "flag": "🇬🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da25"
+  },
+  "countryName": "Grenada",
+  "callingCode": "+1473",
+  "countryCode": "GD",
+  "flag": "🇬🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da26"
+  },
+  "countryName": "Georgia",
+  "callingCode": "+995",
+  "countryCode": "GE",
+  "flag": "🇬🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da27"
+  },
+  "countryName": "French Guiana",
+  "callingCode": "+594",
+  "countryCode": "GF",
+  "flag": "🇬🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da28"
+  },
+  "countryName": "Guernsey",
+  "callingCode": "+44",
+  "countryCode": "GG",
+  "flag": "🇬🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da29"
+  },
+  "countryName": "Ghana",
+  "callingCode": "+233",
+  "countryCode": "GH",
+  "flag": "🇬🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da2a"
+  },
+  "countryName": "Gibraltar",
+  "callingCode": "+350",
+  "countryCode": "GI",
+  "flag": "🇬🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da2b"
+  },
+  "countryName": "Greenland",
+  "callingCode": "+299",
+  "countryCode": "GL",
+  "flag": "🇬🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da2c"
+  },
+  "countryName": "Guinea",
+  "callingCode": "+224",
+  "countryCode": "GN",
+  "flag": "🇬🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da2d"
+  },
+  "countryName": "Guadeloupe",
+  "callingCode": "+590",
+  "countryCode": "GP",
+  "flag": "🇬🇵",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da2e"
+  },
+  "countryName": "Equatorial Guinea",
+  "callingCode": "+240",
+  "countryCode": "GQ",
+  "flag": "🇬🇶",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da2f"
+  },
+  "countryName": "Greece",
+  "callingCode": "+30",
+  "countryCode": "GR",
+  "flag": "🇬🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da30"
+  },
+  "countryName": "South Georgia and the South Sandwich Islands",
+  "callingCode": "+500",
+  "countryCode": "GS",
+  "flag": "🇬🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da31"
+  },
+  "countryName": "Guatemala",
+  "callingCode": "+502",
+  "countryCode": "GT",
+  "flag": "🇬🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da32"
+  },
+  "countryName": "Guam",
+  "callingCode": "+1",
+  "countryCode": "GU",
+  "flag": "🇬🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da33"
+  },
+  "countryName": "Guinea-Bissau",
+  "callingCode": "+245",
+  "countryCode": "GW",
+  "flag": "🇬🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da34"
+  },
+  "countryName": "Guyana",
+  "callingCode": "+592",
+  "countryCode": "GY",
+  "flag": "🇬🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da35"
+  },
+  "countryName": "Hong Kong",
+  "callingCode": "+852",
+  "countryCode": "HK",
+  "flag": "🇭🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da36"
+  },
+  "countryName": "Honduras",
+  "callingCode": "+504",
+  "countryCode": "HN",
+  "flag": "🇭🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da37"
+  },
+  "countryName": "Croatia",
+  "callingCode": "+385",
+  "countryCode": "HR",
+  "flag": "🇭🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da38"
+  },
+  "countryName": "Haiti",
+  "callingCode": "+509",
+  "countryCode": "HT",
+  "flag": "🇭🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da39"
+  },
+  "countryName": "Hungary",
+  "callingCode": "+36",
+  "countryCode": "HU",
+  "flag": "🇭🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da3a"
+  },
+  "countryName": "Indonesia",
+  "callingCode": "+62",
+  "countryCode": "ID",
+  "flag": "🇮🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da3b"
+  },
+  "countryName": "Ireland",
+  "callingCode": "+353",
+  "countryCode": "IE",
+  "flag": "🇮🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da3c"
+  },
+  "countryName": "Israel",
+  "callingCode": "+972",
+  "countryCode": "IL",
+  "flag": "🇮🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da3d"
+  },
+  "countryName": "Isle of Man",
+  "callingCode": "+44",
+  "countryCode": "IM",
+  "flag": "🇮🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da3e"
+  },
+  "countryName": "India",
+  "callingCode": "+91",
+  "countryCode": "IN",
+  "flag": "🇮🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da3f"
+  },
+  "countryName": "British Indian Ocean Territories",
+  "callingCode": "+246",
+  "countryCode": "IO",
+  "flag": "🇮🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da40"
+  },
+  "countryName": "Iraq",
+  "callingCode": "+964",
+  "countryCode": "IQ",
+  "flag": "🇮🇶",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da41"
+  },
+  "countryName": "Iran (Islamic Republic of)",
+  "callingCode": "+98",
+  "countryCode": "IR",
+  "flag": "🇮🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da42"
+  },
+  "countryName": "Iceland",
+  "callingCode": "+354",
+  "countryCode": "IS",
+  "flag": "🇮🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da43"
+  },
+  "countryName": "Italy",
+  "callingCode": "+39",
+  "countryCode": "IT",
+  "flag": "🇮🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da44"
+  },
+  "countryName": "Jersey",
+  "callingCode": "+44",
+  "countryCode": "JE",
+  "flag": "🇯🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da45"
+  },
+  "countryName": "Jamaica",
+  "callingCode": "+876",
+  "countryCode": "JM",
+  "flag": "🇯🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da46"
+  },
+  "countryName": "Jordan",
+  "callingCode": "+962",
+  "countryCode": "JO",
+  "flag": "🇯🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da47"
+  },
+  "countryName": "Japan",
+  "callingCode": "+81",
+  "countryCode": "JP",
+  "flag": "🇯🇵",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da48"
+  },
+  "countryName": "Kenya",
+  "callingCode": "+254",
+  "countryCode": "KE",
+  "flag": "🇰🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da49"
+  },
+  "countryName": "Kyrgyzstan",
+  "callingCode": "+996",
+  "countryCode": "KG",
+  "flag": "🇰🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da4a"
+  },
+  "countryName": "Cambodia",
+  "callingCode": "+855",
+  "countryCode": "KH",
+  "flag": "🇰🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da4b"
+  },
+  "countryName": "North Korea",
+  "callingCode": "+850",
+  "countryCode": "KP",
+  "flag": "🇰🇵",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da4c"
+  },
+  "countryName": "South Korea",
+  "callingCode": "+82",
+  "countryCode": "KR",
+  "flag": "🇰🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da4d"
+  },
+  "countryName": "Kiribati",
+  "callingCode": "+686",
+  "countryCode": "KI",
+  "flag": "🇰🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da4e"
+  },
+  "countryName": "Saint Kitts and Nevis",
+  "callingCode": "+1869",
+  "countryCode": "KN",
+  "flag": "🇰🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da4f"
+  },
+  "countryName": "Kuwait",
+  "callingCode": "+965",
+  "countryCode": "KW",
+  "flag": "🇰🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da50"
+  },
+  "countryName": "Kazakhstan",
+  "callingCode": "+7",
+  "countryCode": "KZ",
+  "flag": "🇰🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da51"
+  },
+  "countryName": "Lebanon",
+  "callingCode": "+961",
+  "countryCode": "LB",
+  "flag": "🇱🇧",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da52"
+  },
+  "countryName": "Saint Lucia",
+  "callingCode": "+1758",
+  "countryCode": "LC",
+  "flag": "🇱🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da53"
+  },
+  "countryName": "Liechtenstein",
+  "callingCode": "+423",
+  "countryCode": "LI",
+  "flag": "🇱🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da54"
+  },
+  "countryName": "Sri Lanka",
+  "callingCode": "+94",
+  "countryCode": "LK",
+  "flag": "🇱🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da55"
+  },
+  "countryName": "Liberia",
+  "callingCode": "+231",
+  "countryCode": "LR",
+  "flag": "🇱🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da56"
+  },
+  "countryName": "Lesotho",
+  "callingCode": "+266",
+  "countryCode": "LS",
+  "flag": "🇱🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da57"
+  },
+  "countryName": "Lithuania",
+  "callingCode": "+370",
+  "countryCode": "LT",
+  "flag": "🇱🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da58"
+  },
+  "countryName": "Luxembourg",
+  "callingCode": "+352",
+  "countryCode": "LU",
+  "flag": "🇱🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da59"
+  },
+  "countryName": "Latvia",
+  "callingCode": "+371",
+  "countryCode": "LV",
+  "flag": "🇱🇻",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da5a"
+  },
+  "countryName": "Libya",
+  "callingCode": "+218",
+  "countryCode": "LY",
+  "flag": "🇱🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da5b"
+  },
+  "countryName": "Morocco",
+  "callingCode": "+212",
+  "countryCode": "MA",
+  "flag": "🇲🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da5c"
+  },
+  "countryName": "Monaco",
+  "callingCode": "+377",
+  "countryCode": "MC",
+  "flag": "🇲🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da5d"
+  },
+  "countryName": "Montenegro",
+  "callingCode": "+382",
+  "countryCode": "ME",
+  "flag": "🇲🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da5e"
+  },
+  "countryName": "Saint Martin (French part)",
+  "callingCode": "+590",
+  "countryCode": "MF",
+  "flag": "🇲🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da5f"
+  },
+  "countryName": "Madagascar",
+  "callingCode": "+261",
+  "countryCode": "MG",
+  "flag": "🇲🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da60"
+  },
+  "countryName": "Mali",
+  "callingCode": "+223",
+  "countryCode": "ML",
+  "flag": "🇲🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da61"
+  },
+  "countryName": "Myanmar",
+  "callingCode": "+95",
+  "countryCode": "MM",
+  "flag": "🇲🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da62"
+  },
+  "countryName": "Mongolia",
+  "callingCode": "+976",
+  "countryCode": "MN",
+  "flag": "🇲🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da63"
+  },
+  "countryName": "Macao",
+  "callingCode": "+853",
+  "countryCode": "MO",
+  "flag": "🇲🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da64"
+  },
+  "countryName": "Martinique",
+  "callingCode": "+596",
+  "countryCode": "MQ",
+  "flag": "🇲🇶",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da65"
+  },
+  "countryName": "Mauritania",
+  "callingCode": "+222",
+  "countryCode": "MR",
+  "flag": "🇲🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da66"
+  },
+  "countryName": "Montserrat",
+  "callingCode": "+1664",
+  "countryCode": "MS",
+  "flag": "🇲🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da67"
+  },
+  "countryName": "Malta",
+  "callingCode": "+356",
+  "countryCode": "MT",
+  "flag": "🇲🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da68"
+  },
+  "countryName": "Mauritius",
+  "callingCode": "+230",
+  "countryCode": "MU",
+  "flag": "🇲🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da69"
+  },
+  "countryName": "Maldives",
+  "callingCode": "+960",
+  "countryCode": "MV",
+  "flag": "🇲🇻",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da6a"
+  },
+  "countryName": "Malawi",
+  "callingCode": "+265",
+  "countryCode": "MW",
+  "flag": "🇲🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da6b"
+  },
+  "countryName": "Mexico",
+  "callingCode": "+52",
+  "countryCode": "MX",
+  "flag": "🇲🇽",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da6c"
+  },
+  "countryName": "Malaysia",
+  "callingCode": "+60",
+  "countryCode": "MY",
+  "flag": "🇲🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da6d"
+  },
+  "countryName": "Mozambique",
+  "callingCode": "+258",
+  "countryCode": "MZ",
+  "flag": "🇲🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da6e"
+  },
+  "countryName": "Namibia",
+  "callingCode": "+264",
+  "countryCode": "NA",
+  "flag": "🇳🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da6f"
+  },
+  "countryName": "New Caledonia",
+  "callingCode": "+687",
+  "countryCode": "NC",
+  "flag": "🇳🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da70"
+  },
+  "countryName": "Norfolk Island",
+  "callingCode": "+672",
+  "countryCode": "NF",
+  "flag": "🇳🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da71"
+  },
+  "countryName": "Nigeria",
+  "callingCode": "+234",
+  "countryCode": "NG",
+  "flag": "🇳🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da72"
+  },
+  "countryName": "Nicaragua",
+  "callingCode": "+505",
+  "countryCode": "NI",
+  "flag": "🇳🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da73"
+  },
+  "countryName": "Norway",
+  "callingCode": "+47",
+  "countryCode": "NO",
+  "flag": "🇳🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da74"
+  },
+  "countryName": "Nepal",
+  "callingCode": "+977",
+  "countryCode": "NP",
+  "flag": "🇳🇵",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da75"
+  },
+  "countryName": "Nauru",
+  "callingCode": "+674",
+  "countryCode": "NR",
+  "flag": "🇳🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da76"
+  },
+  "countryName": "Niue",
+  "callingCode": "+683",
+  "countryCode": "NU",
+  "flag": "🇳🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da77"
+  },
+  "countryName": "New Zealand",
+  "callingCode": "+64",
+  "countryCode": "NZ",
+  "flag": "🇳🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da78"
+  },
+  "countryName": "Oman",
+  "callingCode": "+968",
+  "countryCode": "OM",
+  "flag": "🇴🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da79"
+  },
+  "countryName": "Panama",
+  "callingCode": "+507",
+  "countryCode": "PA",
+  "flag": "🇵🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da7a"
+  },
+  "countryName": "Peru",
+  "callingCode": "+51",
+  "countryCode": "PE",
+  "flag": "🇵🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da7b"
+  },
+  "countryName": "French Polynesia",
+  "callingCode": "+689",
+  "countryCode": "PF",
+  "flag": "🇵🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da7c"
+  },
+  "countryName": "Papua New Guinea",
+  "callingCode": "+675",
+  "countryCode": "PG",
+  "flag": "🇵🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da7d"
+  },
+  "countryName": "Pakistan",
+  "callingCode": "+92",
+  "countryCode": "PK",
+  "flag": "🇵🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da7e"
+  },
+  "countryName": "Poland",
+  "callingCode": "+48",
+  "countryCode": "PL",
+  "flag": "🇵🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da7f"
+  },
+  "countryName": "Saint Pierre and Miquelon",
+  "callingCode": "+508",
+  "countryCode": "PM",
+  "flag": "🇵🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da80"
+  },
+  "countryName": "Pitcairn",
+  "callingCode": "+64",
+  "countryCode": "PN",
+  "flag": "🇵🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da81"
+  },
+  "countryName": "Puerto Rico",
+  "callingCode": "+1",
+  "countryCode": "PR",
+  "flag": "🇵🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da82"
+  },
+  "countryName": "Palestine, State of",
+  "callingCode": "+970",
+  "countryCode": "PS",
+  "flag": "🇵🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da83"
+  },
+  "countryName": "Portugal",
+  "callingCode": "+351",
+  "countryCode": "PT",
+  "flag": "🇵🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da84"
+  },
+  "countryName": "Palau",
+  "callingCode": "+680",
+  "countryCode": "PW",
+  "flag": "🇵🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da85"
+  },
+  "countryName": "Paraguay",
+  "callingCode": "+595",
+  "countryCode": "PY",
+  "flag": "🇵🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da86"
+  },
+  "countryName": "Qatar",
+  "callingCode": "+974",
+  "countryCode": "QA",
+  "flag": "🇶🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da87"
+  },
+  "countryName": "Réunion",
+  "callingCode": "+262",
+  "countryCode": "RE",
+  "flag": "🇷🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da88"
+  },
+  "countryName": "Romania",
+  "callingCode": "+40",
+  "countryCode": "RO",
+  "flag": "🇷🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da89"
+  },
+  "countryName": "Serbia",
+  "callingCode": "+381",
+  "countryCode": "RS",
+  "flag": "🇷🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da8a"
+  },
+  "countryName": "Russia",
+  "callingCode": "+7",
+  "countryCode": "RU",
+  "flag": "🇷🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da8b"
+  },
+  "countryName": "Rwanda",
+  "callingCode": "+250",
+  "countryCode": "RW",
+  "flag": "🇷🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da8c"
+  },
+  "countryName": "Saudi Arabia",
+  "callingCode": "+966",
+  "countryCode": "SA",
+  "flag": "🇸🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da8d"
+  },
+  "countryName": "Solomon Islands",
+  "callingCode": "+677",
+  "countryCode": "SB",
+  "flag": "🇸🇧",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da8e"
+  },
+  "countryName": "Seychelles",
+  "callingCode": "+248",
+  "countryCode": "SC",
+  "flag": "🇸🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da8f"
+  },
+  "countryName": "Sweden",
+  "callingCode": "+46",
+  "countryCode": "SE",
+  "flag": "🇸🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da90"
+  },
+  "countryName": "Singapore",
+  "callingCode": "+65",
+  "countryCode": "SG",
+  "flag": "🇸🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da91"
+  },
+  "countryName": "Saint Helena, Ascension and Tristan da Cunha",
+  "callingCode": "+290",
+  "countryCode": "SH",
+  "flag": "🇸🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da92"
+  },
+  "countryName": "Slovenia",
+  "callingCode": "+386",
+  "countryCode": "SI",
+  "flag": "🇸🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da93"
+  },
+  "countryName": "Svalbard and Jan Mayen",
+  "callingCode": "+4779",
+  "countryCode": "SJ",
+  "flag": "🇸🇯",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da94"
+  },
+  "countryName": "Slovakia",
+  "callingCode": "+421",
+  "countryCode": "SK",
+  "flag": "🇸🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da95"
+  },
+  "countryName": "Sierra Leone",
+  "callingCode": "+232",
+  "countryCode": "SL",
+  "flag": "🇸🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da96"
+  },
+  "countryName": "Republic of San Marino",
+  "callingCode": "+378",
+  "countryCode": "SM",
+  "flag": "🇸🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da97"
+  },
+  "countryName": "Senegal",
+  "callingCode": "+221",
+  "countryCode": "SN",
+  "flag": "🇸🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da98"
+  },
+  "countryName": "Somalia",
+  "callingCode": "+252",
+  "countryCode": "SO",
+  "flag": "🇸🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da99"
+  },
+  "countryName": "Suriname",
+  "callingCode": "+597",
+  "countryCode": "SR",
+  "flag": "🇸🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da9a"
+  },
+  "countryName": "South Sudan",
+  "callingCode": "+211",
+  "countryCode": "SS",
+  "flag": "🇸🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da9b"
+  },
+  "countryName": "Sao Tome and Principe",
+  "callingCode": "+239",
+  "countryCode": "ST",
+  "flag": "🇸🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da9c"
+  },
+  "countryName": "El Salvador",
+  "callingCode": "+503",
+  "countryCode": "SV",
+  "flag": "🇸🇻",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da9d"
+  },
+  "countryName": "Sint Maarten (Dutch part)",
+  "callingCode": "+1721",
+  "countryCode": "SX",
+  "flag": "🇸🇽",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da9e"
+  },
+  "countryName": "Syrian Arab Republic",
+  "callingCode": "+963",
+  "countryCode": "SY",
+  "flag": "🇸🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244da9f"
+  },
+  "countryName": "Chad",
+  "callingCode": "+235",
+  "countryCode": "TD",
+  "flag": "🇹🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa0"
+  },
+  "countryName": "Togo",
+  "callingCode": "+228",
+  "countryCode": "TG",
+  "flag": "🇹🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa1"
+  },
+  "countryName": "Thailand",
+  "callingCode": "+66",
+  "countryCode": "TH",
+  "flag": "🇹🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa2"
+  },
+  "countryName": "Tajikistan",
+  "callingCode": "+992",
+  "countryCode": "TJ",
+  "flag": "🇹🇯",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa3"
+  },
+  "countryName": "Tokelau",
+  "callingCode": "+690",
+  "countryCode": "TK",
+  "flag": "🇹🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa4"
+  },
+  "countryName": "Timor-Leste",
+  "callingCode": "+670",
+  "countryCode": "TL",
+  "flag": "🇹🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa5"
+  },
+  "countryName": "Turkmenistan",
+  "callingCode": "+993",
+  "countryCode": "TM",
+  "flag": "🇹🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa6"
+  },
+  "countryName": "Tunisia",
+  "callingCode": "+216",
+  "countryCode": "TN",
+  "flag": "🇹🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa7"
+  },
+  "countryName": "Tonga",
+  "callingCode": "+676",
+  "countryCode": "TO",
+  "flag": "🇹🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa8"
+  },
+  "countryName": "Turkey",
+  "callingCode": "+90",
+  "countryCode": "TR",
+  "flag": "🇹🇷",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daa9"
+  },
+  "countryName": "Trinidad and Tobago",
+  "callingCode": "+868",
+  "countryCode": "TT",
+  "flag": "🇹🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daaa"
+  },
+  "countryName": "Tuvalu",
+  "callingCode": "+688",
+  "countryCode": "TV",
+  "flag": "🇹🇻",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daab"
+  },
+  "countryName": "United Republic of Tanzania",
+  "callingCode": "+255",
+  "countryCode": "TZ",
+  "flag": "🇹🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daac"
+  },
+  "countryName": "Ukraine",
+  "callingCode": "+380",
+  "countryCode": "UA",
+  "flag": "🇺🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daad"
+  },
+  "countryName": "Uganda",
+  "callingCode": "+256",
+  "countryCode": "UG",
+  "flag": "🇺🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daae"
+  },
+  "countryName": "United States of America",
+  "callingCode": "+1",
+  "countryCode": "US",
+  "flag": "🇺🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daaf"
+  },
+  "countryName": "Uruguay",
+  "callingCode": "+598",
+  "countryCode": "UY",
+  "flag": "🇺🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab0"
+  },
+  "countryName": "Uzbekistan",
+  "callingCode": "+998",
+  "countryCode": "UZ",
+  "flag": "🇺🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab1"
+  },
+  "countryName": "Saint Vincent and the Grenadines",
+  "callingCode": "+1784",
+  "countryCode": "VC",
+  "flag": "🇻🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab2"
+  },
+  "countryName": "Venezuela (Bolivarian Republic of)",
+  "callingCode": "+58",
+  "countryCode": "VE",
+  "flag": "🇻🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab3"
+  },
+  "countryName": "Virgin Islands (British)",
+  "callingCode": "+1284",
+  "countryCode": "VG",
+  "flag": "🇻🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab4"
+  },
+  "countryName": "Virgin Islands (U.S.)",
+  "callingCode": "+1340",
+  "countryCode": "VI",
+  "flag": "🇻🇮",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab5"
+  },
+  "countryName": "Vietnam",
+  "callingCode": "+84",
+  "countryCode": "VN",
+  "flag": "🇻🇳",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab6"
+  },
+  "countryName": "Vanuatu",
+  "callingCode": "+678",
+  "countryCode": "VU",
+  "flag": "🇻🇺",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab7"
+  },
+  "countryName": "Wallis and Futuna",
+  "callingCode": "+681",
+  "countryCode": "WF",
+  "flag": "🇼🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab8"
+  },
+  "countryName": "Samoa",
+  "callingCode": "+685",
+  "countryCode": "WS",
+  "flag": "🇼🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dab9"
+  },
+  "countryName": "Yemen",
+  "callingCode": "+967",
+  "countryCode": "YE",
+  "flag": "🇾🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daba"
+  },
+  "countryName": "Mayotte",
+  "callingCode": "+262",
+  "countryCode": "YT",
+  "flag": "🇾🇹",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dabb"
+  },
+  "countryName": "South Africa",
+  "callingCode": "+27",
+  "countryCode": "ZA",
+  "flag": "🇿🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dabc"
+  },
+  "countryName": "Zambia",
+  "callingCode": "+260",
+  "countryCode": "ZM",
+  "flag": "🇿🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dabd"
+  },
+  "countryName": "Zimbabwe",
+  "callingCode": "+263",
+  "countryCode": "ZW",
+  "flag": "🇿🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dabe"
+  },
+  "countryName": "Eswatini",
+  "callingCode": "+268",
+  "countryCode": "SZ",
+  "flag": "🇸🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dabf"
+  },
+  "countryName": "North Macedonia",
+  "callingCode": "+389",
+  "countryCode": "MK",
+  "flag": "🇲🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac0"
+  },
+  "countryName": "Philippines",
+  "callingCode": "+63",
+  "countryCode": "PH",
+  "flag": "🇵🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac1"
+  },
+  "countryName": "Netherlands",
+  "callingCode": "+31",
+  "countryCode": "NL",
+  "flag": "🇳🇱",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac2"
+  },
+  "countryName": "United Arab Emirates",
+  "callingCode": "+971",
+  "countryCode": "AE",
+  "flag": "🇦🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac3"
+  },
+  "countryName": "Republic of Moldova",
+  "callingCode": "+373",
+  "countryCode": "MD",
+  "flag": "🇲🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac4"
+  },
+  "countryName": "Gambia",
+  "callingCode": "+220",
+  "countryCode": "GM",
+  "flag": "🇬🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac5"
+  },
+  "countryName": "Dominican Republic",
+  "callingCode": "+1",
+  "countryCode": "DO",
+  "flag": "🇩🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac6"
+  },
+  "countryName": "Sudan",
+  "callingCode": "+249",
+  "countryCode": "SD",
+  "flag": "🇸🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac7"
+  },
+  "countryName": "Lao People's Democratic Republic",
+  "callingCode": "+856",
+  "countryCode": "LA",
+  "flag": "🇱🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac8"
+  },
+  "countryName": "Taiwan, Province of China",
+  "callingCode": "+886",
+  "countryCode": "TW",
+  "flag": "🇹🇼",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dac9"
+  },
+  "countryName": "Republic of the Congo",
+  "callingCode": "+242",
+  "countryCode": "CG",
+  "flag": "🇨🇬",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244daca"
+  },
+  "countryName": "Czechia",
+  "callingCode": "+420",
+  "countryCode": "CZ",
+  "flag": "🇨🇿",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dacb"
+  },
+  "countryName": "United Kingdom",
+  "callingCode": "+44",
+  "countryCode": "GB",
+  "flag": "🇬🇧",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dacc"
+  },
+  "countryName": "Niger",
+  "callingCode": "+227",
+  "countryCode": "NE",
+  "flag": "🇳🇪",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dacd"
+  },
+  "countryName": "Democratic Republic of the Congo",
+  "callingCode": "+243",
+  "countryCode": "CD",
+  "flag": "🇨🇩",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dace"
+  },
+  "countryName": "Commonwealth of The Bahamas",
+  "callingCode": "+1 242",
+  "countryCode": "BS",
+  "flag": "🇧🇸",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dacf"
+  },
+  "countryName": "Cocos (Keeling) Islands",
+  "callingCode": "+61 891",
+  "countryCode": "CC",
+  "flag": "🇨🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad0"
+  },
+  "countryName": "Central African Republic",
+  "callingCode": "+236",
+  "countryCode": "CF",
+  "flag": "🇨🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad1"
+  },
+  "countryName": "Cook Islands",
+  "callingCode": "+682",
+  "countryCode": "CK",
+  "flag": "🇨🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad2"
+  },
+  "countryName": "Falkland Islands",
+  "callingCode": "+500",
+  "countryCode": "FK",
+  "flag": "🇫🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad3"
+  },
+  "countryName": "Faroe Islands",
+  "callingCode": "+298",
+  "countryCode": "FO",
+  "flag": "🇫🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad4"
+  },
+  "countryName": "Territory of Heard Island and McDonald Islands",
+  "callingCode": "+672",
+  "countryCode": "HM",
+  "flag": "🇭🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad5"
+  },
+  "countryName": "British Indian Ocean Territory",
+  "callingCode": "+246",
+  "countryCode": "IO",
+  "flag": "🇮🇴",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad6"
+  },
+  "countryName": "Comoros",
+  "callingCode": "+269",
+  "countryCode": "KM",
+  "flag": "🇰🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad7"
+  },
+  "countryName": "Cayman Islands",
+  "callingCode": "+1 345",
+  "countryCode": "KY",
+  "flag": "🇰🇾",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad8"
+  },
+  "countryName": "Republic of the Marshall Islands",
+  "callingCode": "+692",
+  "countryCode": "MH",
+  "flag": "🇲🇭",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dad9"
+  },
+  "countryName": "Commonwealth of the Northern Mariana Islands",
+  "callingCode": "+1 670",
+  "countryCode": "MP",
+  "flag": "🇲🇵",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dada"
+  },
+  "countryName": "Turks and Caicos Islands",
+  "callingCode": "+1 649",
+  "countryCode": "TC",
+  "flag": "🇹🇨",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dadb"
+  },
+  "countryName": "French Southern and Antarctic Lands",
+  "callingCode": "+672",
+  "countryCode": "TF",
+  "flag": "🇹🇫",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dadc"
+  },
+  "countryName": "United States Minor Outlying Islands",
+  "callingCode": "+1",
+  "countryCode": "UM",
+  "flag": "🇺🇲",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dadd"
+  },
+  "countryName": "Holy See",
+  "callingCode": "+39",
+  "countryCode": "VA",
+  "flag": "🇻🇦",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dade"
+  },
+  "countryName": "Republic of Kosovo",
+  "callingCode": "+383",
+  "countryCode": "XK",
+  "flag": "🇽🇰",
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "69affeed51f02c6df244dadf"
+  },
+  "countryName": "Netherlands Antilles",
+  "callingCode": "+599",
+  "countryCode": "AN",
+  "flag": "🇧🇶",
+  "__v": 0
+}]

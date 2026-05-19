@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const { Schema, model, models } = mongoose;
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DEFAULT_FREE_PLAN_ID = "4c6e497d-a6f9-4c3b-8d64-65bf843be685";
+const DEFAULT_FREE_PLAN_ID = "49ad0056-3d32-4543-b5da-db24b76dbd5a";
 
 const NamedRefSchema = new Schema(
   {
