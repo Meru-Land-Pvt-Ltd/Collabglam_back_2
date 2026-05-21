@@ -104,6 +104,34 @@ const CampaignSchema = new Schema(
     brandId: { type: Schema.Types.ObjectId, ref: "Brand", required: true, index: true },
     brandName: { type: String, trim: true, default: "" },
 
+    brandSubscriptionSnapshot: {
+      planId: { type: String, trim: true, default: "" },
+      planName: { type: String, trim: true, default: "" },
+      status: { type: String, trim: true, default: "" },
+      startedAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null },
+      wasFullyManaged: { type: Boolean, default: false, index: true },
+    },
+
+    brandWasFullyManagedAtCreation: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    isFullyManaged: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    managementType: {
+      type: String,
+      enum: ["self_serve", "fully_managed"],
+      default: "self_serve",
+      index: true,
+    },
+
     campaignTitle: { type: String, required: true, trim: true },
     description: { type: String, trim: true, default: "" },
     campaignType: { type: String, trim: true, default: "" },

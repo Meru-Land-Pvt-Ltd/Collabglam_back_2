@@ -39,6 +39,12 @@ function toObjectId(value) {
   return new mongoose.Types.ObjectId(String(value));
 }
 
+function toPlainId(value) {
+  if (!value) return null;
+  if (typeof value === 'object' && value._id) return String(value._id);
+  return String(value);
+}
+
 function normalizeHandle(h) {
   if (!h) return '';
   const t = String(h).trim().toLowerCase();
@@ -404,35 +410,181 @@ function normalizeAiScore(value) {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-function invitationResponse(doc) {
+async function resolveMissingEmailDoc({
+  missingEmailId,
+  email,
+  handle,
+  platform,
+}) {
+  const rawMissingEmailId = String(missingEmailId || '').trim();
+  const cleanedEmail = cleanEmail(email);
+  const normalizedHandle = handle ? normalizeHandle(handle) : '';
+  const normalizedPlatform = normalizePlatform(platform);
+
+  let missing = null;
+
+  if (rawMissingEmailId && normalizeObjectId(rawMissingEmailId)) {
+    missing = await MissingEmail.findById(rawMissingEmailId).lean();
+  }
+
+  if (!missing && rawMissingEmailId) {
+    missing = await MissingEmail.findOne({
+      $or: [
+        { missingEmailId: rawMissingEmailId },
+        { missingId: rawMissingEmailId },
+        { uuid: rawMissingEmailId },
+        { publicId: rawMissingEmailId },
+        { id: rawMissingEmailId },
+      ],
+    }).lean();
+  }
+
+  if (!missing && cleanedEmail) {
+    missing = await MissingEmail.findOne({
+      email: cleanedEmail,
+    }).lean();
+  }
+
+  if (!missing && normalizedHandle) {
+    const query = {
+      handle: normalizedHandle,
+    };
+
+    if (normalizedPlatform) {
+      query.platform = normalizedPlatform;
+    }
+
+    missing = await MissingEmail.findOne(query).lean();
+  }
+
+  return missing;
+}
+
+function invitationResponse(doc, refs = {}) {
+  const brand = refs.brand || null;
+  const campaign = refs.campaign || null;
+  const missingEmail = refs.missingEmail || null;
+
+  const brandId = toPlainId(doc.brandId);
+  const campaignId = toPlainId(doc.campaignId);
+  const missingEmailId = toPlainId(doc.missingEmailId);
+
   return {
     _id: String(doc._id),
+
     handle: doc.handle,
     platform: doc.platform,
-    brandId: doc.brandId,
-    campaignId: doc.campaignId || null,
     modashUserId: doc.modashUserId || null,
-    missingEmailId: doc.missingEmailId || null,
+
     status: doc.status,
+    aiScore: doc.aiScore ?? null,
+    rawAiScore: doc.rawAiScore ?? null,
+    recommendationReason: doc.recommendationReason || '',
+
+    brandId,
+    brandName:
+      brand?.brandName ||
+      campaign?.brandName ||
+      doc.brandName ||
+      '',
+    brandEmail: brand?.email || '',
+    brandIndustry: brand?.industry || '',
+    brandCompanySize: brand?.companySize || '',
+    brand: brand
+      ? {
+          _id: String(brand._id),
+          brandName: brand.brandName || '',
+          email: brand.email || '',
+          name: brand.name || '',
+          industry: brand.industry || '',
+          companySize: brand.companySize || '',
+          proxyEmail: brand.proxyEmail || '',
+          subscription: brand.subscription || null,
+          subscriptionExpired: brand.subscriptionExpired ?? false,
+          isAdminCreated: brand.isAdminCreated ?? false,
+          signupCompleted: brand.signupCompleted ?? true,
+          createdAt: brand.createdAt || null,
+          updatedAt: brand.updatedAt || null,
+        }
+      : null,
+
+    campaignId,
+    campaignName:
+      campaign?.campaignTitle ||
+      doc.campaignTitle ||
+      '',
+    campaign: campaign
+      ? {
+          _id: String(campaign._id),
+          brandId: toPlainId(campaign.brandId),
+          brandName: campaign.brandName || '',
+          campaignTitle: campaign.campaignTitle || '',
+          description: campaign.description || '',
+          campaignType: campaign.campaignType || '',
+          campaignCategory: campaign.campaignCategory || '',
+          campaignSubcategory: campaign.campaignSubcategory || '',
+          campaignBudget: campaign.campaignBudget ?? null,
+          budget: campaign.budget ?? null,
+          influencerBudget: campaign.influencerBudget ?? null,
+          paymentType: campaign.paymentType || '',
+          platformSelection: campaign.platformSelection || [],
+          numberOfInfluencers: campaign.numberOfInfluencers ?? null,
+          influencerTier: campaign.influencerTier || '',
+          minFollowers: campaign.minFollowers ?? null,
+          maxFollowers: campaign.maxFollowers ?? null,
+          creatorContentLanguage: campaign.creatorContentLanguage || '',
+          audienceContentLanguage: campaign.audienceContentLanguage || '',
+          targetCountry: campaign.targetCountry || '',
+          additionalNotes: campaign.additionalNotes || '',
+          hashtags: campaign.hashtags || [],
+          timeline: campaign.timeline || null,
+          startAt: campaign.startAt || null,
+          endAt: campaign.endAt || null,
+          scheduledAt: campaign.scheduledAt || null,
+          publishedAt: campaign.publishedAt || null,
+          endedAt: campaign.endedAt || null,
+          status: campaign.status || '',
+          publishStatus: campaign.publishStatus || '',
+          approvalMode: campaign.approvalMode || '',
+          isFullyManaged: campaign.isFullyManaged ?? false,
+          managementType: campaign.managementType || '',
+          isActive: campaign.isActive ?? null,
+          applicantCount: campaign.applicantCount ?? null,
+          hasApplied: campaign.hasApplied ?? null,
+          isDraft: campaign.isDraft ?? null,
+          byAi: campaign.byAi ?? null,
+          createdAt: campaign.createdAt || null,
+          updatedAt: campaign.updatedAt || null,
+        }
+      : null,
+
+    missingEmailId,
+    email: missingEmail?.email || null,
+    missingEmail: missingEmail
+      ? {
+          _id: String(missingEmail._id),
+          email: missingEmail.email || null,
+          handle: missingEmail.handle || '',
+          platform: missingEmail.platform || '',
+          status: missingEmail.status || '',
+          youtube: missingEmail.youtube || null,
+          createdByAdminId: missingEmail.createdByAdminId || null,
+          createdAt: missingEmail.createdAt || null,
+          updatedAt: missingEmail.updatedAt || null,
+        }
+      : null,
+
+    creatorTitle:
+      missingEmail?.youtube?.title ||
+      missingEmail?.handle ||
+      doc.handle ||
+      '',
+
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
 }
 
-/**
- * POST /newinvitations/create
- *
- * Uses Mongo _id only:
- * body: {
- *   brandId: brand._id,
- *   campaignId: campaign._id,
- *   handle,
- *   platform,
- *   status?: "invited" | "available",
- *   modashUserId?,
- *   emailTemplate?
- * }
- */
 exports.createInvitation = async (req, res) => {
   try {
     const brandId = normalizeObjectId(req.body?.brandId);
@@ -543,7 +695,7 @@ exports.createInvitation = async (req, res) => {
         emailSent: false,
         emailMeta: null,
         emailSkippedReason: 'Duplicate invitation skipped.',
-        data: invitationResponse(doc),
+        data: invitationResponse(doc, { brand, campaign }),
       });
     }
 
@@ -640,7 +792,11 @@ exports.createInvitation = async (req, res) => {
       emailSent,
       emailMeta,
       emailSkippedReason,
-      data: invitationResponse(doc),
+      data: invitationResponse(doc, {
+        brand,
+        campaign,
+        missingEmail: pendingMissingEmailRecord,
+      }),
     });
   } catch (err) {
     console.error('createInvitation error:', err);
@@ -689,43 +845,53 @@ exports.updateInvitationStatus = async (req, res) => {
 
     doc.status = rawStatus;
 
-    if (req.body?.missingEmailId) {
-      const missingEmailId = normalizeObjectId(req.body.missingEmailId);
+    let warning = null;
 
-      if (!missingEmailId) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Invalid missingEmailId. Use MissingEmail _id.',
-        });
+    const rawMissingEmailId = String(req.body?.missingEmailId || '').trim();
+    const hasResolverInput =
+      rawMissingEmailId ||
+      req.body?.email ||
+      req.body?.handle ||
+      req.body?.platform;
+
+    if (hasResolverInput) {
+      const missing = await resolveMissingEmailDoc({
+        missingEmailId: rawMissingEmailId,
+        email: req.body?.email,
+        handle: req.body?.handle || doc.handle,
+        platform: req.body?.platform || doc.platform,
+      });
+
+      if (missing?._id) {
+        doc.missingEmailId = String(missing._id);
+      } else if (rawMissingEmailId) {
+        warning =
+          'missingEmailId was not found as Mongo _id or custom id, so status was updated without changing invitation.missingEmailId.';
       }
-
-      const missing = await MissingEmail.findById(missingEmailId)
-        .select('_id handle platform')
-        .lean();
-
-      if (!missing) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'MissingEmail record not found for provided _id.',
-        });
-      }
-
-      doc.missingEmailId = String(missing._id);
     }
 
     await doc.save();
 
+    const [brand, campaign, missingEmail] = await Promise.all([
+      doc.brandId ? Brand.findById(doc.brandId).lean() : null,
+      doc.campaignId ? Campaign.findById(doc.campaignId).lean() : null,
+      doc.missingEmailId ? resolveMissingEmailDoc({ missingEmailId: doc.missingEmailId }) : null,
+    ]);
+
     return res.json({
       status: 'success',
-      message: 'Invitation status updated.',
-      data: invitationResponse(doc),
+      message: warning
+        ? 'Invitation status updated, but missing email could not be linked.'
+        : 'Invitation status updated.',
+      warning,
+      data: invitationResponse(doc, { brand, campaign, missingEmail }),
     });
   } catch (err) {
     console.error('Error in updateInvitationStatus:', err);
 
     return res.status(500).json({
       status: 'error',
-      message: 'Internal server error.',
+      message: err?.message || 'Internal server error.',
     });
   }
 };
@@ -744,6 +910,8 @@ exports.listInvitations = async (req, res) => {
     const rawPlatform = typeof body.platform === 'string' ? body.platform.trim() : '';
     const rawStatus =
       typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+    const rawSearch =
+      typeof body.search === 'string' ? body.search.trim() : '';
 
     const query = {};
 
@@ -807,6 +975,94 @@ exports.listInvitations = async (req, res) => {
       query.status = rawStatus;
     }
 
+    if (rawSearch) {
+      const rx = new RegExp(escapeRegExp(rawSearch), 'i');
+
+      const [matchedBrands, matchedCampaigns, matchedMissingEmails] =
+        await Promise.all([
+          Brand.find({
+            $or: [
+              { brandName: rx },
+              { email: rx },
+              { name: rx },
+              { industry: rx },
+              { companySize: rx },
+            ],
+          })
+            .select('_id')
+            .lean(),
+
+          Campaign.find({
+            $or: [
+              { campaignTitle: rx },
+              { brandName: rx },
+              { description: rx },
+              { campaignType: rx },
+              { campaignCategory: rx },
+              { campaignSubcategory: rx },
+              { targetCountry: rx },
+              { paymentType: rx },
+              { influencerTier: rx },
+              { hashtags: rx },
+            ],
+          })
+            .select('_id')
+            .lean(),
+
+          MissingEmail.find({
+            $or: [
+              { email: rx },
+              { handle: rx },
+              { platform: rx },
+              { status: rx },
+              { 'youtube.title': rx },
+              { 'youtube.description': rx },
+              { 'youtube.country': rx },
+            ],
+          })
+            .select('_id')
+            .lean(),
+        ]);
+
+      const matchedBrandIds = matchedBrands.map((item) => String(item._id));
+      const matchedCampaignIds = matchedCampaigns.map((item) => String(item._id));
+      const matchedMissingEmailIds = matchedMissingEmails.map((item) =>
+        String(item._id)
+      );
+
+      const searchOr = [
+        { handle: rx },
+        { modashUserId: rx },
+        { recommendationReason: rx },
+      ];
+
+      const possibleHandle = normalizeHandle(rawSearch);
+      if (HANDLE_RX.test(possibleHandle)) {
+        searchOr.push({ handle: possibleHandle });
+      }
+
+      if (isObjectId(rawSearch)) {
+        searchOr.push({ _id: toObjectId(rawSearch) });
+        searchOr.push({ brandId: rawSearch });
+        searchOr.push({ campaignId: rawSearch });
+        searchOr.push({ missingEmailId: rawSearch });
+      }
+
+      if (matchedBrandIds.length) {
+        searchOr.push({ brandId: { $in: matchedBrandIds } });
+      }
+
+      if (matchedCampaignIds.length) {
+        searchOr.push({ campaignId: { $in: matchedCampaignIds } });
+      }
+
+      if (matchedMissingEmailIds.length) {
+        searchOr.push({ missingEmailId: { $in: matchedMissingEmailIds } });
+      }
+
+      query.$or = searchOr;
+    }
+
     const [total, docs] = await Promise.all([
       Invitation.countDocuments(query),
       Invitation.find(query)
@@ -816,20 +1072,171 @@ exports.listInvitations = async (req, res) => {
         .lean(),
     ]);
 
+    const brandIds = [
+      ...new Set(docs.map((doc) => normalizeObjectId(doc.brandId)).filter(Boolean)),
+    ];
+
+    const campaignIds = [
+      ...new Set(
+        docs.map((doc) => normalizeObjectId(doc.campaignId)).filter(Boolean)
+      ),
+    ];
+
+    const rawMissingEmailIds = [
+      ...new Set(
+        docs
+          .map((doc) => String(doc.missingEmailId || '').trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const mongoMissingEmailIds = rawMissingEmailIds.filter((id) =>
+      normalizeObjectId(id)
+    );
+
+    const customMissingEmailIds = rawMissingEmailIds.filter(
+      (id) => !normalizeObjectId(id)
+    );
+
+    const [brands, campaigns, missingEmails] = await Promise.all([
+      brandIds.length
+        ? Brand.find({
+            _id: { $in: brandIds.map((id) => toObjectId(id)) },
+          })
+            .select(
+              [
+                'brandName',
+                'email',
+                'name',
+                'industry',
+                'companySize',
+                'proxyEmail',
+                'subscription',
+                'subscriptionExpired',
+                'isAdminCreated',
+                'signupCompleted',
+                'createdAt',
+                'updatedAt',
+              ].join(' ')
+            )
+            .lean()
+        : [],
+
+      campaignIds.length
+        ? Campaign.find({
+            _id: { $in: campaignIds.map((id) => toObjectId(id)) },
+          })
+            .select(
+              [
+                'brandId',
+                'brandName',
+                'campaignTitle',
+                'description',
+                'campaignType',
+                'campaignCategory',
+                'campaignSubcategory',
+                'campaignBudget',
+                'budget',
+                'influencerBudget',
+                'paymentType',
+                'platformSelection',
+                'numberOfInfluencers',
+                'influencerTier',
+                'minFollowers',
+                'maxFollowers',
+                'creatorContentLanguage',
+                'audienceContentLanguage',
+                'targetCountry',
+                'additionalNotes',
+                'hashtags',
+                'timeline',
+                'startAt',
+                'endAt',
+                'scheduledAt',
+                'publishedAt',
+                'endedAt',
+                'status',
+                'publishStatus',
+                'approvalMode',
+                'isFullyManaged',
+                'managementType',
+                'isActive',
+                'applicantCount',
+                'hasApplied',
+                'isDraft',
+                'byAi',
+                'createdAt',
+                'updatedAt',
+              ].join(' ')
+            )
+            .lean()
+        : [],
+
+      rawMissingEmailIds.length
+        ? MissingEmail.find({
+            $or: [
+              ...(mongoMissingEmailIds.length
+                ? [
+                    {
+                      _id: {
+                        $in: mongoMissingEmailIds.map((id) => toObjectId(id)),
+                      },
+                    },
+                  ]
+                : []),
+              ...(customMissingEmailIds.length
+                ? [
+                    { missingEmailId: { $in: customMissingEmailIds } },
+                    { missingId: { $in: customMissingEmailIds } },
+                    { uuid: { $in: customMissingEmailIds } },
+                    { publicId: { $in: customMissingEmailIds } },
+                    { id: { $in: customMissingEmailIds } },
+                  ]
+                : []),
+            ],
+          }).lean()
+        : [],
+    ]);
+
+    const brandMap = new Map(brands.map((brand) => [String(brand._id), brand]));
+    const campaignMap = new Map(
+      campaigns.map((campaign) => [String(campaign._id), campaign])
+    );
+
+    const missingEmailMap = new Map();
+
+    for (const missing of missingEmails) {
+      missingEmailMap.set(String(missing._id), missing);
+
+      for (const key of ['missingEmailId', 'missingId', 'uuid', 'publicId', 'id']) {
+        if (missing[key]) {
+          missingEmailMap.set(String(missing[key]), missing);
+        }
+      }
+    }
+
+    const data = docs.map((doc) =>
+      invitationResponse(doc, {
+        brand: brandMap.get(String(doc.brandId || '')),
+        campaign: campaignMap.get(String(doc.campaignId || '')),
+        missingEmail: missingEmailMap.get(String(doc.missingEmailId || '')),
+      })
+    );
+
     return res.json({
       status: 'success',
       page,
       limit,
       total,
       hasNext: page * limit < total,
-      data: docs.map(invitationResponse),
+      data,
     });
   } catch (err) {
     console.error('listInvitations error:', err);
 
     return res.status(500).json({
       status: 'error',
-      message: 'Internal server error.',
+      message: err?.message || 'Internal server error.',
     });
   }
 };
@@ -850,8 +1257,7 @@ exports.getInvitationList = async (req, res) => {
     const invitations = await Invitation.find({
       brandId,
       missingEmailId: { $ne: null },
-    })
-      .lean();
+    }).lean();
 
     if (!invitations.length) {
       return res.json({
@@ -864,38 +1270,95 @@ exports.getInvitationList = async (req, res) => {
     const missingIds = [
       ...new Set(
         invitations
-          .map((inv) => normalizeObjectId(inv.missingEmailId))
+          .map((inv) => String(inv.missingEmailId || '').trim())
           .filter(Boolean)
       ),
     ];
 
-    const missingDocs = missingIds.length
-      ? await MissingEmail.find({
-          _id: {
-            $in: missingIds.map((id) => toObjectId(id)),
-          },
-        }).lean()
-      : [];
+    const mongoMissingIds = missingIds.filter((id) => normalizeObjectId(id));
+    const customMissingIds = missingIds.filter((id) => !normalizeObjectId(id));
+
+    const campaignIds = [
+      ...new Set(
+        invitations.map((inv) => normalizeObjectId(inv.campaignId)).filter(Boolean)
+      ),
+    ];
+
+    const [missingDocs, campaigns] = await Promise.all([
+      missingIds.length
+        ? MissingEmail.find({
+            $or: [
+              ...(mongoMissingIds.length
+                ? [
+                    {
+                      _id: {
+                        $in: mongoMissingIds.map((id) => toObjectId(id)),
+                      },
+                    },
+                  ]
+                : []),
+              ...(customMissingIds.length
+                ? [
+                    { missingEmailId: { $in: customMissingIds } },
+                    { missingId: { $in: customMissingIds } },
+                    { uuid: { $in: customMissingIds } },
+                    { publicId: { $in: customMissingIds } },
+                    { id: { $in: customMissingIds } },
+                  ]
+                : []),
+            ],
+          }).lean()
+        : [],
+      campaignIds.length
+        ? Campaign.find({
+            _id: {
+              $in: campaignIds.map((id) => toObjectId(id)),
+            },
+          })
+            .select('campaignTitle brandName campaignBudget status publishStatus')
+            .lean()
+        : [],
+    ]);
 
     const missingMap = new Map();
+    const campaignMap = new Map();
 
     for (const me of missingDocs) {
       missingMap.set(String(me._id), me);
+
+      for (const key of ['missingEmailId', 'missingId', 'uuid', 'publicId', 'id']) {
+        if (me[key]) {
+          missingMap.set(String(me[key]), me);
+        }
+      }
+    }
+
+    for (const campaign of campaigns) {
+      campaignMap.set(String(campaign._id), campaign);
     }
 
     const data = invitations.map((inv) => {
       const me = missingMap.get(String(inv.missingEmailId || ''));
+      const campaign = campaignMap.get(String(inv.campaignId || ''));
 
       const title =
-        (me && me.youtube && me.youtube.title) ||
-        (me && me.handle) ||
+        me?.youtube?.title ||
+        me?.handle ||
+        inv.handle ||
         '';
 
       return {
         _id: String(inv._id),
+        handle: inv.handle || '',
+        platform: inv.platform || '',
+        status: inv.status || '',
         missingEmailId: inv.missingEmailId || null,
         campaignId: inv.campaignId || null,
+        campaignName: campaign?.campaignTitle || '',
+        brandName: campaign?.brandName || '',
         title,
+        email: me?.email || null,
+        missingEmail: me || null,
       };
     });
 
@@ -978,7 +1441,7 @@ async function computeBrandEligibilityForThread(threadId) {
     nextAllowedAt: null,
     outgoingCount,
   };
-};
+}
 
 exports.getInvitationSendEligibility = async (req, res) => {
   try {
@@ -1035,7 +1498,9 @@ exports.getInvitationSendEligibility = async (req, res) => {
       });
     }
 
-    const missing = await MissingEmail.findById(invitation.missingEmailId).lean();
+    const missing = await resolveMissingEmailDoc({
+      missingEmailId: invitation.missingEmailId,
+    });
 
     const recipientEmail = cleanEmail(missing?.email);
 
