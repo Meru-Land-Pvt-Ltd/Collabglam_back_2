@@ -19,6 +19,7 @@ const {
   submitDeliverable,
   approveDeliverable,
   acceptMilestoneByInfluencer,
+  updateDeliverableStatus,
 } = require("../controllers/milestoneController");
 
 // Brand: create milestone and freeze amount in BrandWallet
@@ -55,5 +56,7 @@ router.post("/submitDeliverable", submitDeliverable);
 router.post("/approveDeliverable", approveDeliverable);
 
 router.post("/acceptByInfluencer", acceptMilestoneByInfluencer);
+  
+router.post("/updateDeliverableStatus", updateDeliverableStatus);
 
 module.exports = router;

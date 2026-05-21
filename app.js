@@ -83,9 +83,9 @@ const defaultCorsOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:4000",
-  "http://192.168.1.45:3000",
+  "http://192.168.1.26:3000",
 
-  "http://192.168.1.4:3000",
+  "http://192.168.1.12:3000",
   "https://mhd.sharemitra.com",
 ];
 
@@ -413,6 +413,7 @@ app.use("/outreach", require("./routes/outreachRoutes"));
 app.use("/matched-creators", matchedCreatorRoutes);
 app.use("/campaign-reviews", campaignReviewRoutes);
 app.use("/youtube-insights", youtubeInsightRoutes);
+app.use("/campaign-intelligence", require("./routes/campaignIntelligenceRoutes"));
 
 /* =========================================================
    404 HANDLER

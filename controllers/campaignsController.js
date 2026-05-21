@@ -326,6 +326,39 @@ const resolveCategoryAndSubcategories = async (categoryId, subIds) => {
 };
 
 const DEFAULT_CAMPAIGN_TZ = "UTC";
+const FULLY_MANAGED_PLAN_ID = "e5cb75da-6d0d-481b-b202-69b9cf864940";
+
+function isFullyManagedBrandSnapshot(brandDoc = {}) {
+  const subscription = brandDoc.subscription || {};
+  const planId = String(subscription.planId || "").trim();
+  const planName = String(subscription.planName || "").toLowerCase().trim();
+  const features = Array.isArray(subscription.features) ? subscription.features : [];
+
+  if (planId === FULLY_MANAGED_PLAN_ID) return true;
+  if (planName.includes("fully managed") || planName.includes("full managed")) return true;
+
+  return features.some((feature) =>
+    [
+      "creator_sourcing_and_outreach",
+      "shortlist_delivered",
+      "negotiation_and_followups",
+    ].includes(String(feature?.key || ""))
+  );
+}
+
+function buildBrandSubscriptionSnapshot(brandDoc = {}) {
+  const subscription = brandDoc.subscription || {};
+  const wasFullyManaged = isFullyManagedBrandSnapshot(brandDoc);
+
+  return {
+    planId: String(subscription.planId || ""),
+    planName: String(subscription.planName || ""),
+    status: String(subscription.status || ""),
+    startedAt: subscription.startedAt || null,
+    expiresAt: subscription.expiresAt || null,
+    wasFullyManaged,
+  };
+}
 
 const normalizeTimezone = (tzRaw) => {
   const tz = clean(tzRaw) || DEFAULT_CAMPAIGN_TZ;
@@ -966,9 +999,24 @@ const buildCampaignDoc = (body, geo, status, byAi, timing, extra = {}) => {
     source: geo?.source,
   };
 
+  const brandSubscriptionSnapshot = extra.brandSubscriptionSnapshot || null;
+  const createdByAdmin =
+    String(extra.createdBy?.role || "").toLowerCase() === "admin" ||
+    String(extra.createdBy?.userModel || "").toLowerCase() === "master" ||
+    String(extra.approvalMode || "").toLowerCase() === "admin_review";
+
+  const wasFullyManaged =
+    createdByAdmin || Boolean(brandSubscriptionSnapshot?.wasFullyManaged);
+
   const base = {
     brandId: toObjectId(body.brandId),
     brandName: clean(extra.brandName) || "",
+
+    brandSubscriptionSnapshot,
+    brandWasFullyManagedAtCreation: wasFullyManaged,
+    isFullyManaged: wasFullyManaged,
+    managementType: wasFullyManaged ? "fully_managed" : "self_serve",
+
     byAi,
 
     createdLocation,
@@ -1733,7 +1781,8 @@ exports.createCampaign = async (req, res) => {
 
     req.body.campaignTimezone = campaignTz;
 
-    console.time("buildCampaignDoc");
+    const brandSubscriptionSnapshot = buildBrandSubscriptionSnapshot(brandDoc);
+
     const docToCreate = buildCampaignDoc(req.body, geo, status, 0, timing, {
       brandName: String(brandDoc.name || brandDoc.brandName || ""),
       createdBy: actor,
@@ -1742,6 +1791,7 @@ exports.createCampaign = async (req, res) => {
       subcategoryNames: Array.isArray(v?.rel?.subs)
         ? v.rel.subs.map((s) => String(s.name || ""))
         : [],
+      brandSubscriptionSnapshot,
     });
     console.timeEnd("buildCampaignDoc");
 
@@ -2126,6 +2176,8 @@ exports.prefillCampaignWithAI = async (req, res) => {
       const win = parseCampaignWindow(prefill, tz, requestId, res, false);
       if (!win.ok) return win.resp;
 
+      const brandSubscriptionSnapshot = buildBrandSubscriptionSnapshot(brandDoc);
+
       const docToCreate = buildCampaignDoc(
         { ...prefill, status: "draft", campaignTimezone: tz },
         geo,
@@ -2138,6 +2190,7 @@ exports.prefillCampaignWithAI = async (req, res) => {
           approvalMode: actor.role === "admin" ? "admin_review" : "direct",
           categoryName: rel?.cat?.name || "",
           subcategoryNames: Array.isArray(rel?.subs) ? rel.subs.map((s) => String(s.name || "")) : [],
+          brandSubscriptionSnapshot,
         }
       );
 
@@ -2205,16 +2258,16 @@ const FULLY_MANAGED_CAMPAIGN_TEXT_MARKERS = [
 function getAuthedBrandIdForCampaignDropdown(req = {}) {
   return clean(
     req.brand?._id ||
-      req.brand?.id ||
-      req.brand?.brandId ||
-      req.brandId ||
-      req.user?.brandId ||
-      req.user?.brand?._id ||
-      req.user?.brand?.id ||
-      req.user?._id ||
-      req.user?.id ||
-      req.auth?.brandId ||
-      req.query?.brandId
+    req.brand?.id ||
+    req.brand?.brandId ||
+    req.brandId ||
+    req.user?.brandId ||
+    req.user?.brand?._id ||
+    req.user?.brand?.id ||
+    req.user?._id ||
+    req.user?.id ||
+    req.auth?.brandId ||
+    req.query?.brandId
   );
 }
 
@@ -4943,15 +4996,78 @@ exports.getCampaignsByBrandId = async (req, res) => {
     const safeLimit = Math.max(parseInt(limit, 10) || 1000, 1);
     const skip = (safePage - 1) * safeLimit;
 
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+
+    const validStatuses = new Set([
+      "draft",
+      "scheduled",
+      "active",
+      "paused",
+      "completed",
+      "archived",
+    ]);
+
     const andFilters = [
       { brandId: brandObjectId },
-      { isActive: 1 },
-      { isDraft: { $ne: 1 } },
     ];
 
-    if (status) {
+    if (normalizedStatus && normalizedStatus !== "all") {
+      if (!validStatuses.has(normalizedStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid campaign status.",
+        });
+      }
+
+      if (normalizedStatus === "draft") {
+        andFilters.push({
+          $or: [
+            { status: "draft" },
+            { isDraft: 1 },
+            { publishStatus: "draft" },
+          ],
+        });
+      } else if (normalizedStatus === "scheduled") {
+        andFilters.push({
+          $or: [
+            { status: "scheduled" },
+            {
+              status: { $exists: false },
+              scheduledAt: { $ne: null },
+              isActive: { $ne: 1 },
+              isDraft: { $ne: 1 },
+            },
+          ],
+        });
+      } else if (normalizedStatus === "active") {
+        andFilters.push({
+          $or: [
+            { status: "active" },
+            {
+              status: { $exists: false },
+              isActive: 1,
+              isDraft: { $ne: 1 },
+            },
+          ],
+        });
+      } else {
+        andFilters.push({
+          status: normalizedStatus,
+        });
+      }
+    } else {
       andFilters.push({
-        status: String(status).trim().toLowerCase(),
+        $or: [
+          { status: { $in: ["draft", "scheduled", "active", "paused", "completed"] } },
+          { isDraft: 1 },
+          { isActive: 1 },
+          {
+            status: { $exists: false },
+            scheduledAt: { $ne: null },
+            isActive: { $ne: 1 },
+            isDraft: { $ne: 1 },
+          },
+        ],
       });
     }
 
@@ -6331,9 +6447,9 @@ exports.getInfluencerListByCampaignId = async (req, res) => {
     for (const contract of contractDocs) {
       const id = String(
         contract.influencerId ||
-          contract.influencer?._id ||
-          contract.influencer?.influencerId ||
-          ""
+        contract.influencer?._id ||
+        contract.influencer?.influencerId ||
+        ""
       ).trim();
 
       if (!id) continue;
@@ -6818,10 +6934,10 @@ exports.getInfluencerMatchScore = async (req, res) => {
       campaignPlatforms.length > 0
         ? influencerPlatforms.length > 0
           ? Math.round(
-              (campaignPlatforms.filter((item) => influencerPlatforms.includes(item)).length /
-                campaignPlatforms.length) *
-                100
-            )
+            (campaignPlatforms.filter((item) => influencerPlatforms.includes(item)).length /
+              campaignPlatforms.length) *
+            100
+          )
           : 0
         : null;
 
@@ -6831,14 +6947,14 @@ exports.getInfluencerMatchScore = async (req, res) => {
 
     const campaignCountryDocs = campaignCountryIds.length
       ? await Country.find({
-          _id: {
-            $in: campaignCountryIds
-              .filter((id) => isOid(id))
-              .map((id) => toObjectId(id)),
-          },
-        })
-          .select("_id countryNameEn countryNameLocal countryName name countryCode")
-          .lean()
+        _id: {
+          $in: campaignCountryIds
+            .filter((id) => isOid(id))
+            .map((id) => toObjectId(id)),
+        },
+      })
+        .select("_id countryNameEn countryNameLocal countryName name countryCode")
+        .lean()
       : [];
 
     const campaignCountries = uniq(
@@ -6873,14 +6989,14 @@ exports.getInfluencerMatchScore = async (req, res) => {
 
     const campaignLanguageDocs = campaignLanguageIds.length
       ? await ContentLanguage.find({
-          _id: {
-            $in: campaignLanguageIds
-              .filter((id) => isOid(id))
-              .map((id) => toObjectId(id)),
-          },
-        })
-          .select("_id code name")
-          .lean()
+        _id: {
+          $in: campaignLanguageIds
+            .filter((id) => isOid(id))
+            .map((id) => toObjectId(id)),
+        },
+      })
+        .select("_id code name")
+        .lean()
       : [];
 
     const campaignLanguages = uniq(
@@ -7042,14 +7158,14 @@ exports.getInfluencerMatchScore = async (req, res) => {
           category:
             categoryScore > 0
               ? uniq(campaignCategoryNames).filter((item) =>
-                  scoreTextMatch([item], [...influencerCategoryNames, ...influencerInterestNames])
-                )
+                scoreTextMatch([item], [...influencerCategoryNames, ...influencerInterestNames])
+              )
               : [],
           subcategory:
             subcategoryScore > 0
               ? uniq(campaignSubcategoryNames).filter((item) =>
-                  scoreTextMatch([item], [...influencerSubcategoryNames, ...influencerInterestNames])
-                )
+                scoreTextMatch([item], [...influencerSubcategoryNames, ...influencerInterestNames])
+              )
               : [],
           platform: campaignPlatforms.filter((item) =>
             influencerPlatforms.includes(item)

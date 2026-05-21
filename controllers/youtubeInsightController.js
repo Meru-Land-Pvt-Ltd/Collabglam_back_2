@@ -1,7 +1,9 @@
 'use strict';
 
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const YoutubeInsightReport = require('../models/youtubeInsightReport');
+const YoutubeInsightPublicShare = require('../models/youtubeInsightPublicShare');
 const { createInsightReport } = require('../services/youtubeInsight.service');
 const {
   formatYoutubeInsightReport,
@@ -16,6 +18,48 @@ function escapeRegex(value = '') {
 
 function clean(value) {
   return String(value || '').trim();
+}
+
+function isObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toObjectId(value) {
+  const id = clean(value);
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+}
+
+function getBrandIdFromRequest(req = {}) {
+  return clean(
+    req.brand?._id ||
+      req.brand?.id ||
+      req.brand?.brandId ||
+      req.user?.brandId ||
+      req.user?.brand?._id ||
+      req.user?.brand?.id ||
+      req.admin?.brandId ||
+      req.body?.brandId ||
+      req.query?.brandId
+  );
+}
+
+function getBrandNameFromRequest(req = {}) {
+  return clean(
+    req.brand?.brandName ||
+      req.brand?.name ||
+      req.user?.brandName ||
+      req.user?.brand?.brandName ||
+      req.admin?.brandName ||
+      req.body?.brandName ||
+      req.query?.brandName
+  );
+}
+
+function shouldPersistFromRequest(req = {}) {
+  const body = req.body || {};
+  const sourceContext = clean(body.sourceContext || req.query?.sourceContext).toLowerCase();
+  if (body.saveReport === false || body.persist === false || sourceContext === 'public_insight_os') return false;
+  return true;
 }
 
 function getRequestActor(req = {}) {
@@ -60,6 +104,8 @@ function canViewAllReports(req = {}) {
 
 function buildAccessFilter(req = {}) {
   const actor = getRequestActor(req);
+  const brandObjectId = toObjectId(getBrandIdFromRequest(req));
+  if (brandObjectId) return { brandId: brandObjectId };
   if (canViewAllReports(req)) return {};
   if (actor.adminId && mongoose.Types.ObjectId.isValid(actor.adminId)) return { createdByAdminId: actor.adminId };
   if (actor.userId && mongoose.Types.ObjectId.isValid(actor.userId)) return { userId: actor.userId };
@@ -71,6 +117,9 @@ function getListInput(req = {}) {
 }
 
 function addOptionalFilters(filter, input = {}) {
+  const brandObjectId = toObjectId(input.brandId);
+  if (brandObjectId) filter.brandId = brandObjectId;
+  if (input.sourceContext) filter.sourceContext = clean(input.sourceContext);
   if (input.videoId) filter.videoId = clean(input.videoId);
   if (input.channelId) filter['channelMetrics.channelId'] = clean(input.channelId);
   if (input.reportStatus) filter.reportStatus = clean(input.reportStatus);
@@ -85,10 +134,12 @@ function addOptionalFilters(filter, input = {}) {
       { 'creatorInsights.primaryCategory': search }
     ];
   }
-  if (input.fromDate || input.toDate) {
+  const fromDate = input.fromDate || input.startDate;
+  const toDate = input.toDate || input.endDate;
+  if (fromDate || toDate) {
     filter.createdAt = {};
-    if (input.fromDate) filter.createdAt.$gte = new Date(input.fromDate);
-    if (input.toDate) filter.createdAt.$lte = new Date(input.toDate);
+    if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+    if (toDate) filter.createdAt.$lte = new Date(toDate);
   }
   return filter;
 }
@@ -134,16 +185,244 @@ function formatYoutubeInsightListItem(report = {}) {
   };
 }
 
+
+function getPublicWebBaseUrl(req = {}, body = {}) {
+  const direct = clean(body.publicBaseUrl || body.origin || body.siteUrl || body.webBaseUrl);
+  const envUrl = clean(process.env.PUBLIC_WEB_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.FRONTEND_URL || process.env.CLIENT_URL);
+  const host = clean(req.headers?.origin) || clean(req.headers?.referer).replace(/\/[^/]*$/, '');
+  return (direct || envUrl || host || 'https://collabglam.com').replace(/\/+$/, '');
+}
+
+function makePublicReportUrl(token, req = {}, body = {}) {
+  const base = getPublicWebBaseUrl(req, body);
+  return `${base}/insight-os/report?share=${encodeURIComponent(token)}`;
+}
+
+function getSnapshotFromRequest(body = {}) {
+  if (isObject(body.frontendReport)) return body.frontendReport;
+  if (isObject(body.dashboard)) return body.dashboard;
+  if (isObject(body.report)) return body.report;
+  if (isObject(body.data)) return body.data;
+  return null;
+}
+
+function getSnapshotTitle(snapshot = {}) {
+  if (!isObject(snapshot)) return '';
+  return clean(
+    snapshot.videoOverview?.title ||
+      snapshot.hero?.videoTitle ||
+      snapshot.videoTitle ||
+      snapshot.title ||
+      snapshot.profile?.name ||
+      snapshot.hero?.influencerName
+  );
+}
+
+function getSnapshotCreatorName(snapshot = {}) {
+  if (!isObject(snapshot)) return '';
+  return clean(
+    snapshot.profile?.name ||
+      snapshot.hero?.influencerName ||
+      snapshot.influencerName ||
+      snapshot.channelOverview?.name ||
+      snapshot.creatorName
+  );
+}
+
+function getSnapshotVideoUrl(snapshot = {}) {
+  if (!isObject(snapshot)) return '';
+  return clean(
+    snapshot.videoOverview?.videoUrl ||
+      snapshot.hero?.livePublishedLink ||
+      snapshot.videoUrl ||
+      snapshot.url
+  );
+}
+
+function getRequestActorIds(req = {}) {
+  const actor = getRequestActor(req);
+  return {
+    actor,
+    createdByAdminId: actor.adminId && mongoose.Types.ObjectId.isValid(actor.adminId) ? actor.adminId : null,
+    createdByUserId: actor.userId && mongoose.Types.ObjectId.isValid(actor.userId) ? actor.userId : null,
+    createdByEmail: actor.email || ''
+  };
+}
+
+function makeShareToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+async function createYoutubeInsightPublicLink(req, res, next) {
+  try {
+    const body = req.body || {};
+    const reportId = clean(body.reportId || body.id || body._id);
+    const snapshot = getSnapshotFromRequest(body);
+    const sourceContext = clean(body.sourceContext || body.context).toLowerCase() || 'unknown';
+    const { actor, createdByAdminId, createdByUserId, createdByEmail } = getRequestActorIds(req);
+
+    let report = null;
+
+    if (reportId) {
+      if (!mongoose.Types.ObjectId.isValid(reportId)) {
+        return res.status(400).json({ success: false, message: 'Invalid YouTube insight report id.' });
+      }
+
+      // Authenticated brand/admin users may share a saved report. Public users can
+      // still share the report snapshot without requiring DB report access.
+      const accessFilter = actor.id ? buildAccessFilter(req) : null;
+      if (accessFilter) {
+        report = await YoutubeInsightReport.findOne({ ...accessFilter, _id: reportId }).lean();
+        if (!report && !snapshot) {
+          return res.status(404).json({ success: false, message: 'YouTube insight report not found.' });
+        }
+      }
+    }
+
+    if (!report && !snapshot) {
+      return res.status(400).json({
+        success: false,
+        message: 'reportId or frontendReport/dashboard snapshot is required to create a public link.'
+      });
+    }
+
+    const token = makeShareToken();
+    const reportObjectId = report?._id || (reportId && mongoose.Types.ObjectId.isValid(reportId) && actor.id ? reportId : null);
+    const brandObjectId = report?.brandId || toObjectId(body.brandId) || toObjectId(getBrandIdFromRequest(req));
+    const frontendSnapshot = snapshot || null;
+
+    const share = await YoutubeInsightPublicShare.create({
+      token,
+      reportId: reportObjectId,
+      brandId: brandObjectId,
+      brandName: clean(report?.brandName || body.brandName || getBrandNameFromRequest(req)),
+      sourceContext: ['public_insight_os', 'brand_insight_os'].includes(sourceContext) ? sourceContext : (report?.sourceContext || 'unknown'),
+      title: clean(report?.videoMetrics?.title || report?.hero?.videoTitle || getSnapshotTitle(frontendSnapshot)),
+      creatorName: clean(report?.hero?.influencerName || report?.channelMetrics?.title || getSnapshotCreatorName(frontendSnapshot)),
+      videoUrl: clean(report?.videoUrl || report?.hero?.livePublishedLink || getSnapshotVideoUrl(frontendSnapshot)),
+      snapshot: frontendSnapshot,
+      createdByAdminId,
+      createdByUserId,
+      createdByEmail
+    });
+
+    const publicUrl = makePublicReportUrl(share.token, req, body);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Public Insight OS report link created successfully.',
+      data: {
+        token: share.token,
+        shareToken: share.token,
+        publicUrl,
+        url: publicUrl,
+        reportId: share.reportId ? String(share.reportId) : ''
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getYoutubeInsightPublicShare(req, res, next) {
+  try {
+    const token = clean(req.params.token || req.query.share || req.query.token);
+    if (!token) return res.status(400).json({ success: false, message: 'Public report token is required.' });
+
+    const share = await YoutubeInsightPublicShare.findOne({ token, isActive: true }).lean();
+    if (!share) return res.status(404).json({ success: false, message: 'Public Insight OS report link not found.' });
+
+    if (share.expiresAt && new Date(share.expiresAt).getTime() < Date.now()) {
+      return res.status(410).json({ success: false, message: 'This public Insight OS report link has expired.' });
+    }
+
+    await YoutubeInsightPublicShare.updateOne(
+      { _id: share._id },
+      { $inc: { accessCount: 1 }, $set: { lastAccessedAt: new Date() } }
+    ).catch(() => null);
+
+    if (share.reportId) {
+      const report = await YoutubeInsightReport.findById(share.reportId).lean();
+      if (report) {
+        const formattedReport = formatYoutubeInsightReport(report, {
+          includeRawData: false,
+          includeRawReport: false,
+          includeDebug: false
+        });
+
+        return res.status(200).json({
+          success: true,
+          data: formattedReport,
+          reportId: formattedReport.reportId,
+          frontendReport: formattedReport.frontendReport,
+          dashboard: formattedReport.dashboard,
+          aiSummary: formattedReport.aiSummary,
+          aiInsights: formattedReport.aiInsights,
+          finalVerdict: formattedReport.finalVerdict,
+          publicShare: {
+            token: share.token,
+            title: share.title,
+            creatorName: share.creatorName,
+            createdAt: share.createdAt
+          }
+        });
+      }
+    }
+
+    if (!share.snapshot) {
+      return res.status(404).json({ success: false, message: 'Public report snapshot is not available.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        reportId: share.reportId ? String(share.reportId) : '',
+        frontendReport: share.snapshot,
+        dashboard: share.snapshot,
+        publicShare: {
+          token: share.token,
+          title: share.title,
+          creatorName: share.creatorName,
+          createdAt: share.createdAt
+        }
+      },
+      reportId: share.reportId ? String(share.reportId) : '',
+      frontendReport: share.snapshot,
+      dashboard: share.snapshot,
+      publicShare: {
+        token: share.token,
+        title: share.title,
+        creatorName: share.creatorName,
+        createdAt: share.createdAt
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+
 async function analyzeYoutubeVideo(req, res, next) {
   try {
     const actor = getRequestActor(req);
     const videoUrl = getYoutubeLinkFromRequest(req);
     const body = req.body || {};
+    const persistReport = shouldPersistFromRequest(req);
+    const brandId = getBrandIdFromRequest(req);
+    const brandName = getBrandNameFromRequest(req);
+
+    if (persistReport && !brandId) {
+      return res.status(400).json({ success: false, message: 'brandId is required for brand Insight OS saved reports.' });
+    }
 
     const report = await createInsightReport({
       actor,
       payload: {
         videoUrl,
+        saveReport: persistReport,
+        sourceContext: persistReport ? 'brand_insight_os' : 'public_insight_os',
+        brandId,
+        brandName,
         maxComments: body.maxComments,
         creatorAverageLimit: body.creatorAverageLimit,
         includeReplies: body.includeReplies,
@@ -164,6 +443,7 @@ async function analyzeYoutubeVideo(req, res, next) {
     return res.status(201).json({
       success: true,
       message: 'YouTube link insight generated successfully.',
+      saved: persistReport,
       data: formattedReport,
       reportId: formattedReport.reportId,
       frontendReport: formattedReport.frontendReport,
@@ -185,7 +465,7 @@ async function getYoutubeInsightReports(req, res, next) {
     const skip = (page - 1) * limit;
     const sortBy = clean(input.sortBy) || 'createdAt';
     const sortOrder = clean(input.sortOrder).toLowerCase() === 'asc' ? 1 : -1;
-    const allowedSorts = new Set(['createdAt', 'updatedAt', 'videoId', 'videoMetrics.viewCount', 'videoMetrics.likeCount', 'videoMetrics.commentCount', 'videoMetrics.engagementRate', 'channelMetrics.subscriberCount', 'channelMetrics.totalViewCount', 'aiScores.finalAiScore', 'creatorInsights.primaryCategory']);
+    const allowedSorts = new Set(['createdAt', 'updatedAt', 'videoId', 'hero.influencerName', 'videoMetrics.title', 'videoMetrics.viewCount', 'videoMetrics.likeCount', 'videoMetrics.commentCount', 'videoMetrics.engagementRate', 'channelMetrics.subscriberCount', 'channelMetrics.totalViewCount', 'aiScores.finalAiScore', 'creatorInsights.primaryCategory']);
     const filter = addOptionalFilters(buildAccessFilter(req), input);
     const sort = { [allowedSorts.has(sortBy) ? sortBy : 'createdAt']: sortOrder };
     const [items, total] = await Promise.all([
@@ -253,5 +533,7 @@ module.exports = {
   getYoutubeInsightReports,
   getYoutubeInsightReportById,
   getYoutubeInsightSummary,
-  deleteYoutubeInsightReport
+  deleteYoutubeInsightReport,
+  createYoutubeInsightPublicLink,
+  getYoutubeInsightPublicShare
 };
