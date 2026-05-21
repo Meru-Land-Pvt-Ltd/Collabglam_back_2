@@ -1,15 +1,21 @@
 'use strict';
 
 const express = require('express');
-const router = express.Router();
-const youtubeInsightController = require('../controllers/youtubeInsightController');
-const { adminAuth } = require('../middlewares/adminAuth');
+const {
+  analyzeYoutubeVideo,
+  getYoutubeInsightReports,
+  getYoutubeInsightReportById,
+  getYoutubeInsightSummary,
+  deleteYoutubeInsightReport
+} = require('../controllers/youtubeInsightController');
 
-router.post('/analyze', youtubeInsightController.analyzeYoutubeVideo);
-router.get('/summary', youtubeInsightController.getYoutubeInsightSummary);
-router.get('/', youtubeInsightController.getYoutubeInsightReports);
-router.post('/getlist', youtubeInsightController.getYoutubeInsightReports);
-router.get('/:id', youtubeInsightController.getYoutubeInsightReportById);
-router.delete('/:id', youtubeInsightController.deleteYoutubeInsightReport);
+const router = express.Router();
+
+router.post('/analyze', analyzeYoutubeVideo);
+
+router.get('/', getYoutubeInsightReports);
+router.get('/summary', getYoutubeInsightSummary);
+router.get('/:id', getYoutubeInsightReportById);
+router.delete('/:id', deleteYoutubeInsightReport);
 
 module.exports = router;

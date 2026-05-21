@@ -18,6 +18,44 @@ function clean(value) {
   return String(value || '').trim();
 }
 
+function toObjectId(value) {
+  const id = clean(value);
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+}
+
+function getBrandIdFromRequest(req = {}) {
+  return clean(
+    req.brand?._id ||
+      req.brand?.id ||
+      req.brand?.brandId ||
+      req.user?.brandId ||
+      req.user?.brand?._id ||
+      req.user?.brand?.id ||
+      req.admin?.brandId ||
+      req.body?.brandId ||
+      req.query?.brandId
+  );
+}
+
+function getBrandNameFromRequest(req = {}) {
+  return clean(
+    req.brand?.brandName ||
+      req.brand?.name ||
+      req.user?.brandName ||
+      req.user?.brand?.brandName ||
+      req.admin?.brandName ||
+      req.body?.brandName ||
+      req.query?.brandName
+  );
+}
+
+function shouldPersistFromRequest(req = {}) {
+  const body = req.body || {};
+  const sourceContext = clean(body.sourceContext || req.query?.sourceContext).toLowerCase();
+  if (body.saveReport === false || body.persist === false || sourceContext === 'public_insight_os') return false;
+  return true;
+}
+
 function getRequestActor(req = {}) {
   const admin = req.admin || null;
   const user = req.user || null;
@@ -60,6 +98,8 @@ function canViewAllReports(req = {}) {
 
 function buildAccessFilter(req = {}) {
   const actor = getRequestActor(req);
+  const brandObjectId = toObjectId(getBrandIdFromRequest(req));
+  if (brandObjectId) return { brandId: brandObjectId };
   if (canViewAllReports(req)) return {};
   if (actor.adminId && mongoose.Types.ObjectId.isValid(actor.adminId)) return { createdByAdminId: actor.adminId };
   if (actor.userId && mongoose.Types.ObjectId.isValid(actor.userId)) return { userId: actor.userId };
@@ -71,6 +111,9 @@ function getListInput(req = {}) {
 }
 
 function addOptionalFilters(filter, input = {}) {
+  const brandObjectId = toObjectId(input.brandId);
+  if (brandObjectId) filter.brandId = brandObjectId;
+  if (input.sourceContext) filter.sourceContext = clean(input.sourceContext);
   if (input.videoId) filter.videoId = clean(input.videoId);
   if (input.channelId) filter['channelMetrics.channelId'] = clean(input.channelId);
   if (input.reportStatus) filter.reportStatus = clean(input.reportStatus);
@@ -139,11 +182,22 @@ async function analyzeYoutubeVideo(req, res, next) {
     const actor = getRequestActor(req);
     const videoUrl = getYoutubeLinkFromRequest(req);
     const body = req.body || {};
+    const persistReport = shouldPersistFromRequest(req);
+    const brandId = getBrandIdFromRequest(req);
+    const brandName = getBrandNameFromRequest(req);
+
+    if (persistReport && !brandId) {
+      return res.status(400).json({ success: false, message: 'brandId is required for brand Insight OS saved reports.' });
+    }
 
     const report = await createInsightReport({
       actor,
       payload: {
         videoUrl,
+        saveReport: persistReport,
+        sourceContext: persistReport ? 'brand_insight_os' : 'public_insight_os',
+        brandId,
+        brandName,
         maxComments: body.maxComments,
         creatorAverageLimit: body.creatorAverageLimit,
         includeReplies: body.includeReplies,
@@ -164,6 +218,7 @@ async function analyzeYoutubeVideo(req, res, next) {
     return res.status(201).json({
       success: true,
       message: 'YouTube link insight generated successfully.',
+      saved: persistReport,
       data: formattedReport,
       reportId: formattedReport.reportId,
       frontendReport: formattedReport.frontendReport,
