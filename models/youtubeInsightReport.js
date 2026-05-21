@@ -42,6 +42,9 @@ const YoutubeInsightReportSchema = new Schema(
     createdByAdminName: { type: String, trim: true, default: '' },
     createdByAdminEmail: { type: String, trim: true, lowercase: true, default: '' },
     createdByAdminRole: { type: String, trim: true, lowercase: true, default: '' },
+    brandId: { type: Schema.Types.ObjectId, ref: 'Brand', default: null, index: true },
+    brandName: { type: String, trim: true, default: '' },
+    sourceContext: { type: String, trim: true, default: 'brand_insight_os', index: true },
 
     reportType: { type: String, default: 'YouTube Public Video Insight Report' },
     platform: { type: String, default: 'YouTube', index: true },
@@ -367,6 +370,7 @@ const YoutubeInsightReportSchema = new Schema(
 
 YoutubeInsightReportSchema.index({ createdByAdminId: 1, createdAt: -1 });
 YoutubeInsightReportSchema.index({ userId: 1, createdAt: -1 });
+YoutubeInsightReportSchema.index({ brandId: 1, createdAt: -1 });
 YoutubeInsightReportSchema.index({ videoId: 1, createdAt: -1 });
 YoutubeInsightReportSchema.index({ 'channelMetrics.channelId': 1, createdAt: -1 });
 YoutubeInsightReportSchema.index({ 'aiScores.finalAiScore': -1 });

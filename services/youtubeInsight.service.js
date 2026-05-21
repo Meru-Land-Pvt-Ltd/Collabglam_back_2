@@ -1,5 +1,6 @@
 'use strict';
 
+const mongoose = require('mongoose');
 const YoutubeInsightReport = require('../models/youtubeInsightReport');
 const { extractYouTubeVideoId, buildYouTubeWatchUrl } = require('../utils/youtubeUrl');
 const {
@@ -623,6 +624,18 @@ function buildAdvancedCommentInsights(commentIntelligence) {
   };
 }
 
+
+function toObjectId(value) {
+  const id = clean(value);
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+}
+
+function shouldPersistReport(payload = {}) {
+  if (payload.saveReport === false || payload.persist === false || payload.shouldSave === false) return false;
+  if (clean(payload.mode).toLowerCase() === 'public' || clean(payload.sourceContext).toLowerCase() === 'public_insight_os') return false;
+  return true;
+}
+
 async function createInsightReport({ actor = {}, payload = {} }) {
   const input = buildYoutubeOnlyInput(payload);
   const videoId = extractYouTubeVideoId(input.videoUrl);
@@ -678,8 +691,13 @@ async function createInsightReport({ actor = {}, payload = {} }) {
   });
   const aiSummary = { ...aiInsights };
 
-  const report = await YoutubeInsightReport.create({
+  const brandObjectId = toObjectId(payload.brandId || actor.brandId);
+  const persistReport = shouldPersistReport(payload);
+
+  const reportPayload = {
     userId: actor.userId || null,
+    brandId: brandObjectId,
+    brandName: clean(payload.brandName || actor.brandName),
     createdByAdminId: actor.adminId || null,
     createdByAdminName: actor.name || '',
     createdByAdminEmail: actor.email || '',
@@ -688,6 +706,7 @@ async function createInsightReport({ actor = {}, payload = {} }) {
     platform: 'YouTube',
     reportStatus: 'Published',
     sourceType: 'public_youtube_link',
+    sourceContext: clean(payload.sourceContext) || (persistReport ? 'brand_insight_os' : 'public_insight_os'),
     videoUrl,
     videoId,
     hero: {
@@ -755,7 +774,23 @@ async function createInsightReport({ actor = {}, payload = {} }) {
       commentTabs: commentIntelligence.commentTabs,
       openAiRaw: aiInsights.source === 'openai' ? { model: aiInsights._rawModel || '' } : null
     }
-  });
+    };
+
+
+  if (!persistReport) {
+    const previewReport = {
+      ...reportPayload,
+      _id: null,
+      reportId: '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    previewReport.chartData = buildChartData(previewReport);
+    previewReport.dashboard = buildYoutubeInsightDashboard(previewReport);
+    return previewReport;
+  }
+
+  const report = await YoutubeInsightReport.create(reportPayload);
 
   report.chartData = buildChartData(report);
   report.dashboard = buildYoutubeInsightDashboard(report);
