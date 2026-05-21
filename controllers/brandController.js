@@ -6,7 +6,25 @@ const OpenAI = require("openai");
 const BrandInfo = require("../models/brandInfo");
 const BrandModelImport = require("../models/brand");
 const BrandCoupon = require("../models/brandCoupon");
+const { BrandFolderModel } = require("../models/brandFolder");
+let PitchFolderForBrandGoodFit = null;
+try {
+  const PitchFolderImport = require("../models/pitchFolder");
+  PitchFolderForBrandGoodFit =
+    PitchFolderImport.PitchFolder ||
+    PitchFolderImport.PitchFolderModel ||
+    PitchFolderImport.default ||
+    PitchFolderImport;
+} catch {
+  PitchFolderForBrandGoodFit = null;
+}
 const VerifyOtpModelImport = require("../models/verifyOtp");
+let BrandCampaignModelImport = null;
+try {
+  BrandCampaignModelImport = require("../models/campaign");
+} catch {
+  BrandCampaignModelImport = null;
+}
 const OtpTemplateImport = require("../template/otpTemplate");
 const ResetOtpTemplateImport = require("../template/resetOtp");
 const EmailServiceImport = require("../services/emailService");
@@ -27,6 +45,12 @@ const VerifyOtpModel =
   VerifyOtpModelImport.VerifyOtpModel ||
   VerifyOtpModelImport.default ||
   VerifyOtpModelImport;
+
+const BrandCampaignModel =
+  BrandCampaignModelImport?.CampaignModel ||
+  BrandCampaignModelImport?.Campaign ||
+  BrandCampaignModelImport?.default ||
+  BrandCampaignModelImport;
 
 const buildOtpEmailTemplate =
   OtpTemplateImport.buildOtpEmailTemplate ||
@@ -1983,6 +2007,1518 @@ async function getbookmarkProfile(req, res) {
 }
 
 
+
+/* -------------------------------------------------------------------------- */
+/*                         Brand-owned folder controllers                      */
+/* -------------------------------------------------------------------------- */
+
+const folderCleanStr = (value) =>
+  value === undefined || value === null ? "" : String(value).trim();
+
+function folderToObjectId(value) {
+  const id = folderCleanStr(value);
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+}
+
+function folderSlugify(value) {
+  return folderCleanStr(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function getFolderAuthedBrandId(req = {}) {
+  return folderCleanStr(
+    req.brand?._id ||
+      req.brand?.id ||
+      req.brand?.brandId ||
+      req.brandId ||
+      req.user?.brandId ||
+      req.user?.brand?._id ||
+      req.user?.brand?.id ||
+      req.user?._id ||
+      req.user?.id ||
+      req.auth?.brandId
+  );
+}
+
+function getFolderRequestedBrandId(req = {}) {
+  return folderCleanStr(
+    req.query?.brandId ||
+      req.body?.brandId ||
+      req.params?.brandId ||
+      getFolderAuthedBrandId(req)
+  );
+}
+
+function normalizeBrandFolderKind(value = "all") {
+  const raw = folderCleanStr(value).toLowerCase();
+
+  if (!raw || raw === "all") return "all";
+
+  if (
+    ["folder", "folders", "pitch_sheet", "pitchsheet", "manual"].includes(raw)
+  ) {
+    return "folder";
+  }
+
+  if (["bookmark", "bookmarks", "bookmarked"].includes(raw)) {
+    return "bookmark";
+  }
+
+  if (["good_fit", "good-fit", "goodfit", "saved"].includes(raw)) {
+    return "good_fit";
+  }
+
+  return "folder";
+}
+
+function buildBrandScopedFolderFilter(brandId) {
+  const id = folderCleanStr(brandId);
+  const objectId = folderToObjectId(id);
+
+  const brandOr = [{ brandId: id }];
+
+  if (objectId) {
+    brandOr.push({ brandId: objectId }, { brandRef: objectId });
+  }
+
+  return {
+    archivedAt: null,
+    $or: brandOr,
+  };
+}
+
+function brandFolderSearchMatches(folder = {}, search = "") {
+  const q = folderCleanStr(search).toLowerCase();
+  if (!q) return true;
+
+  return [
+    folder.title,
+    folder.name,
+    folder.slug,
+    folder.description,
+    folder.type,
+    folder.creatorTier,
+    folder.linkedCampaign?.campaignTitle,
+    folder.linkedCampaign?.productOrServiceName,
+    folder.linkedCampaign?.campaignsId,
+    folder.linkedCampaign?.brandName,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(q);
+}
+
+function brandFolderMatchesCampaign(folder = {}, campaignId = "") {
+  const id = folderCleanStr(campaignId);
+  if (!id) return true;
+
+  const linked = folder.linkedCampaign || {};
+
+  return [
+    linked.campaignId,
+    linked.campaignsId,
+    linked._id,
+    folder.campaignId,
+    folder.campaignsId,
+  ]
+    .map((value) => folderCleanStr(value))
+    .filter(Boolean)
+    .includes(id);
+}
+
+function serializeBrandFolderCard(folder = {}) {
+  const itemCount = Array.isArray(folder.items)
+    ? folder.items.length
+    : Number(folder.itemCount || 0);
+
+  return {
+    _id: String(folder._id),
+    id: String(folder._id),
+
+    brandId: folderCleanStr(folder.brandId),
+    brandName: folderCleanStr(folder.brandName),
+
+    title: folderCleanStr(folder.title || folder.name),
+    name: folderCleanStr(folder.name || folder.title),
+    slug: folderCleanStr(folder.slug),
+    description: folderCleanStr(folder.description),
+
+    type: folderCleanStr(folder.type || "folder"),
+    creatorTier: folderCleanStr(folder.creatorTier),
+
+    linkedCampaign: folder.linkedCampaign || null,
+
+    itemCount,
+    isDefault: !!folder.isDefault,
+
+    createdAt: folder.createdAt || null,
+    updatedAt: folder.updatedAt || null,
+    archivedAt: folder.archivedAt || null,
+  };
+}
+
+function serializeBrandFolderDetail(folder = {}) {
+  return {
+    ...serializeBrandFolderCard(folder),
+    items: Array.isArray(folder.items) ? folder.items : [],
+  };
+}
+
+async function buildUniqueBrandFolderSlug(brandId, title, excludeId = null) {
+  const base = folderSlugify(title) || "folder";
+  let slug = base;
+  let counter = 2;
+
+  while (true) {
+    const filter = {
+      ...buildBrandScopedFolderFilter(brandId),
+      slug,
+    };
+
+    if (excludeId && mongoose.Types.ObjectId.isValid(String(excludeId))) {
+      filter._id = { $ne: new mongoose.Types.ObjectId(String(excludeId)) };
+    }
+
+    const existing = await BrandFolderModel.findOne(filter).select("_id").lean();
+
+    if (!existing) return slug;
+
+    slug = `${base}-${counter}`;
+    counter += 1;
+  }
+}
+
+function getBrandFolderProfileKey(item = {}) {
+  const id = folderCleanStr(
+    item.profileKey ||
+      item.influencerId ||
+      item.creatorId ||
+      item.userId ||
+      item.modashId ||
+      item._id ||
+      item.id
+  );
+
+  if (id) return id.startsWith("id:") ? id : `id:${id}`;
+
+  const email = folderCleanStr(item.email).toLowerCase();
+  if (email) return `email:${email}`;
+
+  const link = folderCleanStr(item.primaryLink || item.profileUrl || item.url || item.links?.[0])
+    .toLowerCase()
+    .replace(/\/+$/, "");
+
+  if (link) return `link:${link}`;
+
+  const handle = folderCleanStr(item.handle || item.username || item.userName)
+    .toLowerCase()
+    .replace(/^@+/, "");
+
+  const provider = folderCleanStr(item.provider || item.platform).toLowerCase();
+
+  if (handle || provider) return `handle:${provider}:${handle}`;
+
+  const name = folderCleanStr(item.name || item.fullname || item.fullName).toLowerCase();
+
+  return name ? `name:${name}:${provider}` : "";
+}
+
+function normalizeBrandFolderItem(rawItem = {}, status = "saved") {
+  const categories = Array.isArray(rawItem.categories)
+    ? rawItem.categories
+    : Array.isArray(rawItem.niche)
+      ? rawItem.niche
+      : rawItem.category
+        ? [rawItem.category]
+        : rawItem.niche
+          ? [rawItem.niche]
+          : [];
+
+  const primaryLink = folderCleanStr(
+    rawItem.primaryLink || rawItem.profileUrl || rawItem.url || rawItem.links?.[0]
+  );
+
+  const picture = folderCleanStr(
+    rawItem.picture ||
+      rawItem.avatarUrl ||
+      rawItem.profileImage ||
+      rawItem.profilePicture ||
+      rawItem.image ||
+      rawItem.thumbnail ||
+      rawItem.avatar ||
+      rawItem.profilePicUrl
+  );
+
+  return {
+    profileKey: getBrandFolderProfileKey(rawItem),
+
+    influencerId: folderCleanStr(
+      rawItem.influencerId || rawItem.creatorId || rawItem.userId || rawItem._id || rawItem.id
+    ),
+    creatorId: folderCleanStr(rawItem.creatorId || rawItem.influencerId || rawItem.userId || rawItem._id || rawItem.id),
+    userId: folderCleanStr(rawItem.userId || rawItem.influencerId || rawItem.creatorId || rawItem._id || rawItem.id),
+    modashId: folderCleanStr(rawItem.modashId),
+
+    name: folderCleanStr(rawItem.name || rawItem.fullname || rawItem.fullName || rawItem.username),
+    fullname: folderCleanStr(rawItem.fullname || rawItem.fullName || rawItem.name),
+    username: folderCleanStr(rawItem.username || rawItem.userName || rawItem.handle),
+    handle: folderCleanStr(rawItem.handle || rawItem.username || rawItem.userName),
+
+    email: folderCleanStr(rawItem.email).toLowerCase(),
+
+    provider: folderCleanStr(rawItem.provider || rawItem.platform),
+    platform: folderCleanStr(rawItem.platform || rawItem.provider),
+
+    country: folderCleanStr(rawItem.country),
+    language: folderCleanStr(rawItem.language),
+    location: folderCleanStr(rawItem.location || rawItem.country),
+
+    categories,
+    niche: categories,
+
+    followers: Number.isFinite(Number(rawItem.followers)) ? Number(rawItem.followers) : null,
+    engagements: Number.isFinite(Number(rawItem.engagements)) ? Number(rawItem.engagements) : null,
+    engagementRate: Number.isFinite(Number(rawItem.engagementRate)) ? Number(rawItem.engagementRate) : null,
+    averageViews: Number.isFinite(Number(rawItem.averageViews)) ? Number(rawItem.averageViews) : null,
+
+    primaryLink,
+    profileUrl: folderCleanStr(rawItem.profileUrl || primaryLink),
+    url: folderCleanStr(rawItem.url || primaryLink),
+    links: Array.isArray(rawItem.links)
+      ? rawItem.links.map(folderCleanStr).filter(Boolean)
+      : primaryLink
+        ? [primaryLink]
+        : [],
+
+    picture,
+    avatarUrl: folderCleanStr(rawItem.avatarUrl || picture),
+    profileImage: folderCleanStr(rawItem.profileImage || picture),
+
+    status,
+    raw: rawItem,
+
+    addedAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+async function findBrandFolderCampaignSnapshot(campaignId, brandId) {
+  const id = folderCleanStr(campaignId);
+
+  if (!id) return null;
+
+  if (!BrandCampaignModel || typeof BrandCampaignModel.findOne !== "function") {
+    return {
+      campaignId: id,
+      campaignsId: id,
+      campaignTitle: id,
+      productOrServiceName: "",
+      brandId,
+      brandName: "",
+    };
+  }
+
+  const campaignOr = [{ campaignsId: id }];
+
+  const objectId = folderToObjectId(id);
+  if (objectId) campaignOr.push({ _id: objectId });
+
+  const campaign = await BrandCampaignModel.findOne({ $or: campaignOr }).lean();
+
+  if (!campaign) return null;
+
+  const requestedBrandId = folderCleanStr(brandId);
+  const campaignBrandId = folderCleanStr(campaign.brandId);
+
+  if (requestedBrandId && campaignBrandId && campaignBrandId !== requestedBrandId) {
+    const brandObjectId = folderToObjectId(requestedBrandId);
+
+    if (!brandObjectId || String(campaign.brandId) !== String(brandObjectId)) {
+      return null;
+    }
+  }
+
+  return {
+    campaignId: campaign._id ? String(campaign._id) : id,
+    campaignsId: folderCleanStr(campaign.campaignsId),
+    campaignTitle: folderCleanStr(
+      campaign.campaignTitle ||
+        campaign.title ||
+        campaign.name ||
+        campaign.productOrServiceName
+    ),
+    productOrServiceName: folderCleanStr(campaign.productOrServiceName),
+    brandId: campaign.brandId ? String(campaign.brandId) : requestedBrandId,
+    brandName: folderCleanStr(campaign.brandName),
+  };
+}
+
+async function getOrCreateBrandDefaultFolder({ brandId, type, title, req }) {
+  let folder = await BrandFolderModel.findOne({
+    ...buildBrandScopedFolderFilter(brandId),
+    type,
+    isDefault: true,
+  });
+
+  if (folder) return folder;
+
+  const slug = await buildUniqueBrandFolderSlug(brandId, title);
+
+  return BrandFolderModel.create({
+    brandId,
+    brandRef: folderToObjectId(brandId),
+    brandName: folderCleanStr(req?.brand?.name || req?.body?.brandName),
+    title,
+    name: title,
+    slug,
+    description: "",
+    type,
+    creatorTier: "",
+    linkedCampaign: null,
+    items: [],
+    itemCount: 0,
+    isDefault: true,
+    createdByBrand: req?.brand?._id || req?.brand?.id || brandId,
+    archivedAt: null,
+  });
+}
+
+function upsertProfilesIntoBrandFolder(folder, profiles) {
+  const existingKeys = new Set(
+    (folder.items || []).map((item) => item.profileKey).filter(Boolean)
+  );
+
+  let added = 0;
+  let skipped = 0;
+
+  profiles.forEach((profile) => {
+    const key = profile.profileKey;
+
+    if (!key || existingKeys.has(key)) {
+      skipped += 1;
+      return;
+    }
+
+    existingKeys.add(key);
+    folder.items.push(profile);
+    added += 1;
+  });
+
+  folder.itemCount = folder.items.length;
+  folder.updatedAt = new Date();
+
+  return { added, skipped };
+}
+
+
+function campaignValueMatches(left, right) {
+  const a = folderCleanStr(left);
+  const b = folderCleanStr(right);
+  return Boolean(a && b && a === b);
+}
+
+function buildAssignedCampaignLookupValues(rawCampaignId, campaign = {}) {
+  return [
+    rawCampaignId,
+    campaign._id ? String(campaign._id) : "",
+    campaign.id,
+    campaign.campaignId,
+    campaign.campaignsId,
+  ]
+    .map(folderCleanStr)
+    .filter(Boolean);
+}
+
+function brandFolderCampaignMatches(folderCampaign = {}, lookupValues = []) {
+  if (!lookupValues.length) return false;
+
+  const values = [
+    folderCampaign.campaignId,
+    folderCampaign._id,
+    folderCampaign.id,
+    folderCampaign.campaignsId,
+  ].map(folderCleanStr);
+
+  return values.some((value) => lookupValues.includes(value));
+}
+
+function pitchFolderMatchesBrandForGoodFit(folder = {}, brandId = "") {
+  const wanted = folderCleanStr(brandId);
+  if (!wanted) return false;
+
+  return [
+    folder.brandId,
+    folder.brandRef,
+    folder.brand?._id,
+    folder.brand?.id,
+    folder.assignedCampaign?.brandId,
+    folder.assignedCampaign?.brandRef,
+  ]
+    .map(folderCleanStr)
+    .some((value) => value === wanted);
+}
+
+function pitchFolderMatchesCampaignForGoodFit(folder = {}, lookupValues = []) {
+  if (!lookupValues.length) return false;
+
+  const assignedCampaign = folder.assignedCampaign || {};
+
+  return brandFolderCampaignMatches(assignedCampaign, lookupValues);
+}
+
+function getCampaignDisplayNameForBrandFolder(campaign = {}) {
+  return (
+    folderCleanStr(
+      campaign.campaignTitle ||
+        campaign.productOrServiceName ||
+        campaign.title ||
+        campaign.name ||
+        campaign.campaignsId
+    ) || "Campaign"
+  );
+}
+
+function isTruthyFullyManagedValue(value) {
+  if (value === true) return true;
+
+  const text = folderCleanStr(value).toLowerCase();
+
+  if (!text) return false;
+
+  if (["true", "1", "yes", "y"].includes(text)) return true;
+
+  return [
+    "fully_managed",
+    "fully-managed",
+    "fully managed",
+    "full_managed",
+    "full-managed",
+    "full managed",
+    "fullymanaged",
+    "fullmanaged",
+    "managed",
+    "done_for_you",
+    "done-for-you",
+    "done for you",
+    "doneforyou",
+    "admin_review",
+    "admin-review",
+    "admin review",
+  ].includes(text);
+}
+
+function isFullyManagedCampaign(campaign = {}) {
+  if (!campaign || typeof campaign !== "object") return false;
+
+  if (isTruthyFullyManagedValue(campaign.isFullyManaged)) return true;
+  if (isTruthyFullyManagedValue(campaign.fullyManaged)) return true;
+  if (isTruthyFullyManagedValue(campaign.isFullManaged)) return true;
+  if (isTruthyFullyManagedValue(campaign.fullManaged)) return true;
+  if (isTruthyFullyManagedValue(campaign.managedByAdmin)) return true;
+  if (isTruthyFullyManagedValue(campaign.isAdminCreated)) return true;
+
+  const createdByRole = folderCleanStr(
+    campaign.createdBy?.role ||
+      campaign.createdByRole ||
+      campaign.createdByType ||
+      campaign.ownerRole
+  ).toLowerCase();
+
+  if (createdByRole === "admin" || createdByRole === "master") return true;
+
+  if (isTruthyFullyManagedValue(campaign.approvalMode)) return true;
+
+  const values = [
+    campaign.campaignType,
+    campaign.type,
+    campaign.planType,
+    campaign.planName,
+    campaign.campaignPlan,
+    campaign.managementType,
+    campaign.serviceType,
+    campaign.workflowType,
+    campaign.mode,
+    campaign.source,
+    campaign.creatorManagement,
+    campaign.packageType,
+    campaign.packageName,
+    campaign.subscriptionPlan,
+  ];
+
+  return values.some(isTruthyFullyManagedValue);
+}
+
+function buildBrandCampaignPayload(campaign = {}, brandId = "") {
+  return {
+    campaignId: campaign._id ? String(campaign._id) : folderCleanStr(campaign.campaignId),
+    campaignsId: folderCleanStr(campaign.campaignsId),
+    campaignTitle: folderCleanStr(
+      campaign.campaignTitle ||
+        campaign.title ||
+        campaign.name ||
+        campaign.productOrServiceName
+    ),
+    productOrServiceName: folderCleanStr(campaign.productOrServiceName),
+    brandId: campaign.brandId ? String(campaign.brandId) : folderCleanStr(brandId),
+    brandName: folderCleanStr(campaign.brandName),
+    assignedAt: campaign.assignedAt || null,
+  };
+}
+
+async function findBrandCampaignByAnyId(campaignId, brandId) {
+  const id = folderCleanStr(campaignId);
+
+  if (!id || !BrandCampaignModel || typeof BrandCampaignModel.findOne !== "function") {
+    return null;
+  }
+
+  const lookupOr = [{ campaignsId: id }, { campaignId: id }, { id }];
+
+  const objectId = folderToObjectId(id);
+  if (objectId) lookupOr.push({ _id: objectId });
+
+  const campaign = await BrandCampaignModel.findOne({ $or: lookupOr }).lean();
+
+  if (!campaign) return null;
+
+  const requestedBrandId = folderCleanStr(brandId);
+  const campaignBrandId = folderCleanStr(campaign.brandId);
+
+  if (requestedBrandId && campaignBrandId && campaignBrandId !== requestedBrandId) {
+    const brandObjectId = folderToObjectId(requestedBrandId);
+
+    if (!brandObjectId || String(campaign.brandId) !== String(brandObjectId)) {
+      return null;
+    }
+  }
+
+  return campaign;
+}
+
+async function findPitchFoldersForBrandCampaignGoodFit(rawCampaignId, campaign, brandId) {
+  const lookupValues = buildAssignedCampaignLookupValues(rawCampaignId, campaign);
+
+  if (!PitchFolderForBrandGoodFit || typeof PitchFolderForBrandGoodFit.find !== "function") {
+    return [];
+  }
+
+  const candidateOr = [];
+
+  lookupValues.forEach((value) => {
+    candidateOr.push(
+      { "assignedCampaign.campaignId": value },
+      { "assignedCampaign.campaignsId": value },
+      { "assignedCampaign._id": value },
+      { "assignedCampaign.id": value }
+    );
+
+    const objectId = folderToObjectId(value);
+    if (objectId) {
+      candidateOr.push(
+        { "assignedCampaign.campaignId": objectId },
+        { "assignedCampaign._id": objectId }
+      );
+    }
+  });
+
+  const docs = await PitchFolderForBrandGoodFit.find({
+    archivedAt: null,
+    "items.goodFit": true,
+    ...(candidateOr.length ? { $or: candidateOr } : {}),
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  return docs.filter((folder) => {
+    return (
+      pitchFolderMatchesCampaignForGoodFit(folder, lookupValues) &&
+      pitchFolderMatchesBrandForGoodFit(folder, brandId)
+    );
+  });
+}
+
+async function findPitchFoldersForBrandCampaign(rawCampaignId, campaign, brandId) {
+  const lookupValues = buildAssignedCampaignLookupValues(rawCampaignId, campaign);
+
+  if (!PitchFolderForBrandGoodFit || typeof PitchFolderForBrandGoodFit.find !== "function") {
+    return [];
+  }
+
+  const candidateOr = [];
+
+  lookupValues.forEach((value) => {
+    candidateOr.push(
+      { "assignedCampaign.campaignId": value },
+      { "assignedCampaign.campaignsId": value },
+      { "assignedCampaign._id": value },
+      { "assignedCampaign.id": value }
+    );
+
+    const objectId = folderToObjectId(value);
+    if (objectId) {
+      candidateOr.push(
+        { "assignedCampaign.campaignId": objectId },
+        { "assignedCampaign._id": objectId }
+      );
+    }
+  });
+
+  const docs = await PitchFolderForBrandGoodFit.find({
+    archivedAt: null,
+    ...(candidateOr.length ? { $or: candidateOr } : {}),
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  return docs.filter((folder) => {
+    return (
+      pitchFolderMatchesCampaignForGoodFit(folder, lookupValues) &&
+      pitchFolderMatchesBrandForGoodFit(folder, brandId)
+    );
+  });
+}
+
+
+function normalizePitchGoodFitItemForBrandFolder(item = {}, source = {}, campaignPayload = {}) {
+  const raw = item.raw && typeof item.raw === "object" ? item.raw : item;
+  const normalized = normalizeBrandFolderItem(
+    {
+      ...raw,
+      ...item,
+      status: "good_fit",
+      goodFit: true,
+      campaignId: campaignPayload.campaignId,
+      campaignsId: campaignPayload.campaignsId,
+      campaignTitle: campaignPayload.campaignTitle,
+      pitchFolderId: source.pitchFolderId,
+      pitchFolderTitle: source.pitchFolderTitle,
+      pitchItemId: source.pitchItemId,
+    },
+    "good_fit"
+  );
+
+  normalized.source = {
+    source: "fully_managed_pitch_good_fit",
+    pitchFolderId: source.pitchFolderId,
+    pitchFolderTitle: source.pitchFolderTitle,
+    pitchItemId: source.pitchItemId,
+    campaignId: campaignPayload.campaignId,
+    campaignsId: campaignPayload.campaignsId,
+    campaignTitle: campaignPayload.campaignTitle,
+    importedAt: new Date(),
+  };
+
+  normalized.status = "good_fit";
+  normalized.raw = {
+    ...raw,
+    ...item,
+    goodFit: true,
+    source: normalized.source,
+  };
+
+  return normalized;
+}
+
+async function getOrCreateCampaignBrandFolder({ brandId, campaign, campaignPayload, req }) {
+  const title = getCampaignDisplayNameForBrandFolder(campaign);
+  const linkedCampaign = campaignPayload;
+  const lookupValues = buildAssignedCampaignLookupValues(campaignPayload.campaignId, {
+    ...campaign,
+    campaignId: campaignPayload.campaignId,
+    campaignsId: campaignPayload.campaignsId,
+  });
+
+  const existingFolders = await BrandFolderModel.find({
+    ...buildBrandScopedFolderFilter(brandId),
+    type: "folder",
+  });
+
+  const existing = existingFolders.find((folder) => {
+    if (folder.isDefault) return false;
+
+    const linked = folder.linkedCampaign || {};
+
+    if (brandFolderCampaignMatches(linked, lookupValues)) return true;
+
+    const folderTitle = folderCleanStr(folder.title || folder.name).toLowerCase();
+    return folderTitle && folderTitle === title.toLowerCase();
+  });
+
+  if (existing) {
+    if (!existing.linkedCampaign || !existing.linkedCampaign.campaignId) {
+      existing.linkedCampaign = linkedCampaign;
+    }
+    return existing;
+  }
+
+  const slug = await buildUniqueBrandFolderSlug(brandId, title);
+
+  return BrandFolderModel.create({
+    title,
+    name: title,
+    slug,
+    description: "",
+    brandId,
+    brandRef: folderToObjectId(brandId),
+    brandName: folderCleanStr(req?.brand?.name || campaignPayload.brandName),
+    type: "folder",
+    creatorTier: "Fully Managed",
+    linkedCampaign,
+    items: [],
+    itemCount: 0,
+    isDefault: false,
+    createdByBrand: req?.brand?._id || req?.brand?.id || brandId,
+    archivedAt: null,
+  });
+}
+
+async function importFullyManagedCampaignGoodFitToBrandFolder({
+  req,
+  brandId,
+  rawCampaignId,
+}) {
+  const campaign = await findBrandCampaignByAnyId(rawCampaignId, brandId);
+
+  if (!campaign) {
+    return {
+      statusCode: 404,
+      body: {
+        success: false,
+        error: "Campaign not found",
+      },
+    };
+  }
+
+  const campaignPayload = buildBrandCampaignPayload(campaign, brandId);
+  const pitchFolders = await findPitchFoldersForBrandCampaignGoodFit(
+    rawCampaignId,
+    campaign,
+    brandId
+  );
+
+  const assignedPitchFolders = pitchFolders.length
+    ? pitchFolders
+    : await findPitchFoldersForBrandCampaign(rawCampaignId, campaign, brandId);
+
+  if (!isFullyManagedCampaign(campaign) && !assignedPitchFolders.length) {
+    return {
+      statusCode: 400,
+      body: {
+        success: false,
+        error:
+          "Only fully managed campaigns assigned to pitch folders can save good-fit creators",
+      },
+    };
+  }
+
+  const brandFolder = await getOrCreateCampaignBrandFolder({
+    brandId,
+    campaign,
+    campaignPayload,
+    req,
+  });
+
+  const uniqueProfileMap = new Map();
+
+  pitchFolders.forEach((pitchFolder) => {
+    const items = Array.isArray(pitchFolder.items) ? pitchFolder.items : [];
+
+    items
+      .filter((item) => item?.goodFit === true)
+      .forEach((item) => {
+        const source = {
+          pitchFolderId: String(pitchFolder._id || ""),
+          pitchFolderTitle: folderCleanStr(pitchFolder.title || pitchFolder.name),
+          pitchItemId: String(item._id || item.id || ""),
+        };
+
+        const normalized = normalizePitchGoodFitItemForBrandFolder(
+          item,
+          source,
+          campaignPayload
+        );
+
+        if (!normalized.profileKey) return;
+
+        if (!uniqueProfileMap.has(normalized.profileKey)) {
+          uniqueProfileMap.set(normalized.profileKey, normalized);
+        }
+      });
+  });
+
+  const profiles = Array.from(uniqueProfileMap.values());
+  const result = upsertProfilesIntoBrandFolder(brandFolder, profiles);
+
+  if (result.added || !brandFolder.isNew) {
+    brandFolder.itemCount = brandFolder.items.length;
+    await brandFolder.save();
+  }
+
+  const folderPayload = serializeBrandFolderDetail(brandFolder.toObject());
+
+  return {
+    statusCode: 200,
+    body: {
+      success: true,
+      message: profiles.length
+        ? "Campaign good fit influencers synced into brand folder"
+        : "Brand folder created, but no good fit influencers were found yet",
+      data: {
+        campaign: campaignPayload,
+        folder: folderPayload,
+        totalFolderCount: 1,
+        totalCampaignCount: 1,
+        totalGoodFitCount: brandFolder.items.length,
+        importedGoodFitCount: profiles.length,
+        addedCount: result.added,
+        skippedCount: result.skipped,
+        campaigns: [campaignPayload],
+        folders: [folderPayload],
+        items: folderPayload.items,
+      },
+    },
+  };
+}
+
+
+function findPitchFolderItemById(pitchFolders = [], itemId = "") {
+  const wanted = folderCleanStr(itemId);
+
+  if (!wanted) return null;
+
+  for (const pitchFolder of pitchFolders) {
+    const items = Array.isArray(pitchFolder.items) ? pitchFolder.items : [];
+
+    for (const item of items) {
+      const candidateIds = [
+        item?._id,
+        item?.id,
+        item?.itemId,
+        item?.profileKey,
+        item?.influencerId,
+        item?.creatorId,
+        item?.userId,
+        item?.modashId,
+      ]
+        .map(folderCleanStr)
+        .filter(Boolean);
+
+      if (candidateIds.includes(wanted)) {
+        return {
+          pitchFolder,
+          item,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function saveCampaignGoodFitItem(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+    const rawCampaignId = folderCleanStr(req.params?.campaignId || req.body?.campaignId);
+    const rawItemId = folderCleanStr(req.params?.itemId || req.body?.itemId);
+    const payloadProfile =
+      req.body?.profile ||
+      req.body?.influencer ||
+      req.body?.creator ||
+      req.body?.item ||
+      null;
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    if (!rawCampaignId) {
+      return res.status(400).json({
+        success: false,
+        error: "campaignId is required",
+      });
+    }
+
+    if (!rawItemId && !payloadProfile) {
+      return res.status(400).json({
+        success: false,
+        error: "itemId or profile payload is required",
+      });
+    }
+
+    const campaign = await findBrandCampaignByAnyId(rawCampaignId, brandId);
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        error: "Campaign not found",
+      });
+    }
+
+    const campaignPayload = buildBrandCampaignPayload(campaign, brandId);
+
+    const assignedPitchFolders = await findPitchFoldersForBrandCampaign(
+      rawCampaignId,
+      campaign,
+      brandId
+    );
+
+    if (!isFullyManagedCampaign(campaign) && !assignedPitchFolders.length) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Only fully managed campaigns assigned to pitch folders can save good-fit creators",
+      });
+    }
+
+    const match = rawItemId
+      ? findPitchFolderItemById(assignedPitchFolders, rawItemId)
+      : null;
+
+    const pitchFolder = match?.pitchFolder || null;
+    const item = match?.item || payloadProfile;
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        error: "Creator payload was not found",
+      });
+    }
+
+    const brandFolder = await getOrCreateCampaignBrandFolder({
+      brandId,
+      campaign,
+      campaignPayload,
+      req,
+    });
+
+    const source = {
+      pitchFolderId: String(
+        pitchFolder?._id ||
+          payloadProfile?.pitchFolderId ||
+          req.body?.pitchFolderId ||
+          ""
+      ),
+      pitchFolderTitle: folderCleanStr(
+        pitchFolder?.title ||
+          pitchFolder?.name ||
+          payloadProfile?.pitchFolderTitle ||
+          req.body?.pitchFolderTitle
+      ),
+      pitchItemId: String(item._id || item.id || rawItemId || ""),
+    };
+
+    const normalized = normalizePitchGoodFitItemForBrandFolder(
+      {
+        ...item,
+        ...payloadProfile,
+        goodFit: true,
+      },
+      source,
+      campaignPayload
+    );
+
+    const result = normalized.profileKey
+      ? upsertProfilesIntoBrandFolder(brandFolder, [normalized])
+      : { added: 0, skipped: 0 };
+
+    brandFolder.itemCount = brandFolder.items.length;
+    await brandFolder.save();
+
+    const folderPayload = serializeBrandFolderDetail(brandFolder.toObject());
+
+    return res.status(result.added ? 201 : 200).json({
+      success: true,
+      message: result.added
+        ? "Creator saved to campaign brand folder"
+        : "Creator already exists in campaign brand folder",
+      data: {
+        campaign: campaignPayload,
+        folder: folderPayload,
+        item: normalized,
+        addedCount: result.added,
+        skippedCount: result.skipped,
+        saved: true,
+      },
+    });
+  } catch (err) {
+    console.error("[saveCampaignGoodFitItem] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+
+async function getCampaignGoodFitList(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+    const rawCampaignId = folderCleanStr(req.params?.campaignId || req.query?.campaignId);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    if (!rawCampaignId) {
+      return res.status(400).json({
+        success: false,
+        error: "campaignId is required",
+      });
+    }
+
+    const result = await importFullyManagedCampaignGoodFitToBrandFolder({
+      req,
+      brandId,
+      rawCampaignId,
+    });
+
+    return res.status(result.statusCode).json(result.body);
+  } catch (err) {
+    console.error("[getCampaignGoodFitList] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+
+async function getFolderList(req, res) {
+  try {
+    const authedBrandId = getFolderAuthedBrandId(req);
+    const brandId = getFolderRequestedBrandId(req) || authedBrandId;
+
+    if (!authedBrandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const folderKind = normalizeBrandFolderKind(
+      req.query?.type || req.query?.folderType || "all"
+    );
+
+    const search = folderCleanStr(req.query?.search || req.query?.q);
+    const campaignId = folderCleanStr(req.query?.campaignId);
+
+    const hasItemsOnly = ["1", "true", "yes", "on"].includes(
+      folderCleanStr(
+        req.query?.hasItems ||
+          req.query?.onlyWithItems ||
+          req.query?.hasInfluencers
+      ).toLowerCase()
+    );
+
+    const includeItems = ["1", "true", "yes", "on"].includes(
+      folderCleanStr(req.query?.includeItems).toLowerCase()
+    );
+
+    const includeFolders = folderKind === "all" || folderKind === "folder";
+    const includeBookmarks = folderKind === "all" || folderKind === "bookmark";
+    const includeGoodFit = folderKind === "all" || folderKind === "good_fit";
+
+    const baseFilter = buildBrandScopedFolderFilter(brandId);
+
+    if (folderKind !== "all") {
+      baseFilter.type = folderKind;
+    }
+
+    const docs = await BrandFolderModel.find(baseFilter)
+      .sort({ isDefault: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    const cards = docs
+      .filter((folder) => brandFolderMatchesCampaign(folder, campaignId))
+      .filter((folder) => brandFolderSearchMatches(folder, search))
+      .filter((folder) => {
+        if (!hasItemsOnly) return true;
+
+        const count = Array.isArray(folder.items)
+          ? folder.items.length
+          : Number(folder.itemCount || 0);
+
+        return count > 0;
+      })
+      .map(includeItems ? serializeBrandFolderDetail : serializeBrandFolderCard);
+
+    const normalFolders = includeFolders
+      ? cards.filter((folder) => folder.type === "folder")
+      : [];
+
+    const bookmarkFolders = includeBookmarks
+      ? cards.filter((folder) => folder.type === "bookmark")
+      : [];
+
+    const goodFitFolders = includeGoodFit
+      ? cards.filter((folder) => folder.type === "good_fit")
+      : [];
+
+    const folders = [...normalFolders, ...bookmarkFolders, ...goodFitFolders];
+
+    return res.json({
+      success: true,
+      message: "Folders fetched successfully",
+      data: {
+        totalCount: folders.length,
+        folderCount: normalFolders.length,
+        bookmarkCount: bookmarkFolders.length,
+        goodFitCount: goodFitFolders.length,
+
+        folders,
+
+        groups: {
+          folders: normalFolders,
+          bookmarks: bookmarkFolders,
+          goodFit: goodFitFolders,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("[getFolderList] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+async function createFolder(req, res) {
+  try {
+    const authedBrandId = getFolderAuthedBrandId(req);
+
+    if (!authedBrandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const body = req.body || {};
+    const brandId = authedBrandId;
+    const brandRef = folderToObjectId(brandId);
+
+    const requestedFolderKind = normalizeBrandFolderKind(
+      body.type || body.folderType || body.kind || "folder"
+    );
+
+    const type = requestedFolderKind === "all" ? "folder" : requestedFolderKind;
+
+    const title = folderCleanStr(body.title || body.name);
+
+    if (!title) {
+      return res.status(400).json({
+        success: false,
+        error: "title is required",
+      });
+    }
+
+    const description = folderCleanStr(body.description);
+    const campaignId = folderCleanStr(body.campaignId || body.campaignsId);
+
+    const linkedCampaign = campaignId
+      ? await findBrandFolderCampaignSnapshot(campaignId, brandId)
+      : null;
+
+    if (campaignId && !linkedCampaign) {
+      return res.status(404).json({
+        success: false,
+        error: "Campaign not found for this brand",
+      });
+    }
+
+    const slug = await buildUniqueBrandFolderSlug(brandId, title);
+
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    const initialItems = [];
+    const seenInitialKeys = new Set();
+
+    for (const rawItem of rawItems) {
+      const normalizedItem = normalizeBrandFolderItem(rawItem, "saved");
+      const itemKey = normalizedItem.profileKey;
+
+      if (!itemKey || seenInitialKeys.has(itemKey)) continue;
+
+      seenInitialKeys.add(itemKey);
+      initialItems.push(normalizedItem);
+    }
+
+    const doc = await BrandFolderModel.create({
+      title,
+      name: title,
+      slug,
+      description,
+
+      brandId,
+      brandRef,
+      brandName: folderCleanStr(body.brandName || req.brand?.name),
+
+      type,
+      creatorTier: folderCleanStr(body.creatorTier || body.tier),
+
+      linkedCampaign,
+
+      items: initialItems,
+      itemCount: initialItems.length,
+
+      isDefault: false,
+      createdByBrand: req.brand?._id || req.brand?.id || brandId,
+      archivedAt: null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Folder created successfully",
+      data: serializeBrandFolderDetail(doc.toObject()),
+    });
+  } catch (err) {
+    console.error("[createFolder] Error:", err);
+
+    const duplicate = err?.code === 11000;
+
+    return res.status(duplicate ? 409 : 500).json({
+      success: false,
+      error: duplicate
+        ? "A folder with this name already exists"
+        : err?.message || "Internal error",
+    });
+  }
+}
+
+async function saveGoodFitInfluencer(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const incomingProfiles = Array.isArray(req.body?.profiles)
+      ? req.body.profiles
+      : Array.isArray(req.body?.influencers)
+        ? req.body.influencers
+        : req.body?.profile
+          ? [req.body.profile]
+          : req.body?.influencer
+            ? [req.body.influencer]
+            : [req.body];
+
+    const profiles = incomingProfiles
+      .filter(Boolean)
+      .map((item) => {
+        const normalized = normalizeBrandFolderItem(item, "good_fit");
+        normalized.source = {
+          source: folderCleanStr(item.source || req.body.source || "brand_good_fit"),
+          pitchFolderId: folderCleanStr(item.pitchFolderId || req.body.pitchFolderId),
+          pitchFolderTitle: folderCleanStr(item.pitchFolderTitle || req.body.pitchFolderTitle),
+          pitchItemId: folderCleanStr(item.pitchItemId || req.body.pitchItemId),
+          campaignId: folderCleanStr(item.campaignId || req.body.campaignId),
+          campaignsId: folderCleanStr(item.campaignsId || req.body.campaignsId),
+          campaignTitle: folderCleanStr(item.campaignTitle || req.body.campaignTitle),
+          importedAt: new Date(),
+        };
+        return normalized;
+      })
+      .filter((item) => item.profileKey);
+
+    if (!profiles.length) {
+      return res.status(400).json({
+        success: false,
+        error: "At least one influencer profile is required",
+      });
+    }
+
+    const folder = await getOrCreateBrandDefaultFolder({
+      brandId,
+      type: "good_fit",
+      title: "Good Fit Influencers",
+      req,
+    });
+
+    const result = upsertProfilesIntoBrandFolder(folder, profiles);
+    await folder.save();
+
+    return res.status(result.added ? 201 : 200).json({
+      success: true,
+      message: result.added
+        ? "Good fit influencer saved successfully"
+        : "Good fit influencer already exists",
+      data: {
+        folder: serializeBrandFolderDetail(folder.toObject()),
+        addedCount: result.added,
+        skippedCount: result.skipped,
+        savedKeys: folder.items.map((item) => item.profileKey).filter(Boolean),
+      },
+    });
+  } catch (err) {
+    console.error("[saveGoodFitInfluencer] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+async function getGoodFitInfluencers(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const folder = await BrandFolderModel.findOne({
+      ...buildBrandScopedFolderFilter(brandId),
+      type: "good_fit",
+      isDefault: true,
+    }).lean();
+
+    const items = Array.isArray(folder?.items) ? folder.items : [];
+
+    return res.status(200).json({
+      success: true,
+      message: "Good fit influencers fetched successfully",
+      data: {
+        folder: folder ? serializeBrandFolderCard(folder) : null,
+        totalCount: items.length,
+        savedKeys: items.map((item) => item.profileKey).filter(Boolean),
+        items,
+      },
+    });
+  } catch (err) {
+    console.error("[getGoodFitInfluencers] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+/* Brand bookmark compatibility now uses BrandFolder, not the old BookmarkFolder model. */
+async function addbookmarkProfile(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const incomingProfiles = Array.isArray(req.body?.profiles)
+      ? req.body.profiles
+      : Array.isArray(req.body?.influencers)
+        ? req.body.influencers
+        : req.body?.profile
+          ? [req.body.profile]
+          : req.body?.influencer
+            ? [req.body.influencer]
+            : [req.body];
+
+    const profiles = incomingProfiles
+      .filter(Boolean)
+      .map((item) => normalizeBrandFolderItem(item, "bookmarked"))
+      .filter((item) => item.profileKey);
+
+    if (!profiles.length) {
+      return res.status(400).json({
+        success: false,
+        error: "At least one influencer profile is required",
+      });
+    }
+
+    const folder = await getOrCreateBrandDefaultFolder({
+      brandId,
+      type: "bookmark",
+      title: "bookmarked",
+      req,
+    });
+
+    const result = upsertProfilesIntoBrandFolder(folder, profiles);
+    await folder.save();
+
+    return res.status(result.added ? 201 : 200).json({
+      success: true,
+      message: result.added
+        ? "Profile bookmarked successfully"
+        : "Profile already exists in bookmarked folder",
+      data: {
+        folder: serializeBrandFolderDetail(folder.toObject()),
+        addedCount: result.added,
+        skippedCount: result.skipped,
+        savedKeys: folder.items.map((item) => item.profileKey).filter(Boolean),
+      },
+    });
+  } catch (err) {
+    console.error("[addbookmarkProfile] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
+async function getbookmarkProfile(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const folder = await BrandFolderModel.findOne({
+      ...buildBrandScopedFolderFilter(brandId),
+      type: "bookmark",
+      isDefault: true,
+    }).lean();
+
+    const items = Array.isArray(folder?.items) ? folder.items : [];
+
+    return res.status(200).json({
+      success: true,
+      message: "Bookmarked profiles fetched successfully",
+      data: {
+        folder: folder ? serializeBrandFolderCard(folder) : null,
+        totalCount: items.length,
+        savedKeys: items.map((item) => item.profileKey).filter(Boolean),
+        items,
+      },
+    });
+  } catch (err) {
+    console.error("[getbookmarkProfile] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
+
 module.exports = {
   sendSignupOtp,
   verifyOtpSignUp,
@@ -1997,6 +3533,12 @@ module.exports = {
   getBrandProfile,
   updateBrandProfile,
   verifyBrandCoupon,
+  getGoodFitInfluencers,
+  getCampaignGoodFitList,
+  saveCampaignGoodFitItem,
+  saveGoodFitInfluencer,
+  createFolder,
+  getFolderList,
   addbookmarkProfile,
   getbookmarkProfile,
 };
