@@ -5032,7 +5032,6 @@ exports.getCampaignsByBrandId = async (req, res) => {
           $or: [
             { status: "scheduled" },
             {
-              status: { $exists: false },
               scheduledAt: { $ne: null },
               isActive: { $ne: 1 },
               isDraft: { $ne: 1 },
@@ -5044,7 +5043,6 @@ exports.getCampaignsByBrandId = async (req, res) => {
           $or: [
             { status: "active" },
             {
-              status: { $exists: false },
               isActive: 1,
               isDraft: { $ne: 1 },
             },
@@ -5055,20 +5053,6 @@ exports.getCampaignsByBrandId = async (req, res) => {
           status: normalizedStatus,
         });
       }
-    } else {
-      andFilters.push({
-        $or: [
-          { status: { $in: ["draft", "scheduled", "active", "paused", "completed"] } },
-          { isDraft: 1 },
-          { isActive: 1 },
-          {
-            status: { $exists: false },
-            scheduledAt: { $ne: null },
-            isActive: { $ne: 1 },
-            isDraft: { $ne: 1 },
-          },
-        ],
-      });
     }
 
     const searchOr = buildDisputeCampaignSearchOr(search);
