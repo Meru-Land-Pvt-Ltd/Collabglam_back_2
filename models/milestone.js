@@ -162,6 +162,7 @@ const deliverableSchema = new Schema(
       default: 1,
       min: 1,
     },
+
     deliverableLinks: {
       type: [deliverableLinkSchema],
       default: [],
@@ -241,12 +242,33 @@ const milestoneHistorySchema = new Schema(
       index: true,
     },
 
-    // Not required, because old milestoneHistory rows may not have it.
+    // Optional because admin-created milestones do not use contract.
     contractId: {
       type: String,
       default: "",
       trim: true,
       index: true,
+    },
+    adminId: {
+      type: Schema.Types.ObjectId,
+      ref: "Master",
+      default: null,
+      index: true,
+    },
+
+    createdByRole: {
+      type: String,
+      enum: ["brand", "admin", ""],
+      default: "brand",
+      trim: true,
+      index: true,
+    },
+
+    createdByModel: {
+      type: String,
+      enum: ["Brand", "Master", "Admin", ""],
+      default: "",
+      trim: true,
     },
 
     milestoneTitle: {
@@ -261,7 +283,6 @@ const milestoneHistorySchema = new Schema(
       trim: true,
     },
 
-    // Not required, because old milestoneHistory rows may not have it.
     milestoneBudget: {
       type: Number,
       default: 0,
@@ -275,7 +296,6 @@ const milestoneHistorySchema = new Schema(
       min: 0,
     },
 
-    // Optional
     attachments: {
       type: [attachmentSchema],
       default: [],
@@ -296,14 +316,12 @@ const milestoneHistorySchema = new Schema(
       default: null,
     },
 
-    // Optional
     graceDays: {
       type: Number,
       default: 0,
       min: 0,
     },
 
-    // Optional
     submissionLink: {
       type: String,
       default: "",
@@ -315,14 +333,13 @@ const milestoneHistorySchema = new Schema(
       default: false,
     },
 
-    // Optional unless needDraftFirst is true.
     draftDate: {
       type: Date,
       default: null,
     },
 
     // 0 = influencer has not accepted milestone
-    // 1 = influencer accepted milestone, brand cannot edit
+    // 1 = influencer accepted milestone, brand/admin cannot edit locked flows
     isAccepted: {
       type: Number,
       enum: [0, 1],
@@ -344,6 +361,7 @@ const milestoneHistorySchema = new Schema(
       type: String,
       enum: ["pending", "initiated", "paid"],
       default: "pending",
+      index: true,
     },
 
     paidAt: {
@@ -383,18 +401,34 @@ const milestoneSchema = new Schema(
 );
 
 milestoneSchema.index({ brandId: 1, createdAt: -1 });
+
 milestoneSchema.index({
   "milestoneHistory.influencerId": 1,
   "milestoneHistory.campaignId": 1,
 });
+
 milestoneSchema.index({
   "milestoneHistory.contractId": 1,
 });
+
+milestoneSchema.index({
+  "milestoneHistory.adminId": 1,
+});
+
+milestoneSchema.index({
+  "milestoneHistory.createdByRole": 1,
+});
+
 milestoneSchema.index({
   "milestoneHistory.deliverables._id": 1,
 });
+
 milestoneSchema.index({
   "milestoneHistory.isAccepted": 1,
+});
+
+milestoneSchema.index({
+  "milestoneHistory.payoutStatus": 1,
 });
 
 milestoneSchema.index({
