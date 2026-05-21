@@ -128,10 +128,12 @@ function addOptionalFilters(filter, input = {}) {
       { 'creatorInsights.primaryCategory': search }
     ];
   }
-  if (input.fromDate || input.toDate) {
+  const fromDate = input.fromDate || input.startDate;
+  const toDate = input.toDate || input.endDate;
+  if (fromDate || toDate) {
     filter.createdAt = {};
-    if (input.fromDate) filter.createdAt.$gte = new Date(input.fromDate);
-    if (input.toDate) filter.createdAt.$lte = new Date(input.toDate);
+    if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+    if (toDate) filter.createdAt.$lte = new Date(toDate);
   }
   return filter;
 }
@@ -240,7 +242,7 @@ async function getYoutubeInsightReports(req, res, next) {
     const skip = (page - 1) * limit;
     const sortBy = clean(input.sortBy) || 'createdAt';
     const sortOrder = clean(input.sortOrder).toLowerCase() === 'asc' ? 1 : -1;
-    const allowedSorts = new Set(['createdAt', 'updatedAt', 'videoId', 'videoMetrics.viewCount', 'videoMetrics.likeCount', 'videoMetrics.commentCount', 'videoMetrics.engagementRate', 'channelMetrics.subscriberCount', 'channelMetrics.totalViewCount', 'aiScores.finalAiScore', 'creatorInsights.primaryCategory']);
+    const allowedSorts = new Set(['createdAt', 'updatedAt', 'videoId', 'hero.influencerName', 'videoMetrics.title', 'videoMetrics.viewCount', 'videoMetrics.likeCount', 'videoMetrics.commentCount', 'videoMetrics.engagementRate', 'channelMetrics.subscriberCount', 'channelMetrics.totalViewCount', 'aiScores.finalAiScore', 'creatorInsights.primaryCategory']);
     const filter = addOptionalFilters(buildAccessFilter(req), input);
     const sort = { [allowedSorts.has(sortBy) ? sortBy : 'createdAt']: sortOrder };
     const [items, total] = await Promise.all([
