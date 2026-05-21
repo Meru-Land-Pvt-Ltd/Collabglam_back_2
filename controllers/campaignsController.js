@@ -5261,6 +5261,117 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
 };
 //edit draft campaign - only allows updating certain fields, and only if campaign is still in draft mode
 
+function cleanImageString(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function getImageKeyFromUrl(url) {
+  const s = cleanImageString(url);
+  if (!s) return "";
+  return s.split("/campaign-images/")[1] || s.split("/").pop() || "";
+}
+
+function isBase64Image(value) {
+  const s = cleanImageString(value);
+  return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(s);
+}
+
+function normalizeAlreadyUploadedProductImage(item) {
+  if (!item) return null;
+
+  if (typeof item === "string") {
+    const url = cleanImageString(item);
+    if (!url) return null;
+
+    if (isValidHttpUrl(url)) {
+      const key = getImageKeyFromUrl(url);
+      return {
+        dataUrl: url,
+        key,
+        name: key || "Campaign image",
+        type: "image/jpeg",
+        contentType: "image/jpeg",
+        originalSize: 0,
+        size: 0,
+      };
+    }
+
+    return null;
+  }
+
+  if (typeof item !== "object") return null;
+
+  const url = cleanImageString(
+    item.dataUrl ||
+      item.url ||
+      item.Location ||
+      item.location ||
+      item.secure_url ||
+      item.s3Url
+  );
+
+  if (!url || !isValidHttpUrl(url)) return null;
+
+  const key = cleanImageString(item.key) || getImageKeyFromUrl(url);
+  const contentType = cleanImageString(item.contentType || item.type) || "image/jpeg";
+  const size = Number(item.size || item.originalSize || 0) || 0;
+
+  return {
+    dataUrl: url,
+    key,
+    name: cleanImageString(item.name) || key || "Campaign image",
+    type: cleanImageString(item.type) || contentType,
+    contentType,
+    originalSize: Number(item.originalSize || item.size || 0) || size,
+    size,
+  };
+}
+
+async function normalizeProductImagesForDraft(productImages) {
+  const list = Array.isArray(productImages)
+    ? productImages
+    : productImages
+      ? [productImages]
+      : [];
+
+  const alreadyUploaded = [];
+  const base64Images = [];
+
+  for (const item of list) {
+    const raw =
+      typeof item === "string"
+        ? cleanImageString(item)
+        : item && typeof item === "object"
+          ? cleanImageString(
+              item.dataUrl ||
+                item.url ||
+                item.Location ||
+                item.location ||
+                item.secure_url ||
+                item.s3Url
+            )
+          : "";
+
+    if (!raw) continue;
+
+    if (isBase64Image(raw)) {
+      base64Images.push(raw);
+      continue;
+    }
+
+    const normalized = normalizeAlreadyUploadedProductImage(item);
+    if (normalized) alreadyUploaded.push(normalized);
+  }
+
+  let uploadedFromBase64 = [];
+  if (base64Images.length) {
+    uploadedFromBase64 = await normalizeAndUploadProductImages(base64Images);
+  }
+
+  return [...alreadyUploaded, ...uploadedFromBase64];
+}
+
 exports.editDraftCampaign = async (req, res) => {
   const requestId = getRequestId(req);
 
@@ -5361,8 +5472,11 @@ exports.editDraftCampaign = async (req, res) => {
     setOrUnsetString("additionalNotes", req.body.additionalNotes);
 
     // product images
+    // Frontend already uploads files to S3 first and sends productImages as
+    // objects like { dataUrl: "https://...s3...", name, type, key, size }.
+    // Do not re-upload or reject these objects here. Save the S3 URL metadata directly.
     if (req.body.productImages !== undefined) {
-      const imgs = await normalizeAndUploadProductImages(req.body.productImages);
+      const imgs = await normalizeProductImagesForDraft(req.body.productImages);
 
       if (!imgs.length) {
         update.$unset.productImages = 1;
