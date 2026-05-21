@@ -39,4 +39,5 @@ router.get("/conversations/:id", emailController.getConversationForCurrentInflue
 // Welcome email
 router.post("/send-welcome", welcomeEmailController.sendWelcomeEmail);
 
+router.get("/participants", emailController.getEmailParticipants);
 module.exports = router;
