@@ -2205,16 +2205,16 @@ const FULLY_MANAGED_CAMPAIGN_TEXT_MARKERS = [
 function getAuthedBrandIdForCampaignDropdown(req = {}) {
   return clean(
     req.brand?._id ||
-      req.brand?.id ||
-      req.brand?.brandId ||
-      req.brandId ||
-      req.user?.brandId ||
-      req.user?.brand?._id ||
-      req.user?.brand?.id ||
-      req.user?._id ||
-      req.user?.id ||
-      req.auth?.brandId ||
-      req.query?.brandId
+    req.brand?.id ||
+    req.brand?.brandId ||
+    req.brandId ||
+    req.user?.brandId ||
+    req.user?.brand?._id ||
+    req.user?.brand?.id ||
+    req.user?._id ||
+    req.user?.id ||
+    req.auth?.brandId ||
+    req.query?.brandId
   );
 }
 
@@ -6331,9 +6331,9 @@ exports.getInfluencerListByCampaignId = async (req, res) => {
     for (const contract of contractDocs) {
       const id = String(
         contract.influencerId ||
-          contract.influencer?._id ||
-          contract.influencer?.influencerId ||
-          ""
+        contract.influencer?._id ||
+        contract.influencer?.influencerId ||
+        ""
       ).trim();
 
       if (!id) continue;
@@ -6818,10 +6818,10 @@ exports.getInfluencerMatchScore = async (req, res) => {
       campaignPlatforms.length > 0
         ? influencerPlatforms.length > 0
           ? Math.round(
-              (campaignPlatforms.filter((item) => influencerPlatforms.includes(item)).length /
-                campaignPlatforms.length) *
-                100
-            )
+            (campaignPlatforms.filter((item) => influencerPlatforms.includes(item)).length /
+              campaignPlatforms.length) *
+            100
+          )
           : 0
         : null;
 
@@ -6831,14 +6831,14 @@ exports.getInfluencerMatchScore = async (req, res) => {
 
     const campaignCountryDocs = campaignCountryIds.length
       ? await Country.find({
-          _id: {
-            $in: campaignCountryIds
-              .filter((id) => isOid(id))
-              .map((id) => toObjectId(id)),
-          },
-        })
-          .select("_id countryNameEn countryNameLocal countryName name countryCode")
-          .lean()
+        _id: {
+          $in: campaignCountryIds
+            .filter((id) => isOid(id))
+            .map((id) => toObjectId(id)),
+        },
+      })
+        .select("_id countryNameEn countryNameLocal countryName name countryCode")
+        .lean()
       : [];
 
     const campaignCountries = uniq(
@@ -6873,14 +6873,14 @@ exports.getInfluencerMatchScore = async (req, res) => {
 
     const campaignLanguageDocs = campaignLanguageIds.length
       ? await ContentLanguage.find({
-          _id: {
-            $in: campaignLanguageIds
-              .filter((id) => isOid(id))
-              .map((id) => toObjectId(id)),
-          },
-        })
-          .select("_id code name")
-          .lean()
+        _id: {
+          $in: campaignLanguageIds
+            .filter((id) => isOid(id))
+            .map((id) => toObjectId(id)),
+        },
+      })
+        .select("_id code name")
+        .lean()
       : [];
 
     const campaignLanguages = uniq(
@@ -7042,14 +7042,14 @@ exports.getInfluencerMatchScore = async (req, res) => {
           category:
             categoryScore > 0
               ? uniq(campaignCategoryNames).filter((item) =>
-                  scoreTextMatch([item], [...influencerCategoryNames, ...influencerInterestNames])
-                )
+                scoreTextMatch([item], [...influencerCategoryNames, ...influencerInterestNames])
+              )
               : [],
           subcategory:
             subcategoryScore > 0
               ? uniq(campaignSubcategoryNames).filter((item) =>
-                  scoreTextMatch([item], [...influencerSubcategoryNames, ...influencerInterestNames])
-                )
+                scoreTextMatch([item], [...influencerSubcategoryNames, ...influencerInterestNames])
+              )
               : [],
           platform: campaignPlatforms.filter((item) =>
             influencerPlatforms.includes(item)
