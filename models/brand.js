@@ -88,6 +88,48 @@ const brandSchema = new Schema(
       trim: true,
     },
 
+    pocContact: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    website: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    companyDetails: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    timeZone: {
+      type: String,
+      default: "GMT+5:30 Indian standard time",
+      trim: true,
+    },
+
+    currencyFormat: {
+      type: String,
+      default: "$ Dollars",
+      trim: true,
+    },
+
+    region: {
+      type: String,
+      default: "All",
+      trim: true,
+    },
+
+    preferredLanguage: {
+      type: String,
+      default: "English",
+      trim: true,
+    },
+
     industry: {
       type: String,
       required: [
