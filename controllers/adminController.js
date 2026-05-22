@@ -981,7 +981,87 @@ function buildCampaignBaseFilter({ search, statusFlag, brandKeys, requestedBrand
   return filter;
 }
 
+async function buildFullyManagedCampaignOrFilter() {
+  const histories = await BrandAssignedPlanHistory.find({
+    $or: [
+      { planId: FULLY_MANAGED_PLAN_ID },
+      { newPlanName: /fully managed/i },
+      { newPlanName: /full managed/i },
+    ],
+    status: { $ne: "cancelled" },
+  })
+    .select("brandId planId newPlanName startedAt expiresAt createdAt")
+    .lean();
+
+  const historyCampaignFilters = histories
+    .map((history) => {
+      if (!history?.brandId) return null;
+
+      const startedAt = history.startedAt || history.createdAt;
+      if (!startedAt) return null;
+
+      const createdAt = {
+        $gte: new Date(startedAt),
+      };
+
+      if (history.expiresAt) {
+        createdAt.$lte = new Date(history.expiresAt);
+      }
+
+      const brandIds = [String(history.brandId)];
+
+      if (mongoose.Types.ObjectId.isValid(String(history.brandId))) {
+        brandIds.push(new mongoose.Types.ObjectId(String(history.brandId)));
+      }
+
+      return {
+        brandId: { $in: brandIds },
+        createdAt,
+      };
+    })
+    .filter(Boolean);
+
+  return [
+    // Admin-created campaign = fully managed
+    { "createdBy.role": "admin" },
+    { "createdBy.userModel": "Master" },
+    { approvalMode: "admin_review" },
+
+    // New snapshot fields for future/current campaigns
+    { brandWasFullyManagedAtCreation: true },
+    { "brandSubscriptionSnapshot.wasFullyManaged": true },
+    { isFullyManaged: true },
+    { managementType: "fully_managed" },
+
+    // Old campaigns fallback using Fully Managed assigned-plan history window
+    ...historyCampaignFilters,
+  ];
+}
+
+async function applyFullyManagedCampaignFilter(filter) {
+  const fullyManagedOrFilter = await buildFullyManagedCampaignOrFilter();
+
+  if (!fullyManagedOrFilter.length) {
+    filter._id = { $in: [] };
+    return filter;
+  }
+
+  filter.$and = Array.isArray(filter.$and) ? filter.$and : [];
+  filter.$and.push({ $or: fullyManagedOrFilter });
+
+  return filter;
+}
+
 function toCampaignSummary(doc = {}) {
+  const fullyManaged =
+    String(doc.createdBy?.role || "").toLowerCase() === "admin" ||
+    String(doc.createdBy?.userModel || "").toLowerCase() === "master" ||
+    String(doc.approvalMode || "").toLowerCase() === "admin_review" ||
+    Boolean(doc.isFullyManaged) ||
+    Boolean(doc.brandWasFullyManagedAtCreation) ||
+    Boolean(doc.brandSubscriptionSnapshot?.wasFullyManaged) ||
+    String(doc.managementType || "").toLowerCase() === "fully_managed";
+
   return {
     _id: doc._id,
     brandId: doc.brandId || "",
@@ -999,6 +1079,13 @@ function toCampaignSummary(doc = {}) {
     campaignStatus: doc.campaignStatus || "",
     byAi: Number(doc.byAi || 0),
     createdByAdmin: doc.createdByAdmin || null,
+
+    brandPlanId: doc.brandPlanId || "",
+    fullyManaged,
+    isFullyManaged: fullyManaged,
+    managementType: fullyManaged ? "fully_managed" : "self_serve",
+    brandWasFullyManagedAtCreation: Boolean(doc.brandWasFullyManagedAtCreation),
+    brandSubscriptionSnapshot: doc.brandSubscriptionSnapshot || null,
 
     assignedRh: doc.assignedRh || "",
     assignedBme: doc.assignedBme || "",
@@ -1501,7 +1588,7 @@ exports.getAllBrands = async (req, res) => {
     }
 
     const rawBrands = await Brand.find(brandQuery)
-      .select("-password -__v")
+      .select("-password -__v -profilePic")
       .lean();
 
     const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
@@ -1648,7 +1735,6 @@ exports.getAllCampaigns = async (req, res) => {
     const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
     const statusFlag = Number.parseInt(req.body?.type, 10) || 0;
     const brandId = String(req.body?.brandId || "").trim();
-
     const actor = req.admin || {};
     const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
 
@@ -2802,6 +2888,71 @@ exports.getAllCampaignsLite = async (req, res) => {
   } catch (error) {
     console.error("Error in getAllCampaignsLite:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getFullyManagedCampaignsLite = async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.body?.page, 1);
+    const limit = parsePositiveInt(req.body?.limit, 10, { min: 1, max: 1000 });
+    const search = String(req.body?.search || "").trim();
+    const sortBy = String(req.body?.sortBy || "createdAt").trim();
+    const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
+    const statusFlag = Number.parseInt(req.body?.type, 10) || 0;
+    const brandId = String(req.body?.brandId || "").trim();
+
+    const actor = req.admin || {};
+    const scopedAccess = await getScopedCampaignAccessForAdmin(actor);
+
+    const filter = buildCampaignBaseFilter({
+      search,
+      statusFlag,
+      brandKeys: scopedAccess.brandKeys,
+      requestedBrandId: brandId,
+    });
+
+    if (Array.isArray(scopedAccess.campaignIds)) {
+      filter._id = { $in: scopedAccess.campaignIds };
+    }
+
+    await applyFullyManagedCampaignFilter(filter);
+
+    const field = getCampaignSortField(sortBy);
+    const dir = sortOrder === "asc" ? 1 : -1;
+
+    const total = await Campaign.countDocuments(filter);
+
+    const rows = await Campaign.find(filter)
+      .select(
+        "_id brandId brandName campaignsId campaignTitle productOrServiceName goal budget applicantCount isActive isDraft byAi createdBy approvalMode campaignStatus timeline.startDate timeline.endDate createdAt brandWasFullyManagedAtCreation brandSubscriptionSnapshot isFullyManaged managementType"
+      )
+      .sort({ [field]: dir, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    const rowsWithCreators = await enrichLiteCampaignCreatedBy(rows);
+    const rowsWithBrandMeta = await enrichLiteCampaignBrandMeta(rowsWithCreators);
+    const rowsWithAssignments = await enrichLiteCampaignAssignments(rowsWithBrandMeta);
+    const campaigns = rowsWithAssignments.map(toCampaignSummary);
+
+    return res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      status: statusFlag,
+      sortBy,
+      sortOrder,
+      campaigns,
+    });
+  } catch (error) {
+    console.error("Error in getFullyManagedCampaignsLite:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
   }
 };
 

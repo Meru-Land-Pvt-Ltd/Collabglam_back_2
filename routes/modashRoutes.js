@@ -24,12 +24,4 @@ router.get("/media-kit-link", ModashController.getMediaKitLink);
 router.post("/creator", ModashController.upsertCreator);
 router.get("/creator/:userId", ModashController.getCreatorByUserId);
 router.get("/locations", ModashController.getModashLocations);
-
-router.post(
-  "/recommended-by-campaign",
-  ModashController.getRecommendedInfluencersForCampaign
-);
-
-router.post("/rate-card/suggested", ModashController.getSuggestedRateCard);
-
 module.exports = router;
