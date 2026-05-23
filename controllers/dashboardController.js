@@ -494,13 +494,13 @@ exports.getBrandDashboardHome = async (req, res) => {
     const [activeInfluencerDocs, modashProfiles] = await Promise.all([
       activeInfluencerObjectIds.length
         ? Influencer.find({
-            $or: [
-              { _id: { $in: activeInfluencerObjectIds } },
-              { influencerId: { $in: activeInfluencerIds } },
-            ],
-          })
-            .select(
-              `
+          $or: [
+            { _id: { $in: activeInfluencerObjectIds } },
+            { influencerId: { $in: activeInfluencerIds } },
+          ],
+        })
+          .select(
+            `
                 _id
                 influencerId
                 name
@@ -521,17 +521,17 @@ exports.getBrandDashboardHome = async (req, res) => {
                 photo
                 photoUrl
               `
-            )
-            .lean()
+          )
+          .lean()
         : [],
 
       activeInfluencerIds.length
         ? Modash.find({
-            $or: [
-              { influencerId: { $in: activeInfluencerIds } },
-              { influencer: { $in: activeInfluencerObjectIds } },
-            ],
-          }).lean()
+          $or: [
+            { influencerId: { $in: activeInfluencerIds } },
+            { influencer: { $in: activeInfluencerObjectIds } },
+          ],
+        }).lean()
         : [],
     ]);
 
@@ -1285,7 +1285,7 @@ const dashGetBrandsList = async (req, options = {}) => {
   }
 
   const brands = await Brand.find(filter)
-    .select("-password -__v")
+    .select("-password -__v -profilePic")
     .sort({ [field]: dir, createdAt: -1 })
     .lean();
 
@@ -2636,8 +2636,6 @@ exports.getDashboard = async (req, res) => {
       });
     }
 
-    // For now: Super Admin gets all combined details.
-    // Other roles are safe and will not crash.
     if (role !== DASH_ROLES.SUPER_ADMIN) {
       return res.status(200).json({
         success: true,
@@ -3051,8 +3049,8 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
     const brands = brandObjectIds.length
       ? await Brand.find({ _id: { $in: brandObjectIds } })
-          .select("-password -__v")
-          .lean()
+        .select("-password -__v -profilePic")
+        .lean()
       : [];
 
     const brandMap = new Map(
@@ -3105,26 +3103,26 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
         brand: brand
           ? {
-              ...brand,
-              _id: String(brand._id || ""),
-              brandId: String(brand._id || ""),
-              brandName: rhDashGetBrandDisplayName(brand),
-              planName:
-                brand.subscription?.planName ||
-                brand.planName ||
-                brand.plan ||
-                "free",
-              fullyManagedSubscription: isFullyManaged,
-              isFullyManaged,
-            }
+            ...brand,
+            _id: String(brand._id || ""),
+            brandId: String(brand._id || ""),
+            brandName: rhDashGetBrandDisplayName(brand),
+            planName:
+              brand.subscription?.planName ||
+              brand.planName ||
+              brand.plan ||
+              "free",
+            fullyManagedSubscription: isFullyManaged,
+            isFullyManaged,
+          }
           : {
-              _id: brandId,
-              brandId,
-              brandName: "",
-              planName: "",
-              fullyManagedSubscription: isFullyManaged,
-              isFullyManaged,
-            },
+            _id: brandId,
+            brandId,
+            brandName: "",
+            planName: "",
+            fullyManagedSubscription: isFullyManaged,
+            isFullyManaged,
+          },
       };
     });
 
@@ -3161,8 +3159,8 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
     const applyRows = campaignKeys.length
       ? await ApplyCampaign.find({ campaignId: { $in: campaignKeys } })
-          .select("campaignId applicants approved createdAt updatedAt")
-          .lean()
+        .select("campaignId applicants approved createdAt updatedAt")
+        .lean()
       : [];
 
     const influencerIds = [
@@ -3183,13 +3181,13 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
     const influencers = influencerObjectIds.length
       ? await Influencer.find({
-          $or: [
-            { _id: { $in: influencerObjectIds } },
-            { influencerId: { $in: influencerIds } },
-          ],
-        })
-          .select("_id influencerId name email proxyEmail countryName")
-          .lean()
+        $or: [
+          { _id: { $in: influencerObjectIds } },
+          { influencerId: { $in: influencerIds } },
+        ],
+      })
+        .select("_id influencerId name email proxyEmail countryName")
+        .lean()
       : [];
 
     const influencerMap = new Map();
@@ -3279,12 +3277,12 @@ exports.getRevenueHeadDetails = async (req, res) => {
 
         brand: brand
           ? {
-              _id: String(brand._id || ""),
-              brandId: String(brand._id || ""),
-              brandName: rhDashGetBrandDisplayName(brand),
-              email: brand.email || "",
-              plan: rhDashGetBrandPlan(brand),
-            }
+            _id: String(brand._id || ""),
+            brandId: String(brand._id || ""),
+            brandName: rhDashGetBrandDisplayName(brand),
+            email: brand.email || "",
+            plan: rhDashGetBrandPlan(brand),
+          }
           : null,
 
         applicantCount:

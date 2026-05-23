@@ -1678,22 +1678,22 @@ const bookmarkCleanStr = (value) => String(value || "").trim();
 const getBookmarkBrandIdFromReq = (req) => {
   return bookmarkCleanStr(
     req.brand?._id ||
-      req.brand?.id ||
-      req.user?.brandId ||
-      req.user?._id ||
-      req.user?.id ||
-      req.body?.brandId ||
-      req.query?.brandId
+    req.brand?.id ||
+    req.user?.brandId ||
+    req.user?._id ||
+    req.user?.id ||
+    req.body?.brandId ||
+    req.query?.brandId
   );
 };
 
 const getBookmarkProfileKey = (item = {}) => {
   const influencerId = bookmarkCleanStr(
     item.influencerId ||
-      item.creatorId ||
-      item.userId ||
-      item.modashId ||
-      item._id
+    item.creatorId ||
+    item.userId ||
+    item.modashId ||
+    item._id
   );
 
   if (influencerId) return `id:${influencerId}`;
@@ -1738,12 +1738,12 @@ async function addbookmarkProfile(req, res) {
     const incomingProfiles = Array.isArray(req.body?.profiles)
       ? req.body.profiles
       : Array.isArray(req.body?.influencers)
-      ? req.body.influencers
-      : req.body?.profile
-      ? [req.body.profile]
-      : req.body?.influencer
-      ? [req.body.influencer]
-      : [req.body];
+        ? req.body.influencers
+        : req.body?.profile
+          ? [req.body.profile]
+          : req.body?.influencer
+            ? [req.body.influencer]
+            : [req.body];
 
     const profiles = incomingProfiles
       .filter(Boolean)
@@ -1754,24 +1754,24 @@ async function addbookmarkProfile(req, res) {
 
         const avatar = bookmarkCleanStr(
           item.picture ||
-            item.avatarUrl ||
-            item.profileImage ||
-            item.profilePicture ||
-            item.image ||
-            item.thumbnail ||
-            item.avatar ||
-            item.profilePicUrl
+          item.avatarUrl ||
+          item.profileImage ||
+          item.profilePicture ||
+          item.image ||
+          item.thumbnail ||
+          item.avatar ||
+          item.profilePicUrl
         );
 
         const categories = Array.isArray(item.categories)
           ? item.categories
           : Array.isArray(item.niche)
-          ? item.niche
-          : item.category
-          ? [item.category]
-          : item.niche
-          ? [item.niche]
-          : [];
+            ? item.niche
+            : item.category
+              ? [item.category]
+              : item.niche
+                ? [item.niche]
+                : [];
 
         const profile = {
           influencerId: bookmarkCleanStr(
@@ -1814,8 +1814,8 @@ async function addbookmarkProfile(req, res) {
           links: Array.isArray(item.links)
             ? item.links.filter(Boolean).map(bookmarkCleanStr)
             : primaryLink
-            ? [primaryLink]
-            : [],
+              ? [primaryLink]
+              : [],
 
           picture: avatar,
           avatarUrl: bookmarkCleanStr(item.avatarUrl || avatar),
@@ -1885,8 +1885,8 @@ async function addbookmarkProfile(req, res) {
     const existingItems = Array.isArray(folder.items)
       ? folder.items
       : Array.isArray(folder.bookmarks)
-      ? folder.bookmarks
-      : [];
+        ? folder.bookmarks
+        : [];
 
     const existingKeys = new Set(
       existingItems
@@ -1963,8 +1963,8 @@ async function getbookmarkProfile(req, res) {
       ? Array.isArray(folder.items)
         ? folder.items
         : Array.isArray(folder.bookmarks)
-        ? folder.bookmarks
-        : []
+          ? folder.bookmarks
+          : []
       : [];
 
     const savedKeys = Array.from(
@@ -1981,15 +1981,15 @@ async function getbookmarkProfile(req, res) {
       data: {
         folder: folder
           ? {
-              _id: String(folder._id),
-              name: folder.name,
-              title: folder.title || folder.name,
-              slug: folder.slug,
-              description: folder.description || "",
-              itemCount: items.length,
-              createdAt: folder.createdAt,
-              updatedAt: folder.updatedAt,
-            }
+            _id: String(folder._id),
+            name: folder.name,
+            title: folder.title || folder.name,
+            slug: folder.slug,
+            description: folder.description || "",
+            itemCount: items.length,
+            createdAt: folder.createdAt,
+            updatedAt: folder.updatedAt,
+          }
           : null,
         totalCount: items.length,
         savedKeys,
@@ -2030,24 +2030,24 @@ function folderSlugify(value) {
 function getFolderAuthedBrandId(req = {}) {
   return folderCleanStr(
     req.brand?._id ||
-      req.brand?.id ||
-      req.brand?.brandId ||
-      req.brandId ||
-      req.user?.brandId ||
-      req.user?.brand?._id ||
-      req.user?.brand?.id ||
-      req.user?._id ||
-      req.user?.id ||
-      req.auth?.brandId
+    req.brand?.id ||
+    req.brand?.brandId ||
+    req.brandId ||
+    req.user?.brandId ||
+    req.user?.brand?._id ||
+    req.user?.brand?.id ||
+    req.user?._id ||
+    req.user?.id ||
+    req.auth?.brandId
   );
 }
 
 function getFolderRequestedBrandId(req = {}) {
   return folderCleanStr(
     req.query?.brandId ||
-      req.body?.brandId ||
-      req.params?.brandId ||
-      getFolderAuthedBrandId(req)
+    req.body?.brandId ||
+    req.params?.brandId ||
+    getFolderAuthedBrandId(req)
   );
 }
 
@@ -2194,12 +2194,12 @@ async function buildUniqueBrandFolderSlug(brandId, title, excludeId = null) {
 function getBrandFolderProfileKey(item = {}) {
   const id = folderCleanStr(
     item.profileKey ||
-      item.influencerId ||
-      item.creatorId ||
-      item.userId ||
-      item.modashId ||
-      item._id ||
-      item.id
+    item.influencerId ||
+    item.creatorId ||
+    item.userId ||
+    item.modashId ||
+    item._id ||
+    item.id
   );
 
   if (id) return id.startsWith("id:") ? id : `id:${id}`;
@@ -2243,13 +2243,13 @@ function normalizeBrandFolderItem(rawItem = {}, status = "saved") {
 
   const picture = folderCleanStr(
     rawItem.picture ||
-      rawItem.avatarUrl ||
-      rawItem.profileImage ||
-      rawItem.profilePicture ||
-      rawItem.image ||
-      rawItem.thumbnail ||
-      rawItem.avatar ||
-      rawItem.profilePicUrl
+    rawItem.avatarUrl ||
+    rawItem.profileImage ||
+    rawItem.profilePicture ||
+    rawItem.image ||
+    rawItem.thumbnail ||
+    rawItem.avatar ||
+    rawItem.profilePicUrl
   );
 
   return {
@@ -2346,9 +2346,9 @@ async function findBrandFolderCampaignSnapshot(campaignId, brandId) {
     campaignsId: folderCleanStr(campaign.campaignsId),
     campaignTitle: folderCleanStr(
       campaign.campaignTitle ||
-        campaign.title ||
-        campaign.name ||
-        campaign.productOrServiceName
+      campaign.title ||
+      campaign.name ||
+      campaign.productOrServiceName
     ),
     productOrServiceName: folderCleanStr(campaign.productOrServiceName),
     brandId: campaign.brandId ? String(campaign.brandId) : requestedBrandId,
@@ -2473,10 +2473,10 @@ function getCampaignDisplayNameForBrandFolder(campaign = {}) {
   return (
     folderCleanStr(
       campaign.campaignTitle ||
-        campaign.productOrServiceName ||
-        campaign.title ||
-        campaign.name ||
-        campaign.campaignsId
+      campaign.productOrServiceName ||
+      campaign.title ||
+      campaign.name ||
+      campaign.campaignsId
     ) || "Campaign"
   );
 }
@@ -2522,9 +2522,9 @@ function isFullyManagedCampaign(campaign = {}) {
 
   const createdByRole = folderCleanStr(
     campaign.createdBy?.role ||
-      campaign.createdByRole ||
-      campaign.createdByType ||
-      campaign.ownerRole
+    campaign.createdByRole ||
+    campaign.createdByType ||
+    campaign.ownerRole
   ).toLowerCase();
 
   if (createdByRole === "admin" || createdByRole === "master") return true;
@@ -2557,9 +2557,9 @@ function buildBrandCampaignPayload(campaign = {}, brandId = "") {
     campaignsId: folderCleanStr(campaign.campaignsId),
     campaignTitle: folderCleanStr(
       campaign.campaignTitle ||
-        campaign.title ||
-        campaign.name ||
-        campaign.productOrServiceName
+      campaign.title ||
+      campaign.name ||
+      campaign.productOrServiceName
     ),
     productOrServiceName: folderCleanStr(campaign.productOrServiceName),
     brandId: campaign.brandId ? String(campaign.brandId) : folderCleanStr(brandId),
@@ -3000,15 +3000,15 @@ async function saveCampaignGoodFitItem(req, res) {
     const source = {
       pitchFolderId: String(
         pitchFolder?._id ||
-          payloadProfile?.pitchFolderId ||
-          req.body?.pitchFolderId ||
-          ""
+        payloadProfile?.pitchFolderId ||
+        req.body?.pitchFolderId ||
+        ""
       ),
       pitchFolderTitle: folderCleanStr(
         pitchFolder?.title ||
-          pitchFolder?.name ||
-          payloadProfile?.pitchFolderTitle ||
-          req.body?.pitchFolderTitle
+        pitchFolder?.name ||
+        payloadProfile?.pitchFolderTitle ||
+        req.body?.pitchFolderTitle
       ),
       pitchItemId: String(item._id || item.id || rawItemId || ""),
     };
@@ -3116,8 +3116,8 @@ async function getFolderList(req, res) {
     const hasItemsOnly = ["1", "true", "yes", "on"].includes(
       folderCleanStr(
         req.query?.hasItems ||
-          req.query?.onlyWithItems ||
-          req.query?.hasInfluencers
+        req.query?.onlyWithItems ||
+        req.query?.hasInfluencers
       ).toLowerCase()
     );
 
@@ -3519,6 +3519,667 @@ async function getbookmarkProfile(req, res) {
   }
 }
 
+function getQAAnswers(items = [], keywords = []) {
+  const list = Array.isArray(items) ? items : [];
+  const normalizedKeywords = keywords.map((item) =>
+    safeTrim(item).toLowerCase()
+  );
+
+  const match = list.find((item) => {
+    const question = safeTrim(item?.question).toLowerCase();
+    return normalizedKeywords.some((keyword) => question.includes(keyword));
+  });
+
+  if (!match) return [];
+
+  if (Array.isArray(match.answers)) {
+    return match.answers.map(safeTrim).filter(Boolean);
+  }
+
+  const single = safeTrim(match.answer || match.value);
+  return single ? [single] : [];
+}
+
+function getQAAnswer(items = [], keywords = []) {
+  return getQAAnswers(items, keywords)[0] || "";
+}
+
+function upsertQAAnswer(items = [], question, answer) {
+  const list = Array.isArray(items) ? JSON.parse(JSON.stringify(items)) : [];
+
+  const cleanQuestion = safeTrim(question);
+  const questionKey = cleanQuestion.toLowerCase();
+
+  const answers = Array.isArray(answer)
+    ? answer.map(safeTrim).filter(Boolean)
+    : safeTrim(answer)
+      ? [safeTrim(answer)]
+      : [];
+
+  const index = list.findIndex((item) =>
+    safeTrim(item?.question).toLowerCase().includes(questionKey)
+  );
+
+  const row = {
+    question: cleanQuestion,
+    answers,
+  };
+
+  if (index >= 0) {
+    list[index] = row;
+  } else {
+    list.push(row);
+  }
+
+  return list;
+}
+
+function isGoogleSignedBrand(brand = {}) {
+  return Boolean(
+    brand.googleId ||
+    brand.googleSub ||
+    safeTrim(brand.authProvider).toLowerCase() === "google" ||
+    safeTrim(brand.provider).toLowerCase() === "google"
+  );
+}
+
+function isStrongProfilePassword(password) {
+  const value = String(password || "");
+
+  return (
+    value.length >= 8 &&
+    value.length <= 16 &&
+    /[0-9]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /[^A-Za-z0-9]/.test(value)
+  );
+}
+
+function getSettingBrandId(req = {}) {
+  return safeTrim(
+    req.user?.brandId ||
+    req.brand?.brandId ||
+    req.brand?._id ||
+    req.brand?.id ||
+    req.auth?.brandId
+  );
+}
+
+function getUploadedImageUrl(uploadedImage) {
+  if (!uploadedImage) return "";
+  if (typeof uploadedImage === "string") return uploadedImage;
+
+  return (
+    uploadedImage.profilePic ||
+    uploadedImage.url ||
+    uploadedImage.Location ||
+    uploadedImage.location ||
+    uploadedImage.secure_url ||
+    uploadedImage.data?.profilePic ||
+    uploadedImage.data?.url ||
+    uploadedImage.data?.Location ||
+    ""
+  );
+}
+
+function serializeSettingProfile(brand = {}) {
+  const brandName = safeTrim(brand.brandName || brand.name);
+  const pocName = safeTrim(brand.name);
+
+  return {
+    brandId: String(brand._id || ""),
+    workspaceTitle: `${brandName || "Brand"}’s Workspace`,
+
+    profilePic: safeTrim(brand.profilePic),
+
+    brandName,
+    brandEmail: normalizeEmail(brand.email),
+    companySize: safeTrim(brand.companySize),
+
+    // name = pocName
+    pocName,
+
+    brandEmailAlias: safeTrim(brand.proxyEmail),
+    industryName: safeTrim(brand.industry),
+    pocContact: safeTrim(brand.pocContact),
+    website: safeTrim(brand.website),
+
+    companyDetails: safeTrim(brand.companyDetails),
+
+onboarding: {
+  brandType: getQAAnswer(brand.page1, [
+    "brand type",
+    "type of brand",
+  ]),
+  organizationRole: getQAAnswer(brand.page2, [
+    "role in organisation",
+    "role in organization",
+    "your role",
+  ]),
+  preferredPlatform: getQAAnswer(brand.page3, [
+    "preferred platform",
+    "platform",
+  ]),
+  preferredPlatforms: getQAAnswers(brand.page3, [
+    "preferred platform",
+    "platform",
+  ]),
+},
+
+    demographic: {
+      timeZone:
+        safeTrim(brand.timeZone) || "GMT+5:30 Indian standard time",
+      currencyFormat: safeTrim(brand.currencyFormat) || "$ Dollars",
+      region: safeTrim(brand.region) || "All",
+      preferredLanguage: safeTrim(brand.preferredLanguage) || "English",
+    },
+
+    auth: {
+      isGoogleAccount: isGoogleSignedBrand(brand),
+    },
+  };
+}
+
+function isSettingProfileCompleted(brand = {}) {
+  const profile = serializeSettingProfile(brand);
+
+  return Boolean(
+    profile.profilePic &&
+    profile.brandName &&
+    profile.brandEmail &&
+    profile.companySize &&
+    profile.pocName &&
+    profile.industryName &&
+    profile.pocContact &&
+    profile.website &&
+    profile.companyDetails &&
+    profile.onboarding.brandType &&
+    profile.onboarding.organizationRole &&
+    profile.onboarding.preferredPlatform &&
+    profile.demographic.timeZone &&
+    profile.demographic.currencyFormat &&
+    profile.demographic.region &&
+    profile.demographic.preferredLanguage
+  );
+}
+
+function normalizeFeatureKey(value) {
+  return safeTrim(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function findFeature(subscription = {}, keys = []) {
+  const features = Array.isArray(subscription.features)
+    ? subscription.features
+    : [];
+
+  const wanted = keys.map(normalizeFeatureKey);
+
+  return features.find((feature) =>
+    wanted.includes(normalizeFeatureKey(feature.key))
+  );
+}
+
+function buildCreditUsage(subscription = {}) {
+  const items = [
+    {
+      label: "Influencer Search",
+      keys: ["influencerSearch", "influencer_search", "search"],
+      fallbackTotal: 20,
+      color: "green",
+    },
+    {
+      label: "Influencer Profile Views",
+      keys: ["influencerProfileViews", "profileViews", "profile_views"],
+      fallbackTotal: 3,
+      color: "green",
+    },
+    {
+      label: "Invites Per Month",
+      keys: ["invitesPerMonth", "invites", "monthly_invites"],
+      fallbackTotal: 3,
+      color: "red",
+    },
+    {
+      label: "Active Campaign",
+      keys: ["activeCampaign", "activeCampaigns", "campaigns"],
+      fallbackTotal: 10,
+      color: "green",
+    },
+  ];
+
+  return items.map((item) => {
+    const feature = findFeature(subscription, item.keys);
+
+    const used = Number(feature?.used ?? 0);
+    const total = Number(feature?.limit ?? feature?.value ?? item.fallbackTotal);
+
+    return {
+      label: item.label,
+      used: Number.isFinite(used) ? used : 0,
+      total: Number.isFinite(total) ? total : item.fallbackTotal,
+      color: item.color,
+    };
+  });
+}
+
+function buildPlanData(brand = {}) {
+  const subscription = brand.subscription || {};
+  const planName = safeTrim(subscription.planName || "free");
+  const monthlyCost = Number(subscription.monthlyCost || 0);
+
+  return {
+    planName,
+    planTitle: `${planName.toUpperCase()} PLAN`,
+    monthlyCost,
+    billingCycle: safeTrim(subscription.billingCycle || "monthly"),
+    creditUsage: buildCreditUsage(subscription),
+  };
+}
+
+function buildUsersData(brand = {}) {
+  const profile = serializeSettingProfile(brand);
+
+  return {
+    used: 1,
+    total: 3,
+    noSeatsAvailable: false,
+    items: [
+      {
+        id: String(brand._id || ""),
+        name: profile.pocName || profile.brandName || "Brand User",
+        email: profile.brandEmail,
+        avatar: profile.profilePic,
+        relation: "You",
+        role: "Owner",
+        access: "Owner",
+        action: "Transfer Ownership",
+      },
+    ],
+  };
+}
+
+function buildWorkspacesData(brand = {}) {
+  const profile = serializeSettingProfile(brand);
+
+  return {
+    used: 1,
+    total: 1,
+    limitReached: true,
+    items: [
+      {
+        id: String(brand._id || ""),
+        name: `${profile.brandName || "Brand"} workspace`,
+        email: profile.brandEmail,
+        logo: profile.profilePic,
+        relation: "You",
+        role: "Owner",
+        meta: "Created by you",
+        action: "Delete",
+      },
+    ],
+  };
+}
+
+function buildSettingOverviewPayload(brand = {}) {
+  return {
+    profileCompleted: isSettingProfileCompleted(brand),
+    profile: serializeSettingProfile(brand),
+    plan: buildPlanData(brand),
+    users: buildUsersData(brand),
+    workspaces: buildWorkspacesData(brand),
+  };
+}
+
+async function getBrandSettingOverview(req, res, next) {
+  const requestId = req.requestId || "";
+
+  try {
+    const brandId = getSettingBrandId(req);
+
+    if (!brandId || !mongoose.Types.ObjectId.isValid(brandId)) {
+      throw new ValidationError("Invalid brand authentication.");
+    }
+
+    const brand = await BrandModel.findById(brandId).lean().exec();
+
+    if (!brand) {
+      throw new NotFoundError("Brand not found.");
+    }
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        message: "Brand setting overview fetched successfully",
+        ...buildSettingOverviewPayload(brand),
+      },
+      requestId
+    );
+  } catch (err) {
+    return handleControllerError(next, err, "getBrandSettingOverview");
+  }
+}
+
+async function getBrandSettingProfile(req, res, next) {
+  const requestId = req.requestId || "";
+
+  try {
+    const brandId = getSettingBrandId(req);
+
+    if (!brandId || !mongoose.Types.ObjectId.isValid(brandId)) {
+      throw new ValidationError("Invalid brand authentication.");
+    }
+
+    const brand = await BrandModel.findById(brandId).lean().exec();
+
+    if (!brand) {
+      throw new NotFoundError("Brand not found.");
+    }
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        message: "Brand setting profile fetched successfully",
+        ...buildSettingOverviewPayload(brand),
+      },
+      requestId
+    );
+  } catch (err) {
+    return handleControllerError(next, err, "getBrandSettingProfile");
+  }
+}
+
+async function updateBrandSettingProfile(req, res, next) {
+  const requestId = req.requestId || "";
+
+  try {
+    const brandId = getSettingBrandId(req);
+
+    if (!brandId || !mongoose.Types.ObjectId.isValid(brandId)) {
+      throw new ValidationError("Invalid brand authentication.");
+    }
+
+    const brand = await BrandModel.findById(brandId).lean().exec();
+
+    if (!brand) {
+      throw new NotFoundError("Brand not found.");
+    }
+
+    const body = req.body || {};
+    const update = {};
+    const unset = {};
+
+    if (body.brandName !== undefined) {
+      const brandName = safeTrim(body.brandName);
+
+      if (!brandName) {
+        throw new ValidationError("Brand name cannot be empty.");
+      }
+
+      update.brandName = brandName;
+    }
+
+    if (body.companySize !== undefined) {
+      update.companySize = safeTrim(body.companySize);
+    }
+
+    if (body.pocName !== undefined) {
+      update.name = safeTrim(body.pocName);
+    }
+
+    if (body.pocContact !== undefined) {
+      update.pocContact = safeTrim(body.pocContact);
+    }
+
+    if (body.website !== undefined) {
+      update.website = safeTrim(body.website);
+    }
+
+    if (body.companyDetails !== undefined) {
+      update.companyDetails = safeTrim(body.companyDetails);
+    }
+
+    if (body.industryName !== undefined || body.industry !== undefined) {
+      const industry = safeTrim(body.industryName ?? body.industry);
+
+      if (!industry) {
+        throw new ValidationError("Industry name cannot be empty.");
+      }
+
+      update.industry = industry;
+    }
+
+    if (body.brandEmailAlias !== undefined || body.proxyEmail !== undefined) {
+      const proxyEmail = normalizeEmail(body.brandEmailAlias ?? body.proxyEmail);
+
+      if (proxyEmail && !isValidEmail(proxyEmail)) {
+        throw new ValidationError("Brand email alias must be a valid email.");
+      }
+
+      if (proxyEmail) {
+        update.proxyEmail = proxyEmail;
+      } else {
+        unset.proxyEmail = 1;
+      }
+    }
+
+    if (body.brandType !== undefined) {
+      update.page1 = upsertQAAnswer(
+        brand.page1,
+        "Tell us about brand type?",
+        body.brandType
+      );
+      update.ispage1Skip = false;
+    }
+
+    if (body.organizationRole !== undefined) {
+      update.page2 = upsertQAAnswer(
+        brand.page2,
+        "Tell us about your role in Organisation ?",
+        body.organizationRole
+      );
+      update.ispage2Skip = false;
+    }
+
+if (
+  body.preferredPlatform !== undefined ||
+  body.preferredPlatforms !== undefined
+) {
+  update.page3 = upsertQAAnswer(
+    brand.page3,
+    "Preferred platforms",
+    body.preferredPlatforms ?? body.preferredPlatform
+  );
+  update.ispage3Skip = false;
+}
+
+    if (body.timeZone !== undefined) {
+      update.timeZone = safeTrim(body.timeZone);
+    }
+
+    if (body.currencyFormat !== undefined) {
+      update.currencyFormat = safeTrim(body.currencyFormat);
+    }
+
+    if (body.region !== undefined) {
+      update.region = safeTrim(body.region);
+    }
+
+    if (body.preferredLanguage !== undefined) {
+      update.preferredLanguage = safeTrim(body.preferredLanguage);
+    }
+
+    if (body.profilePic !== undefined) {
+      update.profilePic = safeTrim(body.profilePic);
+      update.isProfilePicSkip = !safeTrim(body.profilePic);
+    }
+
+    const updateQuery = {};
+
+    if (Object.keys(update).length) updateQuery.$set = update;
+    if (Object.keys(unset).length) updateQuery.$unset = unset;
+
+    if (!Object.keys(updateQuery).length) {
+      throw new ValidationError("Nothing to update.");
+    }
+
+    const updatedBrand = await BrandModel.findByIdAndUpdate(
+      brandId,
+      updateQuery,
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .lean()
+      .exec();
+
+    if (!updatedBrand) {
+      throw new NotFoundError("Brand not found.");
+    }
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        message: "Brand setting profile updated successfully",
+        ...buildSettingOverviewPayload(updatedBrand),
+      },
+      requestId
+    );
+  } catch (err) {
+    return handleControllerError(next, err, "updateBrandSettingProfile");
+  }
+}
+
+async function updateBrandSettingPassword(req, res, next) {
+  const requestId = req.requestId || "";
+
+  try {
+    const brandId = getSettingBrandId(req);
+
+    if (!brandId || !mongoose.Types.ObjectId.isValid(brandId)) {
+      throw new ValidationError("Invalid brand authentication.");
+    }
+
+    const newPassword = String(req.body?.newPassword || "");
+    const confirmPassword = String(req.body?.confirmPassword || "");
+
+    if (!newPassword.trim()) {
+      throw new ValidationError("New password is required.");
+    }
+
+    if (!confirmPassword.trim()) {
+      throw new ValidationError("Re-enter password is required.");
+    }
+
+    if (newPassword !== confirmPassword) {
+      throw new ValidationError("Passwords do not match.");
+    }
+
+    if (!isStrongProfilePassword(newPassword)) {
+      throw new ValidationError(
+        "Password must be 8 to 16 characters and include a number, uppercase letter, and special character."
+      );
+    }
+
+    const brand = await BrandModel.findById(brandId).select("+password").exec();
+
+    if (!brand) {
+      throw new NotFoundError("Brand not found.");
+    }
+
+    if (isGoogleSignedBrand(brand)) {
+      throw new ValidationError(
+        "You are using Google credentials. Please update your password in your Google account."
+      );
+    }
+
+    if (brand.password) {
+      const samePassword = await brand.comparePassword(newPassword);
+
+      if (samePassword) {
+        throw new ValidationError(
+          "New password cannot be the same as your current password."
+        );
+      }
+    }
+
+    brand.password = newPassword;
+    await brand.save();
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        message: "Password updated successfully",
+      },
+      requestId
+    );
+  } catch (err) {
+    return handleControllerError(next, err, "updateBrandSettingPassword");
+  }
+}
+
+async function updateBrandSettingProfilePhoto(req, res, next) {
+  const requestId = req.requestId || "";
+
+  try {
+    const brandId = getSettingBrandId(req);
+
+    if (!brandId || !mongoose.Types.ObjectId.isValid(brandId)) {
+      throw new ValidationError("Invalid brand authentication.");
+    }
+
+    if (!req.file) {
+      throw new ValidationError("Brand profile image is required.");
+    }
+
+    const uploadedImage = await uploadBrandProfilePicToS3(
+      req.file,
+      "brand-profile-pic"
+    );
+
+    const profilePic = getUploadedImageUrl(uploadedImage);
+
+    if (!profilePic) {
+      throw new InternalError("Profile image uploaded but URL was not returned.");
+    }
+
+    const brand = await BrandModel.findByIdAndUpdate(
+      brandId,
+      {
+        profilePic,
+        isProfilePicSkip: false,
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .lean()
+      .exec();
+
+    if (!brand) {
+      throw new NotFoundError("Brand not found.");
+    }
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        message: "Brand profile photo updated successfully",
+        uploadedImage,
+        ...buildSettingOverviewPayload(brand),
+      },
+      requestId
+    );
+  } catch (err) {
+    return handleControllerError(next, err, "updateBrandSettingProfilePhoto");
+  }
+}
+
 module.exports = {
   sendSignupOtp,
   verifyOtpSignUp,
@@ -3541,5 +4202,9 @@ module.exports = {
   getFolderList,
   addbookmarkProfile,
   getbookmarkProfile,
+  getBrandSettingOverview,
+  getBrandSettingProfile,
+  updateBrandSettingProfile,
+  updateBrandSettingProfilePhoto,
+  updateBrandSettingPassword,
 };
-

@@ -627,6 +627,69 @@ const getFrozenAmountForCampaign = async (req, res) => {
   }
 };
 
+
+const getWalletTopup = async (req, res) => {
+  const requestId = getRequestId(req);
+
+  try {
+    const brandId = clean(
+      typeof req.query.brandId === "string" ? req.query.brandId : ""
+    );
+
+    if (!brandId) {
+      return ApiResponse.sendFail(
+        res,
+        HttpStatus.BAD_REQUEST,
+        EC("VALIDATION_ERROR"),
+        "Valid brandId is required",
+        requestId
+      );
+    }
+
+    const wallet = await BrandWalletModel.findOne({ brandId })
+      .select("brandId topups")
+      .lean();
+
+    if (!wallet) {
+      return ApiResponse.sendOk(
+        res,
+        HttpStatus.OK,
+        {
+          brandId,
+          wallettopup: [],
+        },
+        requestId
+      );
+    }
+
+    const wallettopup = Array.isArray(wallet.topups)
+      ? [...wallet.topups].sort(
+          (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+        )
+      : [];
+
+    return ApiResponse.sendOk(
+      res,
+      HttpStatus.OK,
+      {
+        brandId,
+        wallettopup,
+      },
+      requestId
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal error";
+
+    return ApiResponse.sendFail(
+      res,
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      EC("INTERNAL_ERROR"),
+      message,
+      requestId
+    );
+  }
+};
+
 module.exports = {
   getBrandWallet,
   topupBrandWallet,
@@ -637,4 +700,5 @@ module.exports = {
   syncUsableBalance,
   ensureCampaignFreeze,
   getOrCreateWallet,
+  getWalletTopup,
 };

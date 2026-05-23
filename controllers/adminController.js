@@ -1588,7 +1588,7 @@ exports.getAllBrands = async (req, res) => {
     }
 
     const rawBrands = await Brand.find(brandQuery)
-      .select("-password -__v")
+      .select("-password -__v -profilePic")
       .lean();
 
     const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);

@@ -35,6 +35,11 @@ const {
   getGoodFitInfluencers,
   getCampaignGoodFitList,
   saveCampaignGoodFitItem,
+  getBrandSettingOverview,
+  getBrandSettingProfile,
+  updateBrandSettingProfile,
+  updateBrandSettingProfilePhoto,
+  updateBrandSettingPassword,
 } = require("../controllers/brandController");
 
 const { brandAuth } = require("../auth/brandAuth");
@@ -88,6 +93,27 @@ router.get("/campaign/:campaignId/good-fit", brandAuth, getCampaignGoodFitList);
  */
 router.post("/bookmark/profile", brandAuth, addbookmarkProfile);
 router.get("/bookmark/profile", brandAuth, getbookmarkProfile);
+
+router.get("/setting/overview", brandAuth, getBrandSettingOverview);
+
+router.get("/setting/profile", brandAuth, getBrandSettingProfile);
+
+router.post("/setting/profile", brandAuth, updateBrandSettingProfile);
+
+router.patch("/setting/profile", brandAuth, updateBrandSettingProfile);
+
+router.post(
+  "/setting/profile/photo",
+  brandAuth,
+  upload.single("brandProfilePic"),
+  updateBrandSettingProfilePhoto
+);
+
+router.patch(
+  "/setting/profile/password",
+  brandAuth,
+  updateBrandSettingPassword
+);
 
 router.get("/:id", getBrandById);
 
