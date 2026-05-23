@@ -35,6 +35,7 @@ const {
   getGoodFitInfluencers,
   getCampaignGoodFitList,
   saveCampaignGoodFitItem,
+  moveInfluencerToCampaignFolder,
 } = require("../controllers/brandController");
 
 const { brandAuth } = require("../auth/brandAuth");
@@ -45,7 +46,7 @@ router.post(
   "/upload-brand-profile-pic",
   upload.single("brandProfilePic"),
   brandAuth,
-  uploadBrandProfilePic
+  uploadBrandProfilePic,
 );
 
 router.post("/send-otp-signup", sendSignupOtp);
@@ -68,7 +69,11 @@ router.post("/verify-coupon", brandAuth, verifyBrandCoupon);
  */
 router.get("/folder/list", brandAuth, getFolderList);
 router.post("/folder/create", brandAuth, createFolder);
-
+router.post(
+  "/folder/move-to-campaign",
+  brandAuth,
+  moveInfluencerToCampaignFolder,
+);
 router.get("/folder/good-fit/list", brandAuth, getGoodFitInfluencers);
 router.post("/folder/good-fit", brandAuth, saveGoodFitInfluencer);
 
@@ -77,7 +82,7 @@ router.post("/folder/good-fit", brandAuth, saveGoodFitInfluencer);
 router.post(
   "/campaign/:campaignId/good-fit/:itemId",
   brandAuth,
-  saveCampaignGoodFitItem
+  saveCampaignGoodFitItem,
 );
 
 router.get("/campaign/:campaignId/good-fit", brandAuth, getCampaignGoodFitList);

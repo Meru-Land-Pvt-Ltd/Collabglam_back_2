@@ -18,6 +18,12 @@ try {
 } catch {
   PitchFolderForBrandGoodFit = null;
 }
+let ModashModel = null;
+try {
+  ModashModel = require("../models/modash");
+} catch {
+  ModashModel = null;
+}
 const VerifyOtpModelImport = require("../models/verifyOtp");
 let BrandCampaignModelImport = null;
 try {
@@ -32,7 +38,9 @@ const ApiResponseImport = require("../core/http/ApiResponse");
 const HttpStatusImport = require("../core/http/HttpStatus");
 const ApiErrorImport = require("../core/http/ApiError");
 const SubscriptionPlan = require("../models/subscription");
-const { uploadBrandProfilePicToS3 } = require("../utils/uploadBase64ImagesToS3");
+const {
+  uploadBrandProfilePicToS3,
+} = require("../utils/uploadBase64ImagesToS3");
 const { BookmarkFolder } = require("../models/bookMarkFolder");
 
 void OpenAI;
@@ -73,9 +81,7 @@ const ApiResponse =
   ApiResponseImport;
 
 const HttpStatus =
-  HttpStatusImport.HttpStatus ||
-  HttpStatusImport.default ||
-  HttpStatusImport;
+  HttpStatusImport.HttpStatus || HttpStatusImport.default || HttpStatusImport;
 
 const ApiError = ApiErrorImport.ApiError || ApiErrorImport;
 const ValidationError = ApiErrorImport.ValidationError;
@@ -121,7 +127,10 @@ const SIGNIN_LOCK_1_MIN = 1;
 const SIGNIN_LOCK_15_MIN = 15;
 const SIGNIN_LOCK_24_HOURS = 24;
 
-const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+const normalizeEmail = (email) =>
+  String(email || "")
+    .trim()
+    .toLowerCase();
 const safeTrim = (value) => String(value || "").trim();
 
 const isValidEmail = (email) =>
@@ -141,7 +150,7 @@ function isPendingAdminCreatedBrand(doc = {}) {
 function assertNotPendingAdminCreatedBrand(brand) {
   if (isPendingAdminCreatedBrand(brand)) {
     throw new ValidationError(
-      "This brand was added by admin. Please complete signup first using the same email."
+      "This brand was added by admin. Please complete signup first using the same email.",
     );
   }
 }
@@ -198,11 +207,12 @@ function isQAArray(value) {
 
   return value.every((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-    if (typeof item.question !== "string" || !item.question.trim()) return false;
+    if (typeof item.question !== "string" || !item.question.trim())
+      return false;
     if (!Array.isArray(item.answers) || item.answers.length === 0) return false;
 
     return item.answers.every(
-      (answer) => typeof answer === "string" && answer.trim().length > 0
+      (answer) => typeof answer === "string" && answer.trim().length > 0,
     );
   });
 }
@@ -303,7 +313,7 @@ function rethrowAsApiError(err) {
 
     throw new ConflictError(
       `${field} already exists. Please use a different value.`,
-      { field, value }
+      { field, value },
     );
   }
 
@@ -402,7 +412,7 @@ async function getLatestPendingOtp(email, purpose) {
 function assertValidOtpDoc(otpDoc, email, otp) {
   if (!otpDoc) {
     throw new ValidationError(
-      "OTP not requested or expired. Please request a new OTP."
+      "OTP not requested or expired. Please request a new OTP.",
     );
   }
 
@@ -430,7 +440,7 @@ async function markOtpUsed(otpDoc, options = {}) {
 
   await VerifyOtpModel.updateOne(
     { _id: otpDoc._id, status: 0 },
-    { $set: update }
+    { $set: update },
   ).exec();
 }
 
@@ -456,7 +466,7 @@ async function getSigninLimitDoc(email) {
         signinResetAt: null,
       },
     },
-    { new: true, upsert: true }
+    { new: true, upsert: true },
   ).exec();
 }
 
@@ -486,7 +496,7 @@ async function enforceOtpLimitByKey(email, key) {
         signupOtpResetAt: null,
       },
     },
-    { new: true, upsert: true }
+    { new: true, upsert: true },
   ).exec();
 
   if (
@@ -503,7 +513,7 @@ async function enforceOtpLimitByKey(email, key) {
   if ((limitDoc.signupOtpSend ?? OTP_TOTAL) <= 0) {
     if (!limitDoc.signupOtpResetAt) {
       limitDoc.signupOtpResetAt = new Date(
-        nowMs + OTP_RESET_HOURS * 60 * 60 * 1000
+        nowMs + OTP_RESET_HOURS * 60 * 60 * 1000,
       );
       await limitDoc.save();
     }
@@ -517,8 +527,7 @@ async function enforceOtpLimitByKey(email, key) {
     limitDoc.signupOtpCooldownUntil &&
     nowMs < new Date(limitDoc.signupOtpCooldownUntil).getTime()
   ) {
-    const waitMs =
-      new Date(limitDoc.signupOtpCooldownUntil).getTime() - nowMs;
+    const waitMs = new Date(limitDoc.signupOtpCooldownUntil).getTime() - nowMs;
 
     throw new RateLimitError(`Try again in ${msToWaitString(waitMs)}.`, {
       code: ErrorCodes.OTP_RATE_LIMIT,
@@ -530,7 +539,7 @@ async function enforceOtpLimitByKey(email, key) {
 
   if (limitDoc.signupOtpBatchCount >= OTP_BATCH_LIMIT) {
     limitDoc.signupOtpCooldownUntil = new Date(
-      nowMs + OTP_COOLDOWN_MIN * 60 * 1000
+      nowMs + OTP_COOLDOWN_MIN * 60 * 1000,
     );
     limitDoc.signupOtpBatchCount = 0;
   }
@@ -538,7 +547,7 @@ async function enforceOtpLimitByKey(email, key) {
   if (limitDoc.signupOtpSend <= 0) {
     limitDoc.signupOtpSend = 0;
     limitDoc.signupOtpResetAt = new Date(
-      nowMs + OTP_RESET_HOURS * 60 * 60 * 1000
+      nowMs + OTP_RESET_HOURS * 60 * 60 * 1000,
     );
   }
 
@@ -564,21 +573,21 @@ async function enforceSigninLimit(email) {
 
     throw new RateLimitError(
       `Too many failed login attempts. Try again in ${msToWaitString(waitMs)}.`,
-      { code: ErrorCodes.SIGNIN_RATE_LIMIT }
+      { code: ErrorCodes.SIGNIN_RATE_LIMIT },
     );
   }
 
   if ((doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL) {
     if (!doc.signinResetAt) {
       doc.signinResetAt = new Date(
-        nowMs + SIGNIN_LOCK_24_HOURS * 60 * 60 * 1000
+        nowMs + SIGNIN_LOCK_24_HOURS * 60 * 60 * 1000,
       );
       await doc.save();
     }
 
     throw new RateLimitError(
       "Too many failed login attempts. Try again after 24 hours.",
-      { code: ErrorCodes.SIGNIN_DAILY_LIMIT }
+      { code: ErrorCodes.SIGNIN_DAILY_LIMIT },
     );
   }
 }
@@ -602,11 +611,11 @@ async function recordFailedSignin(email) {
       doc.signinCooldownUntil = new Date(nowMs + SIGNIN_LOCK_1_MIN * 60 * 1000);
     } else if (batchNo === 2) {
       doc.signinCooldownUntil = new Date(
-        nowMs + SIGNIN_LOCK_15_MIN * 60 * 1000
+        nowMs + SIGNIN_LOCK_15_MIN * 60 * 1000,
       );
     } else {
       doc.signinCooldownUntil = new Date(
-        nowMs + SIGNIN_LOCK_24_HOURS * 60 * 60 * 1000
+        nowMs + SIGNIN_LOCK_24_HOURS * 60 * 60 * 1000,
       );
       doc.signinResetAt = doc.signinCooldownUntil;
       doc.signinFailedCount = SIGNIN_TOTAL;
@@ -625,14 +634,14 @@ async function recordFailedSignin(email) {
       (doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL
         ? "Too many failed login attempts. Try again after 24 hours."
         : `Too many failed login attempts. Try again in ${msToWaitString(
-          waitMs
-        )}.`,
+            waitMs,
+          )}.`,
       {
         code:
           (doc.signinFailedCount ?? 0) >= SIGNIN_TOTAL
             ? ErrorCodes.SIGNIN_DAILY_LIMIT
             : ErrorCodes.SIGNIN_RATE_LIMIT,
-      }
+      },
     );
   }
 }
@@ -651,7 +660,7 @@ async function resetSigninLimit(email) {
         signinCooldownUntil: null,
         signinResetAt: null,
       },
-    }
+    },
   ).exec();
 }
 
@@ -698,7 +707,7 @@ async function sendSignupOtp(req, res, next) {
         message: "OTP sent successfully",
         email,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     if (otpDoc?._id) {
@@ -741,7 +750,7 @@ async function verifyOtpSignUp(req, res, next) {
       }
 
       throw new ValidationError(
-        "OTP not requested or expired. Please request a new OTP."
+        "OTP not requested or expired. Please request a new OTP.",
       );
     }
 
@@ -751,7 +760,7 @@ async function verifyOtpSignUp(req, res, next) {
 
     if (!payload.brandName || !payload.industry || !payload.passwordHash) {
       throw new ValidationError(
-        "Signup details missing. Please request OTP again."
+        "Signup details missing. Please request OTP again.",
       );
     }
 
@@ -776,7 +785,8 @@ async function verifyOtpSignUp(req, res, next) {
 
     if (existingBrand && isPendingAdminCreatedBrand(existingBrand)) {
       existingBrand.brandName = safeTrim(payload.brandName);
-      existingBrand.name = safeTrim(payload.name) || safeTrim(payload.brandName);
+      existingBrand.name =
+        safeTrim(payload.name) || safeTrim(payload.brandName);
       existingBrand.companySize = safeTrim(payload.companySize);
       existingBrand.industry = safeTrim(payload.industry);
       existingBrand.password = payload.passwordHash;
@@ -825,7 +835,7 @@ async function verifyOtpSignUp(req, res, next) {
         brandId: String(brand._id),
         token,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "verifyOtpSignUp");
@@ -879,13 +889,13 @@ async function saveBrandOnboarding(req, res, next) {
       } else {
         if (page1 === undefined) {
           throw new ValidationError(
-            "page1 is required when ispage1Skip is false"
+            "page1 is required when ispage1Skip is false",
           );
         }
 
         if (!isQAArray(page1)) {
           throw new ValidationError(
-            "page1 must be an array of { question, answers[] }"
+            "page1 must be an array of { question, answers[] }",
           );
         }
 
@@ -905,13 +915,13 @@ async function saveBrandOnboarding(req, res, next) {
       } else {
         if (page2 === undefined) {
           throw new ValidationError(
-            "page2 is required when ispage2Skip is false"
+            "page2 is required when ispage2Skip is false",
           );
         }
 
         if (!isQAArray(page2)) {
           throw new ValidationError(
-            "page2 must be an array of { question, answers[] }"
+            "page2 must be an array of { question, answers[] }",
           );
         }
 
@@ -931,13 +941,13 @@ async function saveBrandOnboarding(req, res, next) {
       } else {
         if (page3 === undefined) {
           throw new ValidationError(
-            "page3 is required when ispage3Skip is false"
+            "page3 is required when ispage3Skip is false",
           );
         }
 
         if (!isQAArray(page3)) {
           throw new ValidationError(
-            "page3 must be an array of { question, answers[] }"
+            "page3 must be an array of { question, answers[] }",
           );
         }
 
@@ -995,7 +1005,7 @@ async function saveBrandOnboarding(req, res, next) {
         message: "Brand onboarding saved successfully",
         brandId: String(brand._id),
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "saveBrandOnboarding");
@@ -1065,7 +1075,9 @@ async function signInBrand(req, res, next) {
     assertNotPendingAdminCreatedBrand(brand);
 
     if (!brand.password) {
-      throw new ValidationError("Password not set. Please use forgot password.");
+      throw new ValidationError(
+        "Password not set. Please use forgot password.",
+      );
     }
 
     const ok = await brand.comparePassword(password);
@@ -1106,7 +1118,7 @@ async function signInBrand(req, res, next) {
         ispage3Skip: brand.ispage3Skip || false,
         isProfilePicSkip: brand.isProfilePicSkip || false,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "signInBrand");
@@ -1160,7 +1172,7 @@ async function sendOtpForgotBrand(req, res, next) {
         message: "OTP sent for password reset",
         email,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     if (otpDoc?._id) {
@@ -1224,7 +1236,7 @@ async function verifyOtpForgotBrand(req, res, next) {
         message: "OTP verified",
         resetToken,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "verifyOtpForgotBrand");
@@ -1294,7 +1306,7 @@ async function updatePasswordBrand(req, res, next) {
 
     if (samePassword) {
       throw new ValidationError(
-        "New password cannot be the same as your last password"
+        "New password cannot be the same as your last password",
       );
     }
 
@@ -1314,7 +1326,7 @@ async function updatePasswordBrand(req, res, next) {
       res,
       HttpStatus.OK,
       { message: "Password updated successfully" },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "updatePasswordBrand");
@@ -1348,7 +1360,7 @@ async function getBrandById(req, res, next) {
         ...brand,
         brandId: String(brand._id),
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "getBrandById");
@@ -1360,10 +1372,7 @@ async function getBrandLiteById(req, res, next) {
 
   try {
     const id =
-      req.query.brandId ||
-      req.query.id ||
-      req.params.brandId ||
-      req.params.id;
+      req.query.brandId || req.query.id || req.params.brandId || req.params.id;
 
     if (!id) {
       throw new ValidationError("Query parameter brandId or id is required.");
@@ -1393,7 +1402,7 @@ async function getBrandLiteById(req, res, next) {
         subscriptionDetails:
           brand.subscriptionDetails ?? brand.subscription ?? null,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "getBrandLiteById");
@@ -1428,7 +1437,7 @@ async function getBrandProfile(req, res, next) {
         brandId: String(brand._id),
         ...brand,
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "getBrandProfile");
@@ -1439,14 +1448,8 @@ async function updateBrandProfile(req, res, next) {
   const requestId = req.requestId || "";
 
   try {
-    const {
-      brandId,
-      brandName,
-      companySize,
-      brandType,
-      platform,
-      profilePic,
-    } = req.body || {};
+    const { brandId, brandName, companySize, brandType, platform, profilePic } =
+      req.body || {};
 
     if (!brandId) {
       throw new ValidationError("brandId is required.");
@@ -1483,7 +1486,7 @@ async function updateBrandProfile(req, res, next) {
       const idx = page1.findIndex((x) =>
         String(x?.question || "")
           .toLowerCase()
-          .includes("what type of brand")
+          .includes("what type of brand"),
       );
 
       const row = {
@@ -1520,7 +1523,7 @@ async function updateBrandProfile(req, res, next) {
         message: "Brand profile updated successfully",
         brandId: String(updatedBrand._id),
       },
-      requestId
+      requestId,
     );
   } catch (err) {
     return handleControllerError(next, err, "updateBrandProfile");
@@ -1538,7 +1541,7 @@ const uploadBrandProfilePic = async (req, res) => {
 
     const uploadedImage = await uploadBrandProfilePicToS3(
       req.file,
-      "brand-profile-pic"
+      "brand-profile-pic",
     );
 
     return res.status(200).json({
@@ -1555,11 +1558,6 @@ const uploadBrandProfilePic = async (req, res) => {
     });
   }
 };
-
-
-
-
-
 
 async function verifyBrandCoupon(req, res) {
   try {
@@ -1626,7 +1624,8 @@ async function verifyBrandCoupon(req, res) {
       return res.status(404).json({
         success: false,
         verified: false,
-        message: "Invalid promocode or this promocode is not valid for this subscription",
+        message:
+          "Invalid promocode or this promocode is not valid for this subscription",
       });
     }
 
@@ -1683,7 +1682,7 @@ const getBookmarkBrandIdFromReq = (req) => {
       req.user?._id ||
       req.user?.id ||
       req.body?.brandId ||
-      req.query?.brandId
+      req.query?.brandId,
   );
 };
 
@@ -1693,7 +1692,7 @@ const getBookmarkProfileKey = (item = {}) => {
       item.creatorId ||
       item.userId ||
       item.modashId ||
-      item._id
+      item._id,
   );
 
   if (influencerId) return `id:${influencerId}`;
@@ -1702,14 +1701,16 @@ const getBookmarkProfileKey = (item = {}) => {
   if (email) return `email:${email}`;
 
   const link = bookmarkCleanStr(
-    item.primaryLink || item.profileUrl || item.url || item.links?.[0]
+    item.primaryLink || item.profileUrl || item.url || item.links?.[0],
   )
     .toLowerCase()
     .replace(/\/+$/, "");
 
   if (link) return `link:${link}`;
 
-  const provider = bookmarkCleanStr(item.provider || item.platform).toLowerCase();
+  const provider = bookmarkCleanStr(
+    item.provider || item.platform,
+  ).toLowerCase();
 
   const handle = bookmarkCleanStr(item.handle || item.username)
     .toLowerCase()
@@ -1718,7 +1719,7 @@ const getBookmarkProfileKey = (item = {}) => {
   if (provider || handle) return `handle:${provider}:${handle}`;
 
   const name = bookmarkCleanStr(
-    item.name || item.fullname || item.fullName || item.username
+    item.name || item.fullname || item.fullName || item.username,
   ).toLowerCase();
 
   return name ? `name:${name}:${provider}` : "";
@@ -1738,18 +1739,18 @@ async function addbookmarkProfile(req, res) {
     const incomingProfiles = Array.isArray(req.body?.profiles)
       ? req.body.profiles
       : Array.isArray(req.body?.influencers)
-      ? req.body.influencers
-      : req.body?.profile
-      ? [req.body.profile]
-      : req.body?.influencer
-      ? [req.body.influencer]
-      : [req.body];
+        ? req.body.influencers
+        : req.body?.profile
+          ? [req.body.profile]
+          : req.body?.influencer
+            ? [req.body.influencer]
+            : [req.body];
 
     const profiles = incomingProfiles
       .filter(Boolean)
       .map((item) => {
         const primaryLink = bookmarkCleanStr(
-          item.primaryLink || item.profileUrl || item.url
+          item.primaryLink || item.profileUrl || item.url,
         );
 
         const avatar = bookmarkCleanStr(
@@ -1760,35 +1761,37 @@ async function addbookmarkProfile(req, res) {
             item.image ||
             item.thumbnail ||
             item.avatar ||
-            item.profilePicUrl
+            item.profilePicUrl,
         );
 
         const categories = Array.isArray(item.categories)
           ? item.categories
           : Array.isArray(item.niche)
-          ? item.niche
-          : item.category
-          ? [item.category]
-          : item.niche
-          ? [item.niche]
-          : [];
+            ? item.niche
+            : item.category
+              ? [item.category]
+              : item.niche
+                ? [item.niche]
+                : [];
 
         const profile = {
           influencerId: bookmarkCleanStr(
-            item.influencerId || item.creatorId || item.userId || item._id
+            item.influencerId || item.creatorId || item.userId || item._id,
           ),
           creatorId: bookmarkCleanStr(
-            item.creatorId || item.influencerId || item.userId || item._id
+            item.creatorId || item.influencerId || item.userId || item._id,
           ),
           userId: bookmarkCleanStr(
-            item.userId || item.influencerId || item.creatorId || item._id
+            item.userId || item.influencerId || item.creatorId || item._id,
           ),
           modashId: bookmarkCleanStr(item.modashId),
 
           name: bookmarkCleanStr(
-            item.name || item.fullname || item.fullName || item.username
+            item.name || item.fullname || item.fullName || item.username,
           ),
-          fullname: bookmarkCleanStr(item.fullname || item.fullName || item.name),
+          fullname: bookmarkCleanStr(
+            item.fullname || item.fullName || item.name,
+          ),
           username: bookmarkCleanStr(item.username || item.handle),
           handle: bookmarkCleanStr(item.handle || item.username),
 
@@ -1814,8 +1817,8 @@ async function addbookmarkProfile(req, res) {
           links: Array.isArray(item.links)
             ? item.links.filter(Boolean).map(bookmarkCleanStr)
             : primaryLink
-            ? [primaryLink]
-            : [],
+              ? [primaryLink]
+              : [],
 
           picture: avatar,
           avatarUrl: bookmarkCleanStr(item.avatarUrl || avatar),
@@ -1885,13 +1888,13 @@ async function addbookmarkProfile(req, res) {
     const existingItems = Array.isArray(folder.items)
       ? folder.items
       : Array.isArray(folder.bookmarks)
-      ? folder.bookmarks
-      : [];
+        ? folder.bookmarks
+        : [];
 
     const existingKeys = new Set(
       existingItems
         .map((item) => item.profileKey || getBookmarkProfileKey(item))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const newProfiles = profiles.filter((profile) => {
@@ -1963,16 +1966,16 @@ async function getbookmarkProfile(req, res) {
       ? Array.isArray(folder.items)
         ? folder.items
         : Array.isArray(folder.bookmarks)
-        ? folder.bookmarks
-        : []
+          ? folder.bookmarks
+          : []
       : [];
 
     const savedKeys = Array.from(
       new Set(
         items
           .map((item) => item.profileKey || getBookmarkProfileKey(item))
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
 
     return res.status(200).json({
@@ -2006,8 +2009,6 @@ async function getbookmarkProfile(req, res) {
   }
 }
 
-
-
 /* -------------------------------------------------------------------------- */
 /*                         Brand-owned folder controllers                      */
 /* -------------------------------------------------------------------------- */
@@ -2017,7 +2018,9 @@ const folderCleanStr = (value) =>
 
 function folderToObjectId(value) {
   const id = folderCleanStr(value);
-  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+  return mongoose.Types.ObjectId.isValid(id)
+    ? new mongoose.Types.ObjectId(id)
+    : null;
 }
 
 function folderSlugify(value) {
@@ -2038,7 +2041,7 @@ function getFolderAuthedBrandId(req = {}) {
       req.user?.brand?.id ||
       req.user?._id ||
       req.user?.id ||
-      req.auth?.brandId
+      req.auth?.brandId,
   );
 }
 
@@ -2047,7 +2050,7 @@ function getFolderRequestedBrandId(req = {}) {
     req.query?.brandId ||
       req.body?.brandId ||
       req.params?.brandId ||
-      getFolderAuthedBrandId(req)
+      getFolderAuthedBrandId(req),
   );
 }
 
@@ -2182,7 +2185,9 @@ async function buildUniqueBrandFolderSlug(brandId, title, excludeId = null) {
       filter._id = { $ne: new mongoose.Types.ObjectId(String(excludeId)) };
     }
 
-    const existing = await BrandFolderModel.findOne(filter).select("_id").lean();
+    const existing = await BrandFolderModel.findOne(filter)
+      .select("_id")
+      .lean();
 
     if (!existing) return slug;
 
@@ -2199,7 +2204,7 @@ function getBrandFolderProfileKey(item = {}) {
       item.userId ||
       item.modashId ||
       item._id ||
-      item.id
+      item.id,
   );
 
   if (id) return id.startsWith("id:") ? id : `id:${id}`;
@@ -2207,7 +2212,9 @@ function getBrandFolderProfileKey(item = {}) {
   const email = folderCleanStr(item.email).toLowerCase();
   if (email) return `email:${email}`;
 
-  const link = folderCleanStr(item.primaryLink || item.profileUrl || item.url || item.links?.[0])
+  const link = folderCleanStr(
+    item.primaryLink || item.profileUrl || item.url || item.links?.[0],
+  )
     .toLowerCase()
     .replace(/\/+$/, "");
 
@@ -2221,7 +2228,9 @@ function getBrandFolderProfileKey(item = {}) {
 
   if (handle || provider) return `handle:${provider}:${handle}`;
 
-  const name = folderCleanStr(item.name || item.fullname || item.fullName).toLowerCase();
+  const name = folderCleanStr(
+    item.name || item.fullname || item.fullName,
+  ).toLowerCase();
 
   return name ? `name:${name}:${provider}` : "";
 }
@@ -2238,7 +2247,10 @@ function normalizeBrandFolderItem(rawItem = {}, status = "saved") {
           : [];
 
   const primaryLink = folderCleanStr(
-    rawItem.primaryLink || rawItem.profileUrl || rawItem.url || rawItem.links?.[0]
+    rawItem.primaryLink ||
+      rawItem.profileUrl ||
+      rawItem.url ||
+      rawItem.links?.[0],
   );
 
   const picture = folderCleanStr(
@@ -2249,23 +2261,47 @@ function normalizeBrandFolderItem(rawItem = {}, status = "saved") {
       rawItem.image ||
       rawItem.thumbnail ||
       rawItem.avatar ||
-      rawItem.profilePicUrl
+      rawItem.profilePicUrl,
   );
 
   return {
     profileKey: getBrandFolderProfileKey(rawItem),
 
     influencerId: folderCleanStr(
-      rawItem.influencerId || rawItem.creatorId || rawItem.userId || rawItem._id || rawItem.id
+      rawItem.influencerId ||
+        rawItem.creatorId ||
+        rawItem.userId ||
+        rawItem._id ||
+        rawItem.id,
     ),
-    creatorId: folderCleanStr(rawItem.creatorId || rawItem.influencerId || rawItem.userId || rawItem._id || rawItem.id),
-    userId: folderCleanStr(rawItem.userId || rawItem.influencerId || rawItem.creatorId || rawItem._id || rawItem.id),
+    creatorId: folderCleanStr(
+      rawItem.creatorId ||
+        rawItem.influencerId ||
+        rawItem.userId ||
+        rawItem._id ||
+        rawItem.id,
+    ),
+    userId: folderCleanStr(
+      rawItem.userId ||
+        rawItem.influencerId ||
+        rawItem.creatorId ||
+        rawItem._id ||
+        rawItem.id,
+    ),
     modashId: folderCleanStr(rawItem.modashId),
 
-    name: folderCleanStr(rawItem.name || rawItem.fullname || rawItem.fullName || rawItem.username),
-    fullname: folderCleanStr(rawItem.fullname || rawItem.fullName || rawItem.name),
-    username: folderCleanStr(rawItem.username || rawItem.userName || rawItem.handle),
-    handle: folderCleanStr(rawItem.handle || rawItem.username || rawItem.userName),
+    name: folderCleanStr(
+      rawItem.name || rawItem.fullname || rawItem.fullName || rawItem.username,
+    ),
+    fullname: folderCleanStr(
+      rawItem.fullname || rawItem.fullName || rawItem.name,
+    ),
+    username: folderCleanStr(
+      rawItem.username || rawItem.userName || rawItem.handle,
+    ),
+    handle: folderCleanStr(
+      rawItem.handle || rawItem.username || rawItem.userName,
+    ),
 
     email: folderCleanStr(rawItem.email).toLowerCase(),
 
@@ -2279,10 +2315,18 @@ function normalizeBrandFolderItem(rawItem = {}, status = "saved") {
     categories,
     niche: categories,
 
-    followers: Number.isFinite(Number(rawItem.followers)) ? Number(rawItem.followers) : null,
-    engagements: Number.isFinite(Number(rawItem.engagements)) ? Number(rawItem.engagements) : null,
-    engagementRate: Number.isFinite(Number(rawItem.engagementRate)) ? Number(rawItem.engagementRate) : null,
-    averageViews: Number.isFinite(Number(rawItem.averageViews)) ? Number(rawItem.averageViews) : null,
+    followers: Number.isFinite(Number(rawItem.followers))
+      ? Number(rawItem.followers)
+      : null,
+    engagements: Number.isFinite(Number(rawItem.engagements))
+      ? Number(rawItem.engagements)
+      : null,
+    engagementRate: Number.isFinite(Number(rawItem.engagementRate))
+      ? Number(rawItem.engagementRate)
+      : null,
+    averageViews: Number.isFinite(Number(rawItem.averageViews))
+      ? Number(rawItem.averageViews)
+      : null,
 
     primaryLink,
     profileUrl: folderCleanStr(rawItem.profileUrl || primaryLink),
@@ -2333,7 +2377,11 @@ async function findBrandFolderCampaignSnapshot(campaignId, brandId) {
   const requestedBrandId = folderCleanStr(brandId);
   const campaignBrandId = folderCleanStr(campaign.brandId);
 
-  if (requestedBrandId && campaignBrandId && campaignBrandId !== requestedBrandId) {
+  if (
+    requestedBrandId &&
+    campaignBrandId &&
+    campaignBrandId !== requestedBrandId
+  ) {
     const brandObjectId = folderToObjectId(requestedBrandId);
 
     if (!brandObjectId || String(campaign.brandId) !== String(brandObjectId)) {
@@ -2348,7 +2396,7 @@ async function findBrandFolderCampaignSnapshot(campaignId, brandId) {
       campaign.campaignTitle ||
         campaign.title ||
         campaign.name ||
-        campaign.productOrServiceName
+        campaign.productOrServiceName,
     ),
     productOrServiceName: folderCleanStr(campaign.productOrServiceName),
     brandId: campaign.brandId ? String(campaign.brandId) : requestedBrandId,
@@ -2388,7 +2436,7 @@ async function getOrCreateBrandDefaultFolder({ brandId, type, title, req }) {
 
 function upsertProfilesIntoBrandFolder(folder, profiles) {
   const existingKeys = new Set(
-    (folder.items || []).map((item) => item.profileKey).filter(Boolean)
+    (folder.items || []).map((item) => item.profileKey).filter(Boolean),
   );
 
   let added = 0;
@@ -2412,7 +2460,6 @@ function upsertProfilesIntoBrandFolder(folder, profiles) {
 
   return { added, skipped };
 }
-
 
 function campaignValueMatches(left, right) {
   const a = folderCleanStr(left);
@@ -2476,7 +2523,7 @@ function getCampaignDisplayNameForBrandFolder(campaign = {}) {
         campaign.productOrServiceName ||
         campaign.title ||
         campaign.name ||
-        campaign.campaignsId
+        campaign.campaignsId,
     ) || "Campaign"
   );
 }
@@ -2524,7 +2571,7 @@ function isFullyManagedCampaign(campaign = {}) {
     campaign.createdBy?.role ||
       campaign.createdByRole ||
       campaign.createdByType ||
-      campaign.ownerRole
+      campaign.ownerRole,
   ).toLowerCase();
 
   if (createdByRole === "admin" || createdByRole === "master") return true;
@@ -2553,16 +2600,20 @@ function isFullyManagedCampaign(campaign = {}) {
 
 function buildBrandCampaignPayload(campaign = {}, brandId = "") {
   return {
-    campaignId: campaign._id ? String(campaign._id) : folderCleanStr(campaign.campaignId),
+    campaignId: campaign._id
+      ? String(campaign._id)
+      : folderCleanStr(campaign.campaignId),
     campaignsId: folderCleanStr(campaign.campaignsId),
     campaignTitle: folderCleanStr(
       campaign.campaignTitle ||
         campaign.title ||
         campaign.name ||
-        campaign.productOrServiceName
+        campaign.productOrServiceName,
     ),
     productOrServiceName: folderCleanStr(campaign.productOrServiceName),
-    brandId: campaign.brandId ? String(campaign.brandId) : folderCleanStr(brandId),
+    brandId: campaign.brandId
+      ? String(campaign.brandId)
+      : folderCleanStr(brandId),
     brandName: folderCleanStr(campaign.brandName),
     assignedAt: campaign.assignedAt || null,
   };
@@ -2571,7 +2622,11 @@ function buildBrandCampaignPayload(campaign = {}, brandId = "") {
 async function findBrandCampaignByAnyId(campaignId, brandId) {
   const id = folderCleanStr(campaignId);
 
-  if (!id || !BrandCampaignModel || typeof BrandCampaignModel.findOne !== "function") {
+  if (
+    !id ||
+    !BrandCampaignModel ||
+    typeof BrandCampaignModel.findOne !== "function"
+  ) {
     return null;
   }
 
@@ -2587,7 +2642,11 @@ async function findBrandCampaignByAnyId(campaignId, brandId) {
   const requestedBrandId = folderCleanStr(brandId);
   const campaignBrandId = folderCleanStr(campaign.brandId);
 
-  if (requestedBrandId && campaignBrandId && campaignBrandId !== requestedBrandId) {
+  if (
+    requestedBrandId &&
+    campaignBrandId &&
+    campaignBrandId !== requestedBrandId
+  ) {
     const brandObjectId = folderToObjectId(requestedBrandId);
 
     if (!brandObjectId || String(campaign.brandId) !== String(brandObjectId)) {
@@ -2598,10 +2657,20 @@ async function findBrandCampaignByAnyId(campaignId, brandId) {
   return campaign;
 }
 
-async function findPitchFoldersForBrandCampaignGoodFit(rawCampaignId, campaign, brandId) {
-  const lookupValues = buildAssignedCampaignLookupValues(rawCampaignId, campaign);
+async function findPitchFoldersForBrandCampaignGoodFit(
+  rawCampaignId,
+  campaign,
+  brandId,
+) {
+  const lookupValues = buildAssignedCampaignLookupValues(
+    rawCampaignId,
+    campaign,
+  );
 
-  if (!PitchFolderForBrandGoodFit || typeof PitchFolderForBrandGoodFit.find !== "function") {
+  if (
+    !PitchFolderForBrandGoodFit ||
+    typeof PitchFolderForBrandGoodFit.find !== "function"
+  ) {
     return [];
   }
 
@@ -2612,14 +2681,14 @@ async function findPitchFoldersForBrandCampaignGoodFit(rawCampaignId, campaign, 
       { "assignedCampaign.campaignId": value },
       { "assignedCampaign.campaignsId": value },
       { "assignedCampaign._id": value },
-      { "assignedCampaign.id": value }
+      { "assignedCampaign.id": value },
     );
 
     const objectId = folderToObjectId(value);
     if (objectId) {
       candidateOr.push(
         { "assignedCampaign.campaignId": objectId },
-        { "assignedCampaign._id": objectId }
+        { "assignedCampaign._id": objectId },
       );
     }
   });
@@ -2640,10 +2709,20 @@ async function findPitchFoldersForBrandCampaignGoodFit(rawCampaignId, campaign, 
   });
 }
 
-async function findPitchFoldersForBrandCampaign(rawCampaignId, campaign, brandId) {
-  const lookupValues = buildAssignedCampaignLookupValues(rawCampaignId, campaign);
+async function findPitchFoldersForBrandCampaign(
+  rawCampaignId,
+  campaign,
+  brandId,
+) {
+  const lookupValues = buildAssignedCampaignLookupValues(
+    rawCampaignId,
+    campaign,
+  );
 
-  if (!PitchFolderForBrandGoodFit || typeof PitchFolderForBrandGoodFit.find !== "function") {
+  if (
+    !PitchFolderForBrandGoodFit ||
+    typeof PitchFolderForBrandGoodFit.find !== "function"
+  ) {
     return [];
   }
 
@@ -2654,14 +2733,14 @@ async function findPitchFoldersForBrandCampaign(rawCampaignId, campaign, brandId
       { "assignedCampaign.campaignId": value },
       { "assignedCampaign.campaignsId": value },
       { "assignedCampaign._id": value },
-      { "assignedCampaign.id": value }
+      { "assignedCampaign.id": value },
     );
 
     const objectId = folderToObjectId(value);
     if (objectId) {
       candidateOr.push(
         { "assignedCampaign.campaignId": objectId },
-        { "assignedCampaign._id": objectId }
+        { "assignedCampaign._id": objectId },
       );
     }
   });
@@ -2681,8 +2760,11 @@ async function findPitchFoldersForBrandCampaign(rawCampaignId, campaign, brandId
   });
 }
 
-
-function normalizePitchGoodFitItemForBrandFolder(item = {}, source = {}, campaignPayload = {}) {
+function normalizePitchGoodFitItemForBrandFolder(
+  item = {},
+  source = {},
+  campaignPayload = {},
+) {
   const raw = item.raw && typeof item.raw === "object" ? item.raw : item;
   const normalized = normalizeBrandFolderItem(
     {
@@ -2697,7 +2779,7 @@ function normalizePitchGoodFitItemForBrandFolder(item = {}, source = {}, campaig
       pitchFolderTitle: source.pitchFolderTitle,
       pitchItemId: source.pitchItemId,
     },
-    "good_fit"
+    "good_fit",
   );
 
   normalized.source = {
@@ -2722,14 +2804,22 @@ function normalizePitchGoodFitItemForBrandFolder(item = {}, source = {}, campaig
   return normalized;
 }
 
-async function getOrCreateCampaignBrandFolder({ brandId, campaign, campaignPayload, req }) {
+async function getOrCreateCampaignBrandFolder({
+  brandId,
+  campaign,
+  campaignPayload,
+  req,
+}) {
   const title = getCampaignDisplayNameForBrandFolder(campaign);
   const linkedCampaign = campaignPayload;
-  const lookupValues = buildAssignedCampaignLookupValues(campaignPayload.campaignId, {
-    ...campaign,
-    campaignId: campaignPayload.campaignId,
-    campaignsId: campaignPayload.campaignsId,
-  });
+  const lookupValues = buildAssignedCampaignLookupValues(
+    campaignPayload.campaignId,
+    {
+      ...campaign,
+      campaignId: campaignPayload.campaignId,
+      campaignsId: campaignPayload.campaignsId,
+    },
+  );
 
   const existingFolders = await BrandFolderModel.find({
     ...buildBrandScopedFolderFilter(brandId),
@@ -2743,7 +2833,9 @@ async function getOrCreateCampaignBrandFolder({ brandId, campaign, campaignPaylo
 
     if (brandFolderCampaignMatches(linked, lookupValues)) return true;
 
-    const folderTitle = folderCleanStr(folder.title || folder.name).toLowerCase();
+    const folderTitle = folderCleanStr(
+      folder.title || folder.name,
+    ).toLowerCase();
     return folderTitle && folderTitle === title.toLowerCase();
   });
 
@@ -2796,7 +2888,7 @@ async function importFullyManagedCampaignGoodFitToBrandFolder({
   const pitchFolders = await findPitchFoldersForBrandCampaignGoodFit(
     rawCampaignId,
     campaign,
-    brandId
+    brandId,
   );
 
   const assignedPitchFolders = pitchFolders.length
@@ -2831,14 +2923,16 @@ async function importFullyManagedCampaignGoodFitToBrandFolder({
       .forEach((item) => {
         const source = {
           pitchFolderId: String(pitchFolder._id || ""),
-          pitchFolderTitle: folderCleanStr(pitchFolder.title || pitchFolder.name),
+          pitchFolderTitle: folderCleanStr(
+            pitchFolder.title || pitchFolder.name,
+          ),
           pitchItemId: String(item._id || item.id || ""),
         };
 
         const normalized = normalizePitchGoodFitItemForBrandFolder(
           item,
           source,
-          campaignPayload
+          campaignPayload,
         );
 
         if (!normalized.profileKey) return;
@@ -2883,7 +2977,6 @@ async function importFullyManagedCampaignGoodFitToBrandFolder({
   };
 }
 
-
 function findPitchFolderItemById(pitchFolders = [], itemId = "") {
   const wanted = folderCleanStr(itemId);
 
@@ -2921,7 +3014,9 @@ function findPitchFolderItemById(pitchFolders = [], itemId = "") {
 async function saveCampaignGoodFitItem(req, res) {
   try {
     const brandId = getFolderAuthedBrandId(req);
-    const rawCampaignId = folderCleanStr(req.params?.campaignId || req.body?.campaignId);
+    const rawCampaignId = folderCleanStr(
+      req.params?.campaignId || req.body?.campaignId,
+    );
     const rawItemId = folderCleanStr(req.params?.itemId || req.body?.itemId);
     const payloadProfile =
       req.body?.profile ||
@@ -2929,6 +3024,9 @@ async function saveCampaignGoodFitItem(req, res) {
       req.body?.creator ||
       req.body?.item ||
       null;
+
+    const nextGoodFit =
+      req.body?.goodFit === undefined ? true : Boolean(req.body.goodFit);
 
     if (!brandId) {
       return res.status(401).json({
@@ -2965,7 +3063,7 @@ async function saveCampaignGoodFitItem(req, res) {
     const assignedPitchFolders = await findPitchFoldersForBrandCampaign(
       rawCampaignId,
       campaign,
-      brandId
+      brandId,
     );
 
     if (!isFullyManagedCampaign(campaign) && !assignedPitchFolders.length) {
@@ -2990,25 +3088,46 @@ async function saveCampaignGoodFitItem(req, res) {
       });
     }
 
-    const brandFolder = await getOrCreateCampaignBrandFolder({
-      brandId,
-      campaign,
-      campaignPayload,
-      req,
-    });
+    /**
+     * IMPORTANT:
+     * Persist the heart state into the original PitchFolder item.
+     * Without this, refresh loads the old item.goodFit value again.
+     */
+    if (
+      pitchFolder?._id &&
+      item?._id &&
+      PitchFolderForBrandGoodFit &&
+      typeof PitchFolderForBrandGoodFit.updateOne === "function"
+    ) {
+      await PitchFolderForBrandGoodFit.updateOne(
+        {
+          _id: pitchFolder._id,
+          "items._id": item._id,
+        },
+        {
+          $set: {
+            "items.$.goodFit": nextGoodFit,
+            "items.$.updatedAt": new Date(),
+          },
+          $currentDate: {
+            updatedAt: true,
+          },
+        },
+      ).exec();
+    }
 
     const source = {
       pitchFolderId: String(
         pitchFolder?._id ||
           payloadProfile?.pitchFolderId ||
           req.body?.pitchFolderId ||
-          ""
+          "",
       ),
       pitchFolderTitle: folderCleanStr(
         pitchFolder?.title ||
           pitchFolder?.name ||
           payloadProfile?.pitchFolderTitle ||
-          req.body?.pitchFolderTitle
+          req.body?.pitchFolderTitle,
       ),
       pitchItemId: String(item._id || item.id || rawItemId || ""),
     };
@@ -3017,11 +3136,77 @@ async function saveCampaignGoodFitItem(req, res) {
       {
         ...item,
         ...payloadProfile,
-        goodFit: true,
+        goodFit: nextGoodFit,
       },
       source,
-      campaignPayload
+      campaignPayload,
     );
+
+    /**
+     * If user unmarks good fit, remove it from the campaign brand folder too.
+     */
+    if (!nextGoodFit) {
+      if (normalized.profileKey) {
+        const lookupValues = buildAssignedCampaignLookupValues(rawCampaignId, {
+          ...campaign,
+          campaignId: campaignPayload.campaignId,
+          campaignsId: campaignPayload.campaignsId,
+        });
+
+        const folders = await BrandFolderModel.find({
+          ...buildBrandScopedFolderFilter(brandId),
+          type: "folder",
+        });
+
+        for (const folder of folders) {
+          const linked = folder.linkedCampaign || {};
+
+          if (!brandFolderCampaignMatches(linked, lookupValues)) continue;
+
+          const beforeCount = Array.isArray(folder.items)
+            ? folder.items.length
+            : 0;
+
+          folder.items = (folder.items || []).filter((folderItem) => {
+            const key =
+              folderItem.profileKey || getBrandFolderProfileKey(folderItem);
+
+            return key !== normalized.profileKey;
+          });
+
+          if (folder.items.length !== beforeCount) {
+            folder.itemCount = folder.items.length;
+            folder.updatedAt = new Date();
+            await folder.save();
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Creator removed from good fit",
+        data: {
+          campaign: campaignPayload,
+          item: {
+            ...normalized,
+            goodFit: false,
+          },
+          goodFit: false,
+          saved: false,
+        },
+      });
+    }
+
+    /**
+     * If user marks good fit, create/reuse campaign brand folder
+     * and save the creator there.
+     */
+    const brandFolder = await getOrCreateCampaignBrandFolder({
+      brandId,
+      campaign,
+      campaignPayload,
+      req,
+    });
 
     const result = normalized.profileKey
       ? upsertProfilesIntoBrandFolder(brandFolder, [normalized])
@@ -3040,9 +3225,13 @@ async function saveCampaignGoodFitItem(req, res) {
       data: {
         campaign: campaignPayload,
         folder: folderPayload,
-        item: normalized,
+        item: {
+          ...normalized,
+          goodFit: true,
+        },
         addedCount: result.added,
         skippedCount: result.skipped,
+        goodFit: true,
         saved: true,
       },
     });
@@ -3056,11 +3245,12 @@ async function saveCampaignGoodFitItem(req, res) {
   }
 }
 
-
 async function getCampaignGoodFitList(req, res) {
   try {
     const brandId = getFolderAuthedBrandId(req);
-    const rawCampaignId = folderCleanStr(req.params?.campaignId || req.query?.campaignId);
+    const rawCampaignId = folderCleanStr(
+      req.params?.campaignId || req.query?.campaignId,
+    );
 
     if (!brandId) {
       return res.status(401).json({
@@ -3093,6 +3283,434 @@ async function getCampaignGoodFitList(req, res) {
   }
 }
 
+function cleanModashLookupHandle(value) {
+  return folderCleanStr(value).replace(/^@+/, "").trim().toLowerCase();
+}
+
+function normalizeModashLookupProvider(value) {
+  const text = folderCleanStr(value).toLowerCase();
+
+  if (text.includes("youtube")) return "youtube";
+  if (text.includes("instagram")) return "instagram";
+  if (text.includes("tiktok") || text.includes("tik tok")) return "tiktok";
+
+  return "";
+}
+
+function getSavedItemRaw(item = {}) {
+  return item.raw && typeof item.raw === "object" ? item.raw : {};
+}
+
+function getSavedItemModash(item = {}) {
+  const raw = getSavedItemRaw(item);
+
+  return (
+    item.modash ||
+    item.modashProfile ||
+    raw.modash ||
+    raw.modashProfile ||
+    raw.profile?.modash ||
+    raw.creator?.modash ||
+    null
+  );
+}
+
+function getSavedItemHandleForModashLookup(item = {}) {
+  const raw = getSavedItemRaw(item);
+  const modash = getSavedItemModash(item) || {};
+
+  return cleanModashLookupHandle(
+    item.handle ||
+      item.username ||
+      item.userName ||
+      raw.handle ||
+      raw.username ||
+      raw.userName ||
+      modash.handle ||
+      modash.username,
+  );
+}
+
+function getSavedItemProviderForModashLookup(item = {}) {
+  const raw = getSavedItemRaw(item);
+  const modash = getSavedItemModash(item) || {};
+
+  return normalizeModashLookupProvider(
+    item.provider ||
+      item.platform ||
+      raw.provider ||
+      raw.platform ||
+      modash.provider,
+  );
+}
+
+function buildModashLookupKey(provider, handle) {
+  return `${normalizeModashLookupProvider(provider) || "*"}:${cleanModashLookupHandle(
+    handle,
+  )}`;
+}
+
+function serializeModashForBrandFolderItem(modash = {}) {
+  return {
+    _id: modash._id ? String(modash._id) : "",
+    influencer: modash.influencer ? String(modash.influencer) : "",
+    influencerId: folderCleanStr(modash.influencerId),
+    provider: folderCleanStr(modash.provider),
+    userId: folderCleanStr(modash.userId),
+    username: folderCleanStr(modash.username),
+    fullname: folderCleanStr(modash.fullname),
+    handle: folderCleanStr(modash.handle || modash.username),
+    url: folderCleanStr(modash.url),
+    picture: folderCleanStr(modash.picture),
+    followers: modash.followers ?? null,
+    engagements: modash.engagements ?? null,
+    engagementRate: modash.engagementRate ?? null,
+    averageViews: modash.averageViews ?? null,
+    isVerified: modash.isVerified ?? null,
+    isPrivate: modash.isPrivate ?? null,
+    country: folderCleanStr(modash.country),
+    language: modash.language ?? "",
+    categories: Array.isArray(modash.categories) ? modash.categories : [],
+  };
+}
+
+async function enrichBrandFoldersWithModashUserIds(folders = []) {
+  if (!ModashModel || typeof ModashModel.find !== "function") {
+    return folders;
+  }
+
+  const handles = new Set();
+
+  folders.forEach((folder) => {
+    const items = Array.isArray(folder.items) ? folder.items : [];
+
+    items.forEach((item) => {
+      const handle = getSavedItemHandleForModashLookup(item);
+      if (handle) handles.add(handle);
+    });
+  });
+
+  if (!handles.size) return folders;
+
+  const handleVariants = Array.from(handles).flatMap((handle) => [
+    handle,
+    `@${handle}`,
+  ]);
+
+  const modashDocs = await ModashModel.find({
+    $or: [
+      { username: { $in: handleVariants } },
+      { handle: { $in: handleVariants } },
+    ],
+  })
+    .select(
+      "_id influencer influencerId provider userId username fullname handle url picture followers engagements engagementRate averageViews isVerified isPrivate country language categories",
+    )
+    .collation({ locale: "en", strength: 2 })
+    .lean();
+
+  const modashMap = new Map();
+
+  modashDocs.forEach((doc) => {
+    const provider = normalizeModashLookupProvider(doc.provider);
+    const username = cleanModashLookupHandle(doc.username);
+    const handle = cleanModashLookupHandle(doc.handle);
+
+    if (username) {
+      modashMap.set(buildModashLookupKey(provider, username), doc);
+      modashMap.set(buildModashLookupKey("", username), doc);
+    }
+
+    if (handle) {
+      modashMap.set(buildModashLookupKey(provider, handle), doc);
+      modashMap.set(buildModashLookupKey("", handle), doc);
+    }
+  });
+
+  return folders.map((folder) => {
+    const items = Array.isArray(folder.items) ? folder.items : [];
+
+    return {
+      ...folder,
+      items: items.map((item) => {
+        const handle = getSavedItemHandleForModashLookup(item);
+        const provider = getSavedItemProviderForModashLookup(item);
+
+        if (!handle) return item;
+
+        const matchedModash =
+          modashMap.get(buildModashLookupKey(provider, handle)) ||
+          modashMap.get(buildModashLookupKey("", handle));
+
+        if (!matchedModash) return item;
+
+        const modashPayload = serializeModashForBrandFolderItem(matchedModash);
+        const raw = getSavedItemRaw(item);
+
+        const primaryLink =
+          item.primaryLink ||
+          item.profileUrl ||
+          item.url ||
+          raw.primaryLink ||
+          raw.profileUrl ||
+          raw.url ||
+          modashPayload.url;
+
+        return {
+          ...item,
+
+          // Use the Modash userId as the authoritative social-profile userId.
+          // Saved folder items often contain a pitch item _id in userId, which is
+          // not enough for Modash profile/view/copy-link flows.
+          userId: modashPayload.userId || item.userId,
+          modashId: modashPayload._id || item.modashId,
+          influencerId: modashPayload.influencerId || item.influencerId,
+          creatorId:
+            item.creatorId ||
+            modashPayload.influencerId ||
+            item.influencerId,
+
+          provider: item.provider || modashPayload.provider,
+          platform: item.platform || modashPayload.provider,
+
+          username: item.username || modashPayload.username,
+          handle: item.handle || modashPayload.handle || modashPayload.username,
+
+          primaryLink,
+          profileUrl: item.profileUrl || primaryLink,
+          url: item.url || primaryLink,
+          links:
+            Array.isArray(item.links) && item.links.length
+              ? item.links
+              : primaryLink
+                ? [primaryLink]
+                : [],
+
+          picture: item.picture || modashPayload.picture,
+          avatarUrl: item.avatarUrl || modashPayload.picture,
+          profileImage: item.profileImage || modashPayload.picture,
+
+          followers: item.followers ?? modashPayload.followers,
+          engagements: item.engagements ?? modashPayload.engagements,
+          engagementRate: item.engagementRate ?? modashPayload.engagementRate,
+          averageViews: item.averageViews ?? modashPayload.averageViews,
+
+          modash: {
+            ...(item.modash || {}),
+            ...modashPayload,
+          },
+
+          modashProfile: {
+            ...(item.modashProfile || {}),
+            ...modashPayload,
+          },
+
+          raw: {
+            ...raw,
+            userId: modashPayload.userId || raw.userId,
+            modashId: modashPayload._id || raw.modashId,
+            influencerId: modashPayload.influencerId || raw.influencerId,
+
+            provider: raw.provider || modashPayload.provider,
+            platform: raw.platform || modashPayload.provider,
+
+            username: raw.username || modashPayload.username,
+            handle: raw.handle || modashPayload.handle || modashPayload.username,
+
+            primaryLink: raw.primaryLink || primaryLink,
+            profileUrl: raw.profileUrl || primaryLink,
+            url: raw.url || primaryLink,
+
+            picture: raw.picture || modashPayload.picture,
+            avatarUrl: raw.avatarUrl || modashPayload.picture,
+
+            modash: {
+              ...(raw.modash || {}),
+              ...modashPayload,
+            },
+
+            modashProfile: {
+              ...(raw.modashProfile || {}),
+              ...modashPayload,
+            },
+          },
+        };
+      }),
+    };
+  });
+}
+
+
+function brandFolderIdMatches(folder = {}, folderId = "") {
+  const id = folderCleanStr(folderId);
+  if (!id || id === "all") return true;
+
+  return [folder._id, folder.id, folder.slug]
+    .map(folderCleanStr)
+    .filter(Boolean)
+    .includes(id);
+}
+
+function parsePositiveInteger(value, fallback, max = 100) {
+  const parsed = Number.parseInt(folderCleanStr(value), 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+
+  return Math.min(parsed, max);
+}
+
+function isTruthyQueryFlag(value) {
+  return ["1", "true", "yes", "on"].includes(
+    folderCleanStr(value).toLowerCase(),
+  );
+}
+
+function isFalseyQueryFlag(value) {
+  return ["0", "false", "no", "off"].includes(
+    folderCleanStr(value).toLowerCase(),
+  );
+}
+
+function shouldPaginateBrandFolderItems(req = {}, includeItems = false) {
+  if (!includeItems) return false;
+
+  const explicit = req.query?.paginateItems ?? req.query?.itemsPagination;
+
+  if (isTruthyQueryFlag(explicit)) return true;
+  if (isFalseyQueryFlag(explicit)) return false;
+
+  return req.query?.page !== undefined ||
+    req.query?.limit !== undefined ||
+    req.query?.itemPage !== undefined ||
+    req.query?.itemLimit !== undefined;
+}
+
+function brandFolderItemSearchMatches(item = {}, search = "") {
+  const q = folderCleanStr(search).toLowerCase();
+  if (!q) return true;
+
+  const raw = getSavedItemRaw(item);
+  const modash = getSavedItemModash(item) || {};
+
+  return [
+    item.name,
+    item.fullname,
+    item.username,
+    item.handle,
+    item.email,
+    item.provider,
+    item.platform,
+    item.country,
+    item.location,
+    item.language,
+    Array.isArray(item.categories) ? item.categories.join(" ") : item.categories,
+    Array.isArray(item.niche) ? item.niche.join(" ") : item.niche,
+    item.userId,
+    item.influencerId,
+    item.creatorId,
+    item.modashId,
+    item.primaryLink,
+    item.profileUrl,
+    item.url,
+    raw.name,
+    raw.fullname,
+    raw.username,
+    raw.handle,
+    raw.email,
+    raw.provider,
+    raw.platform,
+    raw.country,
+    raw.location,
+    raw.language,
+    raw.userId,
+    raw.influencerId,
+    raw.creatorId,
+    raw.modashId,
+    raw.primaryLink,
+    raw.profileUrl,
+    raw.url,
+    modash.userId,
+    modash.username,
+    modash.fullname,
+    modash.handle,
+    modash.provider,
+    modash.url,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(q);
+}
+
+function buildFolderItemPayload(folder = {}, item = {}) {
+  return {
+    ...item,
+    folder: {
+      _id: folderCleanStr(folder._id || folder.id),
+      id: folderCleanStr(folder.id || folder._id),
+      title: folderCleanStr(folder.title || folder.name),
+      name: folderCleanStr(folder.name || folder.title),
+      slug: folderCleanStr(folder.slug),
+      type: folderCleanStr(folder.type || "folder"),
+      linkedCampaign: folder.linkedCampaign || null,
+    },
+  };
+}
+
+function paginateBrandFolderItems(folders = [], options = {}) {
+  const page = parsePositiveInteger(options.page, 1, 100000);
+  const limit = parsePositiveInteger(options.limit, 10, 100);
+  const itemSearch = folderCleanStr(options.itemSearch);
+  const flatItems = [];
+  const folderTotalMap = new Map();
+
+  folders.forEach((folder, folderIndex) => {
+    const folderKey = folderCleanStr(
+      folder._id || folder.id || folder.slug || `folder-${folderIndex}`,
+    );
+    const items = Array.isArray(folder.items) ? folder.items : [];
+
+    items.forEach((item, itemIndex) => {
+      if (!brandFolderItemSearchMatches(item, itemSearch)) return;
+
+      folderTotalMap.set(folderKey, (folderTotalMap.get(folderKey) || 0) + 1);
+      flatItems.push({ folder, folderKey, item, itemIndex });
+    });
+  });
+
+  const totalItems = flatItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+  const start = (page - 1) * limit;
+  const pageItems = flatItems.slice(start, start + limit);
+  const foldersById = new Map();
+
+  pageItems.forEach(({ folder, folderKey, item }) => {
+    if (!foldersById.has(folderKey)) {
+      foldersById.set(folderKey, {
+        ...folder,
+        items: [],
+        itemCount: folderTotalMap.get(folderKey) || 0,
+      });
+    }
+
+    foldersById.get(folderKey).items.push(item);
+  });
+
+  return {
+    folders: Array.from(foldersById.values()),
+    items: pageItems.map(({ folder, item }) => buildFolderItemPayload(folder, item)),
+    pagination: {
+      page,
+      limit,
+      total: totalItems,
+      totalItems,
+      totalPages,
+      hasNext: start + limit < totalItems,
+      hasPrev: page > 1,
+      returnedCount: pageItems.length,
+    },
+  };
+}
 
 async function getFolderList(req, res) {
   try {
@@ -3107,22 +3725,40 @@ async function getFolderList(req, res) {
     }
 
     const folderKind = normalizeBrandFolderKind(
-      req.query?.type || req.query?.folderType || "all"
+      req.query?.type || req.query?.folderType || "all",
     );
 
-    const search = folderCleanStr(req.query?.search || req.query?.q);
+    const search = folderCleanStr(req.query?.search || req.query?.folderSearch);
     const campaignId = folderCleanStr(req.query?.campaignId);
+    const folderId = folderCleanStr(
+      req.query?.folderId || req.query?.selectedFolderId || req.query?.folder,
+    );
+    const itemSearch = folderCleanStr(
+      req.query?.itemSearch || req.query?.influencerSearch,
+    );
 
     const hasItemsOnly = ["1", "true", "yes", "on"].includes(
       folderCleanStr(
         req.query?.hasItems ||
           req.query?.onlyWithItems ||
-          req.query?.hasInfluencers
-      ).toLowerCase()
+          req.query?.hasInfluencers,
+      ).toLowerCase(),
     );
 
     const includeItems = ["1", "true", "yes", "on"].includes(
-      folderCleanStr(req.query?.includeItems).toLowerCase()
+      folderCleanStr(req.query?.includeItems).toLowerCase(),
+    );
+
+    const paginateItems = shouldPaginateBrandFolderItems(req, includeItems);
+    const itemPage = parsePositiveInteger(
+      req.query?.itemPage || req.query?.page,
+      1,
+      100000,
+    );
+    const itemLimit = parsePositiveInteger(
+      req.query?.itemLimit || req.query?.limit,
+      10,
+      100,
     );
 
     const includeFolders = folderKind === "all" || folderKind === "folder";
@@ -3139,8 +3775,9 @@ async function getFolderList(req, res) {
       .sort({ isDefault: -1, updatedAt: -1, createdAt: -1 })
       .lean();
 
-    const cards = docs
+    let cards = docs
       .filter((folder) => brandFolderMatchesCampaign(folder, campaignId))
+      .filter((folder) => brandFolderIdMatches(folder, folderId))
       .filter((folder) => brandFolderSearchMatches(folder, search))
       .filter((folder) => {
         if (!hasItemsOnly) return true;
@@ -3151,7 +3788,29 @@ async function getFolderList(req, res) {
 
         return count > 0;
       })
-      .map(includeItems ? serializeBrandFolderDetail : serializeBrandFolderCard);
+      .map(
+        includeItems ? serializeBrandFolderDetail : serializeBrandFolderCard,
+      );
+
+    if (includeItems) {
+      cards = await enrichBrandFoldersWithModashUserIds(cards);
+    }
+
+    const totalMatchingFolderCount = cards.length;
+    let itemPagination = null;
+    let flatPaginatedItems = [];
+
+    if (paginateItems) {
+      const paginated = paginateBrandFolderItems(cards, {
+        page: itemPage,
+        limit: itemLimit,
+        itemSearch,
+      });
+
+      cards = paginated.folders;
+      itemPagination = paginated.pagination;
+      flatPaginatedItems = paginated.items;
+    }
 
     const normalFolders = includeFolders
       ? cards.filter((folder) => folder.type === "folder")
@@ -3171,12 +3830,15 @@ async function getFolderList(req, res) {
       success: true,
       message: "Folders fetched successfully",
       data: {
-        totalCount: folders.length,
+        totalCount: paginateItems ? totalMatchingFolderCount : folders.length,
         folderCount: normalFolders.length,
         bookmarkCount: bookmarkFolders.length,
         goodFitCount: goodFitFolders.length,
 
         folders,
+        items: flatPaginatedItems,
+        pagination: itemPagination,
+        itemPagination,
 
         groups: {
           folders: normalFolders,
@@ -3211,7 +3873,7 @@ async function createFolder(req, res) {
     const brandRef = folderToObjectId(brandId);
 
     const requestedFolderKind = normalizeBrandFolderKind(
-      body.type || body.folderType || body.kind || "folder"
+      body.type || body.folderType || body.kind || "folder",
     );
 
     const type = requestedFolderKind === "all" ? "folder" : requestedFolderKind;
@@ -3323,13 +3985,21 @@ async function saveGoodFitInfluencer(req, res) {
       .map((item) => {
         const normalized = normalizeBrandFolderItem(item, "good_fit");
         normalized.source = {
-          source: folderCleanStr(item.source || req.body.source || "brand_good_fit"),
-          pitchFolderId: folderCleanStr(item.pitchFolderId || req.body.pitchFolderId),
-          pitchFolderTitle: folderCleanStr(item.pitchFolderTitle || req.body.pitchFolderTitle),
+          source: folderCleanStr(
+            item.source || req.body.source || "brand_good_fit",
+          ),
+          pitchFolderId: folderCleanStr(
+            item.pitchFolderId || req.body.pitchFolderId,
+          ),
+          pitchFolderTitle: folderCleanStr(
+            item.pitchFolderTitle || req.body.pitchFolderTitle,
+          ),
           pitchItemId: folderCleanStr(item.pitchItemId || req.body.pitchItemId),
           campaignId: folderCleanStr(item.campaignId || req.body.campaignId),
           campaignsId: folderCleanStr(item.campaignsId || req.body.campaignsId),
-          campaignTitle: folderCleanStr(item.campaignTitle || req.body.campaignTitle),
+          campaignTitle: folderCleanStr(
+            item.campaignTitle || req.body.campaignTitle,
+          ),
           importedAt: new Date(),
         };
         return normalized;
@@ -3518,7 +4188,243 @@ async function getbookmarkProfile(req, res) {
     });
   }
 }
+async function getOrCreateNonFullyManagedCampaignFolder({
+  brandId,
+  campaign,
+  campaignPayload,
+  req,
+}) {
+  const title = getCampaignDisplayNameForBrandFolder(campaign);
+  const linkedCampaign = campaignPayload;
 
+  const lookupValues = buildAssignedCampaignLookupValues(
+    campaignPayload.campaignId,
+    {
+      ...campaign,
+      campaignId: campaignPayload.campaignId,
+      campaignsId: campaignPayload.campaignsId,
+    },
+  );
+
+  const existingFolders = await BrandFolderModel.find({
+    ...buildBrandScopedFolderFilter(brandId),
+    type: "folder",
+  });
+
+  const existing = existingFolders.find((folder) => {
+    if (folder.isDefault) return false;
+
+    const linked = folder.linkedCampaign || {};
+
+    if (brandFolderCampaignMatches(linked, lookupValues)) return true;
+
+    const folderTitle = folderCleanStr(
+      folder.title || folder.name,
+    ).toLowerCase();
+    return folderTitle && folderTitle === title.toLowerCase();
+  });
+
+  if (existing) {
+    if (!existing.linkedCampaign || !existing.linkedCampaign.campaignId) {
+      existing.linkedCampaign = linkedCampaign;
+      existing.updatedAt = new Date();
+      await existing.save();
+    }
+
+    return existing;
+  }
+
+  const slug = await buildUniqueBrandFolderSlug(brandId, title);
+
+  return BrandFolderModel.create({
+    title,
+    name: title,
+    slug,
+    description: "",
+
+    brandId,
+    brandRef: folderToObjectId(brandId),
+    brandName: folderCleanStr(req?.brand?.name || campaignPayload.brandName),
+
+    type: "folder",
+    creatorTier: folderCleanStr(req?.body?.creatorTier || req?.body?.tier),
+
+    linkedCampaign,
+
+    items: [],
+    itemCount: 0,
+
+    isDefault: false,
+    createdByBrand: req?.brand?._id || req?.brand?.id || brandId,
+    archivedAt: null,
+  });
+}
+
+async function moveInfluencerToCampaignFolder(req, res) {
+  try {
+    const brandId = getFolderAuthedBrandId(req);
+
+    if (!brandId) {
+      return res.status(401).json({
+        success: false,
+        error: "Brand authentication is required",
+      });
+    }
+
+    const rawCampaignId = folderCleanStr(
+      req.body?.campaignId || req.body?.campaignsId,
+    );
+
+    const incomingInfluencer =
+      req.body?.profile ||
+      req.body?.influencer ||
+      req.body?.creator ||
+      req.body?.item ||
+      null;
+
+    if (!rawCampaignId) {
+      return res.status(400).json({
+        success: false,
+        error: "campaignId is required",
+      });
+    }
+
+    if (!incomingInfluencer) {
+      return res.status(400).json({
+        success: false,
+        error: "influencer payload is required",
+      });
+    }
+
+    const campaign = await findBrandCampaignByAnyId(rawCampaignId, brandId);
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        error: "Campaign not found",
+      });
+    }
+
+    if (isFullyManagedCampaign(campaign)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Only non fully managed campaigns can be used for move to folder",
+      });
+    }
+
+    const campaignPayload = buildBrandCampaignPayload(campaign, brandId);
+
+    if (!campaignPayload.campaignTitle && req.body?.campaignTitle) {
+      campaignPayload.campaignTitle = folderCleanStr(req.body.campaignTitle);
+    }
+
+    const normalizedInfluencer = normalizeBrandFolderItem(
+      {
+        ...incomingInfluencer,
+        campaignId: campaignPayload.campaignId,
+        campaignsId: campaignPayload.campaignsId,
+        campaignTitle: campaignPayload.campaignTitle,
+      },
+      "saved",
+    );
+
+    if (!normalizedInfluencer.profileKey) {
+      return res.status(400).json({
+        success: false,
+        error: "Unable to identify influencer profile key",
+      });
+    }
+
+    const destinationFolder = await getOrCreateNonFullyManagedCampaignFolder({
+      brandId,
+      campaign,
+      campaignPayload,
+      req,
+    });
+
+    const existingDestinationIndex = Array.isArray(destinationFolder.items)
+      ? destinationFolder.items.findIndex((item) => {
+          const key = item.profileKey || getBrandFolderProfileKey(item);
+          return key === normalizedInfluencer.profileKey;
+        })
+      : -1;
+
+    if (!Array.isArray(destinationFolder.items)) {
+      destinationFolder.items = [];
+    }
+
+    if (existingDestinationIndex >= 0) {
+      const previousItem = destinationFolder.items[existingDestinationIndex];
+
+      destinationFolder.items[existingDestinationIndex] = {
+        ...previousItem,
+        ...normalizedInfluencer,
+        addedAt: previousItem.addedAt || normalizedInfluencer.addedAt,
+        updatedAt: new Date(),
+      };
+    } else {
+      destinationFolder.items.push(normalizedInfluencer);
+    }
+
+    destinationFolder.itemCount = destinationFolder.items.length;
+    destinationFolder.updatedAt = new Date();
+
+    await destinationFolder.save();
+
+    const otherFolders = await BrandFolderModel.find({
+      ...buildBrandScopedFolderFilter(brandId),
+      type: "folder",
+      _id: { $ne: destinationFolder._id },
+    });
+
+    const removedFromFolders = [];
+
+    for (const folder of otherFolders) {
+      const items = Array.isArray(folder.items) ? folder.items : [];
+      const beforeCount = items.length;
+
+      folder.items = items.filter((item) => {
+        const key = item.profileKey || getBrandFolderProfileKey(item);
+        return key !== normalizedInfluencer.profileKey;
+      });
+
+      if (folder.items.length !== beforeCount) {
+        folder.itemCount = folder.items.length;
+        folder.updatedAt = new Date();
+        await folder.save();
+
+        removedFromFolders.push({
+          _id: String(folder._id),
+          title: folder.title || folder.name || "",
+        });
+      }
+    }
+
+    const folderPayload = serializeBrandFolderDetail(
+      destinationFolder.toObject(),
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Influencer moved to campaign folder successfully",
+      data: {
+        campaign: campaignPayload,
+        folder: folderPayload,
+        item: normalizedInfluencer,
+        moved: true,
+        removedFromFolders,
+      },
+    });
+  } catch (err) {
+    console.error("[moveInfluencerToCampaignFolder] Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal error",
+    });
+  }
+}
 module.exports = {
   sendSignupOtp,
   verifyOtpSignUp,
@@ -3541,5 +4447,5 @@ module.exports = {
   getFolderList,
   addbookmarkProfile,
   getbookmarkProfile,
+  moveInfluencerToCampaignFolder,
 };
-
