@@ -1940,9 +1940,7 @@ exports.prefillCampaignWithAI = async (req, res) => {
     }
 
     const productLink = clean(req.body.productLink);
-    if (productLink && !isValidHttpUrl(productLink)) {
-      return failField(res, HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "productLink", requestId, "productLink must be a valid http/https URL");
-    }
+    
 
     const videoLink = clean(req.body.videoLink);
     if (videoLink && !isValidHttpUrl(videoLink)) {
