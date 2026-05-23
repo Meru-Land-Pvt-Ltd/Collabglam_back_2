@@ -1934,10 +1934,39 @@ exports.prefillCampaignWithAI = async (req, res) => {
     if (!ageR.ok) return ageR.resp;
 
     const imgs = toUnknownArray(req.body.productImages);
-    const uploadedProductImages = await normalizeAndUploadProductImages(imgs);
-    if (!imgs.length) {
-      return failField(res, HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "productImages", requestId);
+
+if (!imgs.length) {
+  return failField(
+    res,
+    HttpStatus.BAD_REQUEST,
+    "VALIDATION_ERROR",
+    "productImages",
+    requestId
+  );
+}
+
+const uploadedProductImages = imgs
+  .map((img) => {
+    if (typeof img === "string") return clean(img);
+
+    if (img && typeof img === "object") {
+      return clean(
+        img.url ||
+        img.imageUrl ||
+        img.s3Url ||
+        img.s3Link ||
+        img.location ||
+        img.Location ||
+        img.secure_url ||
+        img.src ||
+        img.path ||
+        ""
+      );
     }
+
+    return "";
+  })
+  .filter(Boolean);
 
     const productLink = clean(req.body.productLink);
     
