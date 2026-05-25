@@ -4966,6 +4966,32 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
   }
 };
 
+async function activateDueScheduledCampaignsForBrand(brandObjectId) {
+  const now = new Date();
+
+  await Campaign.updateMany(
+    {
+      brandId: brandObjectId,
+      status: "scheduled",
+      scheduledAt: { $lte: now },
+      isDraft: { $ne: 1 },
+    },
+    {
+      $set: {
+        status: "active",
+        isActive: 1,
+        isDraft: 0,
+        publishStatus: "published",
+        publishedAt: now,
+        statusUpdatedAt: now,
+      },
+      $unset: {
+        scheduledLocation: "",
+      },
+    }
+  );
+}
+
 exports.getCampaignsByBrandId = async (req, res) => {
   try {
     const {
@@ -4996,6 +5022,8 @@ exports.getCampaignsByBrandId = async (req, res) => {
     const safeLimit = Math.max(parseInt(limit, 10) || 1000, 1);
     const skip = (safePage - 1) * safeLimit;
 
+    await activateDueScheduledCampaignsForBrand(brandObjectId);
+    const now = new Date();
     const normalizedStatus = String(status || "").trim().toLowerCase();
 
     const validStatuses = new Set([
@@ -5029,14 +5057,10 @@ exports.getCampaignsByBrandId = async (req, res) => {
         });
       } else if (normalizedStatus === "scheduled") {
         andFilters.push({
-          $or: [
-            { status: "scheduled" },
-            {
-              scheduledAt: { $ne: null },
-              isActive: { $ne: 1 },
-              isDraft: { $ne: 1 },
-            },
-          ],
+          status: "scheduled",
+          scheduledAt: { $gt: now },
+          isActive: { $ne: 1 },
+          isDraft: { $ne: 1 },
         });
       } else if (normalizedStatus === "active") {
         andFilters.push({
@@ -5304,11 +5328,11 @@ function normalizeAlreadyUploadedProductImage(item) {
 
   const url = cleanImageString(
     item.dataUrl ||
-      item.url ||
-      item.Location ||
-      item.location ||
-      item.secure_url ||
-      item.s3Url
+    item.url ||
+    item.Location ||
+    item.location ||
+    item.secure_url ||
+    item.s3Url
   );
 
   if (!url || !isValidHttpUrl(url)) return null;
@@ -5344,13 +5368,13 @@ async function normalizeProductImagesForDraft(productImages) {
         ? cleanImageString(item)
         : item && typeof item === "object"
           ? cleanImageString(
-              item.dataUrl ||
-                item.url ||
-                item.Location ||
-                item.location ||
-                item.secure_url ||
-                item.s3Url
-            )
+            item.dataUrl ||
+            item.url ||
+            item.Location ||
+            item.location ||
+            item.secure_url ||
+            item.s3Url
+          )
           : "";
 
     if (!raw) continue;
