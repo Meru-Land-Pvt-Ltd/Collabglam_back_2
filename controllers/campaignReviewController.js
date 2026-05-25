@@ -89,9 +89,9 @@ function escapeRegex(value = "") {
 function getFrontendBaseUrl() {
   return String(
     process.env.FRONTEND_URL ||
-      process.env.CLIENT_URL ||
-      process.env.NEXT_PUBLIC_FRONTEND_URL ||
-      "http://localhost:3000"
+    process.env.CLIENT_URL ||
+    process.env.NEXT_PUBLIC_FRONTEND_URL ||
+    "http://localhost:3000"
   ).replace(/\/+$/, "");
 }
 
@@ -160,8 +160,8 @@ function normalizeTags(value = []) {
   const raw = Array.isArray(value)
     ? value
     : String(value || "")
-        .split(",")
-        .map((item) => item.trim());
+      .split(",")
+      .map((item) => item.trim());
 
   return uniqueStrings(raw)
     .map((tag) => tag.slice(0, 60))
@@ -365,17 +365,17 @@ function buildQuestionnaireSubmission({ reviewType, docs = {}, body = {} }) {
       tags,
       metrics: isPlatformReviewType(type)
         ? {
-            platformExperience: workingFeel,
-            supportExperience: noteStarRating,
-            wouldRecommend: noteStarRating,
-          }
+          platformExperience: workingFeel,
+          supportExperience: noteStarRating,
+          wouldRecommend: noteStarRating,
+        }
         : {
-            workQuality: visionMatch,
-            communication: reliability,
-            timeliness: reliability,
-            professionalism: workingFeel,
-            wouldRecommend: noteStarRating,
-          },
+          workQuality: visionMatch,
+          communication: reliability,
+          timeliness: reliability,
+          professionalism: workingFeel,
+          wouldRecommend: noteStarRating,
+        },
     },
   };
 }
@@ -428,6 +428,38 @@ function isPlatformReviewType(reviewType) {
   return [REVIEW_TYPES.BRAND_TO_PLATFORM, REVIEW_TYPES.INFLUENCER_TO_PLATFORM].includes(
     normalizeReviewType(reviewType)
   );
+}
+
+const PLATFORM_REVIEW_REMIND_LATER_DAYS = 7;
+
+function getPlatformReviewNextPromptAt(skippedAt) {
+  if (!skippedAt) return null;
+
+  const date = new Date(skippedAt);
+  if (Number.isNaN(date.getTime())) return null;
+
+  date.setDate(date.getDate() + PLATFORM_REVIEW_REMIND_LATER_DAYS);
+  return date;
+}
+
+function shouldForceSimplePlatformRating({ reviewType, submittedVia }) {
+  return (
+    isPlatformReviewType(reviewType) &&
+    [
+      SUBMITTED_VIA.BRAND_PLATFORM_MODAL,
+      SUBMITTED_VIA.INFLUENCER_PLATFORM_MODAL,
+    ].includes(submittedVia)
+  );
+}
+
+function buildSimplePlatformMetrics(rating, existingMetrics = {}) {
+  const incoming = normalizeMetrics(existingMetrics);
+
+  return {
+    platformExperience: incoming.platformExperience || rating,
+    supportExperience: incoming.supportExperience || rating,
+    wouldRecommend: incoming.wouldRecommend || rating,
+  };
 }
 
 function buildReviewRolePayload({ reviewType, brandId = null, influencerId = null }) {
@@ -869,14 +901,45 @@ function buildReviewIdentityQuery({ reviewType, campaignId, brandId, influencerI
   throw httpError("Invalid reviewType", 400);
 }
 
-function normalizeReviewInput(body = {}) {
-  const nested = body.review && typeof body.review === "object" && !Array.isArray(body.review) ? body.review : {};
+function normalizeReviewInput(body = {}, options = {}) {
+  const nested =
+    body.review && typeof body.review === "object" && !Array.isArray(body.review)
+      ? body.review
+      : {};
+
   const src = { ...body, ...nested };
+
+  const rawRating =
+    src.rating ??
+    src.overallRating ??
+    src.finalRating ??
+    src.noteStarRating ??
+    src.note_rating;
+
+  if (options.forceSimplePlatformRating) {
+    const rating = requiredRating(rawRating, "Rating");
+
+    return {
+      isQuestionnaireSubmission: false,
+      answers: {},
+      rating,
+      noteStarRating: rating,
+      reviewTitle: sanitizeText(src.reviewTitle ?? src.title ?? "", 160),
+      reviewText: sanitizeText(src.reviewText ?? src.note ?? src.comment ?? src.feedback ?? "", 3000),
+      privateFeedback: sanitizeText(src.privateFeedback ?? "", 3000),
+      tags: normalizeTags(src.tags ?? []),
+      metrics: buildSimplePlatformMetrics(rating, src.metrics ?? src.ratings ?? {}),
+    };
+  }
 
   if (hasQuestionnaireAnswers(src)) {
     const answers = normalizeAnswerInput(src);
     const rating = requiredRating(
-      answers.note_star_rating ?? src.rating ?? src.overallRating ?? src.finalRating ?? src.noteStarRating,
+      answers.note_star_rating ??
+      src.rating ??
+      src.overallRating ??
+      src.finalRating ??
+      src.noteStarRating,
       "Overall star rating"
     );
 
@@ -893,10 +956,7 @@ function normalizeReviewInput(body = {}) {
     };
   }
 
-  const rating = requiredRating(
-    src.rating ?? src.overallRating ?? src.finalRating ?? src.noteStarRating ?? src.note_rating,
-    "Rating"
-  );
+  const rating = requiredRating(rawRating, "Rating");
 
   return {
     isQuestionnaireSubmission: false,
@@ -1107,11 +1167,11 @@ async function hydrateReview(review = {}) {
 
     generatedByAdmin: raw.generatedByAdminId
       ? {
-          _id: raw.generatedByAdminId._id,
-          name: raw.generatedByAdminId.name || raw.generatedByAdminName || "",
-          email: raw.generatedByAdminId.email || raw.generatedByAdminEmail || "",
-          role: raw.generatedByAdminId.role || raw.generatedByAdminRole || "",
-        }
+        _id: raw.generatedByAdminId._id,
+        name: raw.generatedByAdminId.name || raw.generatedByAdminName || "",
+        email: raw.generatedByAdminId.email || raw.generatedByAdminEmail || "",
+        role: raw.generatedByAdminId.role || raw.generatedByAdminRole || "",
+      }
       : null,
   };
 }
@@ -1132,7 +1192,7 @@ async function publicReviewPayload(review, docs = {}) {
     status: raw.status,
     submittedVia: raw.submittedVia,
     tokenExpiresAt: raw.tokenExpiresAt,
-    canEdit: raw.status === REVIEW_STATUS.SUBMITTED,
+    canEdit: false,
 
     rating: raw.rating,
     noteStarRating: raw.noteStarRating,
@@ -1176,7 +1236,13 @@ async function submitDirectReview(req, res, { reviewType, submittedVia }) {
     const sourceEntityType = sanitizeSourceEntityType(sourceEntityTypeFromBody || defaultSource.sourceEntityType);
     const sourceEntityId = sanitizeSourceEntityId(sourceEntityIdFromBody || defaultSource.sourceEntityId);
 
-    const input = normalizeReviewInput(req.body || {});
+    const input = normalizeReviewInput(req.body || {}, {
+      reviewType: type,
+      forceSimplePlatformRating: shouldForceSimplePlatformRating({
+        reviewType: type,
+        submittedVia,
+      }),
+    });
     const identityQuery = buildReviewIdentityQuery({
       reviewType: type,
       ...contextIds,
@@ -1184,9 +1250,27 @@ async function submitDirectReview(req, res, { reviewType, submittedVia }) {
       sourceEntityId,
     });
 
+    const existingSubmitted = await CampaignReview.findOne({
+      ...identityQuery,
+      status: REVIEW_STATUS.SUBMITTED,
+    }).lean();
+
+    if (existingSubmitted) {
+      return res.status(409).json({
+        success: false,
+        message: "Review already submitted",
+        data: {
+          shouldPrompt: false,
+          status: REVIEW_STATUS.SUBMITTED,
+          reviewId: existingSubmitted._id,
+          alreadyHandled: true,
+        },
+      });
+    }
+
     let review = await CampaignReview.findOne({
       ...identityQuery,
-      status: { $in: [REVIEW_STATUS.SUBMITTED, REVIEW_STATUS.SKIPPED, REVIEW_STATUS.PENDING] },
+      status: { $in: [REVIEW_STATUS.SKIPPED, REVIEW_STATUS.PENDING] },
     }).select("+tokenHash");
 
     if (!review) {
@@ -1231,7 +1315,7 @@ async function submitDirectReview(req, res, { reviewType, submittedVia }) {
 
     return res.status(200).json({
       success: true,
-      message: wasUpdate ? "Review updated successfully" : "Review submitted successfully",
+      message: "Review submitted successfully",
       data: await hydrateReview(await CampaignReview.findById(review._id).populate(REVIEW_POPULATE).lean()),
     });
   } catch (error) {
@@ -1281,10 +1365,17 @@ async function getReviewPromptState(req, res, { reviewType }) {
 
     const docs = await loadReviewDocs({ campaignId, brandId, influencerId, reviewType: type });
     const contextIds = getContextIdsFromDocs(docs);
-    const defaultSource = defaultSourceForReview({ reviewType: type, campaignId: contextIds.campaignId });
+    const defaultSource = defaultSourceForReview({
+      reviewType: type,
+      campaignId: contextIds.campaignId,
+    });
 
-    const sourceEntityType = sanitizeSourceEntityType(req.body?.sourceEntityType || defaultSource.sourceEntityType);
-    const sourceEntityId = sanitizeSourceEntityId(req.body?.sourceEntityId || defaultSource.sourceEntityId);
+    const sourceEntityType = sanitizeSourceEntityType(
+      req.body?.sourceEntityType || defaultSource.sourceEntityType
+    );
+    const sourceEntityId = sanitizeSourceEntityId(
+      req.body?.sourceEntityId || defaultSource.sourceEntityId
+    );
 
     const handledReview = await CampaignReview.findOne({
       ...buildReviewIdentityQuery({
@@ -1295,18 +1386,46 @@ async function getReviewPromptState(req, res, { reviewType }) {
       }),
       status: { $in: [REVIEW_STATUS.SUBMITTED, REVIEW_STATUS.SKIPPED] },
     })
-      .select("_id reviewRequestId status rating submittedAt firstSubmittedAt skippedAt skippedVia reviewUpdateCount")
+      .select(
+        "_id reviewRequestId status rating submittedAt firstSubmittedAt skippedAt skippedVia reviewUpdateCount"
+      )
+      .sort({ submittedAt: -1, skippedAt: -1, updatedAt: -1, createdAt: -1 })
       .lean();
 
-    if (handledReview) {
+    if (handledReview?.status === REVIEW_STATUS.SUBMITTED) {
       return res.status(200).json({
         success: true,
         data: {
           shouldPrompt: false,
-          reason:
-            handledReview.status === REVIEW_STATUS.SUBMITTED
-              ? "review_already_submitted"
-              : "review_already_skipped",
+          reason: "review_already_submitted",
+          review: handledReview,
+        },
+      });
+    }
+
+    if (handledReview?.status === REVIEW_STATUS.SKIPPED) {
+      if (isPlatformReviewType(type)) {
+        const nextPromptAt = getPlatformReviewNextPromptAt(handledReview.skippedAt);
+        const canPromptAgain = !nextPromptAt || nextPromptAt <= new Date();
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            shouldPrompt: canPromptAgain,
+            reason: canPromptAgain
+              ? "review_skip_window_expired"
+              : "review_skipped_until",
+            nextPromptAt,
+            review: handledReview,
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          shouldPrompt: false,
+          reason: "review_already_skipped",
           review: handledReview,
         },
       });
@@ -1388,10 +1507,15 @@ async function skipDirectReview(req, res, { reviewType, skippedVia }) {
       });
     }
 
+    const skippedAt = new Date();
+    const nextPromptAt = isPlatformReviewType(type)
+      ? getPlatformReviewNextPromptAt(skippedAt)
+      : null;
+
     review.status = REVIEW_STATUS.SKIPPED;
     review.submittedVia = skippedVia;
     review.skippedVia = skippedVia;
-    review.skippedAt = review.skippedAt || new Date();
+    review.skippedAt = skippedAt;
     review.skipReason = sanitizeText(skipReason, 500);
     review.sourceEntityType = sourceEntityType;
     review.sourceEntityId = sourceEntityId;
@@ -1407,6 +1531,7 @@ async function skipDirectReview(req, res, { reviewType, skippedVia }) {
         reviewId: review._id,
         reviewRequestId: review.reviewRequestId,
         skippedAt: review.skippedAt,
+        nextPromptAt,
         alreadyHandled: true,
       },
     });
@@ -1713,8 +1838,8 @@ exports.getReviewByToken = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      canUpdate: review.status === REVIEW_STATUS.SUBMITTED,
-      canSubmit: [REVIEW_STATUS.PENDING, REVIEW_STATUS.SUBMITTED, REVIEW_STATUS.SKIPPED].includes(review.status),
+      canUpdate: false,
+      canSubmit: [REVIEW_STATUS.PENDING, REVIEW_STATUS.SKIPPED].includes(review.status),
       data: await publicReviewPayload(review),
     });
   } catch (error) {
@@ -1749,6 +1874,19 @@ exports.submitReviewByToken = async (req, res) => {
       return res.status(410).json({ success: false, message: "This review link has expired" });
     }
 
+    if (review.status === REVIEW_STATUS.SUBMITTED) {
+      return res.status(409).json({
+        success: false,
+        message: "Review already submitted",
+        data: {
+          shouldPrompt: false,
+          status: REVIEW_STATUS.SUBMITTED,
+          reviewId: review._id,
+          alreadyHandled: true,
+        },
+      });
+    }
+
     const docs = await loadReviewDocs({
       campaignId: review.campaignId,
       brandId: review.brandId,
@@ -1756,8 +1894,10 @@ exports.submitReviewByToken = async (req, res) => {
       reviewType: review.reviewType,
     });
 
+    
+
     const input = normalizeReviewInput(req.body || {});
-    const wasUpdate = await applyReviewSubmissionFields({
+    await applyReviewSubmissionFields({
       review,
       reviewType: review.reviewType,
       docs,
@@ -1777,9 +1917,9 @@ exports.submitReviewByToken = async (req, res) => {
     if (generatedByAdmin?._id) {
       await notifySafely("review submitted admin notification", {
         adminId: String(generatedByAdmin._id),
-        type: wasUpdate ? "review.updated" : "review.submitted",
-        title: wasUpdate ? "Review updated" : "Review submitted",
-        message: `A ${review.reviewType} review was ${wasUpdate ? "updated" : "submitted"} with ${input.rating}/5.`,
+        type: "review.submitted",
+        title: "Review submitted",
+        message: `A ${review.reviewType} review was submitted with ${input.rating}/5.`,
         entityType: "campaign_review",
         entityId: String(review._id),
         actionPath: { admin: `/admin/rating-reviews?reviewId=${review._id}` },
@@ -1788,7 +1928,7 @@ exports.submitReviewByToken = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: wasUpdate ? "Review updated successfully" : "Review submitted successfully",
+      message: "Review submitted successfully",
       data: await hydrateReview(await CampaignReview.findById(review._id).populate(REVIEW_POPULATE).lean()),
     });
   } catch (error) {
@@ -1981,7 +2121,7 @@ async function createSingleReviewLink({ req, reviewType, campaignId, brandId, in
         publicUrl: review.publicUrl,
         isExistingLink: true,
         regenerated: false,
-        isUpdateLink: review.status === REVIEW_STATUS.SUBMITTED,
+        isUpdateLink: false,
         isSkippedLink: review.status === REVIEW_STATUS.SKIPPED,
         wasExpired: false,
       };
@@ -1998,7 +2138,7 @@ async function createSingleReviewLink({ req, reviewType, campaignId, brandId, in
       publicUrl: review.publicUrl,
       isExistingLink: true,
       regenerated: true,
-      isUpdateLink: review.status === REVIEW_STATUS.SUBMITTED,
+      isUpdateLink: false,
       isSkippedLink: review.status === REVIEW_STATUS.SKIPPED,
       wasExpired: Boolean(isExpired),
     };
@@ -2117,7 +2257,7 @@ function reviewLinkPayload(review = {}) {
     expiresAt: review.tokenExpiresAt,
     isExistingLink: true,
     regenerated: false,
-    isUpdateLink: review.status === REVIEW_STATUS.SUBMITTED,
+    isUpdateLink: false,
     isSkippedLink: review.status === REVIEW_STATUS.SKIPPED,
     wasExpired: Boolean(review.tokenExpiresAt && review.tokenExpiresAt < new Date()),
   };
@@ -2148,9 +2288,9 @@ exports.listAdminReviewLinks = async (req, res) => {
     const requestedTypes = Array.isArray(reviewTypes)
       ? reviewTypes
       : String(reviewTypes || reviewType || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
 
     const validTypes = uniqueStrings(requestedTypes.map(normalizeReviewType)).filter(isCampaignPairReviewType);
     if (validTypes.length) {

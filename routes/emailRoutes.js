@@ -11,8 +11,12 @@ router.get("/templates/:key", emailController.getTemplateByKey);
 // Threads
 router.post("/threads", emailController.createThread);
 router.get("/threads/brand/:brandId", emailController.getThreadsForBrand);
-router.get("/threads/influencer/:influencerId", emailController.getThreadsForInfluencer);
+router.get(
+  "/threads/influencer/:influencerId",
+  emailController.getThreadsForInfluencer
+);
 router.get("/messages/:threadId", emailController.getMessagesForThread);
+router.post("/threads/:threadId/read", emailController.markThreadAsRead);
 
 // Sending
 router.post("/brand-to-influencer", emailController.sendBrandToInfluencer);
@@ -20,7 +24,10 @@ router.post("/influencer-to-brand", emailController.sendInfluencerToBrand);
 
 // Campaign invitation
 router.post("/campaign-invitation", emailController.sendCampaignInvitation);
-router.post("/campaign-invitation/preview", emailController.getCampaignInvitationPreview);
+router.post(
+  "/campaign-invitation/preview",
+  emailController.getCampaignInvitationPreview
+);
 
 // Brand sidebar + inbox
 router.get("/brand/contacts", emailController.getBrandContacts);
@@ -33,11 +40,18 @@ router.post("/invitation", emailController.handleEmailInvitation);
 router.post("/inbound", emailInboundController.handleInboundEmail);
 
 // Influencer app conversations
-router.get("/conversations", emailController.getConversationsForCurrentInfluencer);
-router.get("/conversations/:id", emailController.getConversationForCurrentInfluencer);
+router.get(
+  "/conversations",
+  emailController.getConversationsForCurrentInfluencer
+);
+router.get(
+  "/conversations/:id",
+  emailController.getConversationForCurrentInfluencer
+);
 
 // Welcome email
 router.post("/send-welcome", welcomeEmailController.sendWelcomeEmail);
 
 router.get("/participants", emailController.getEmailParticipants);
+
 module.exports = router;
