@@ -791,6 +791,141 @@ function threadMatchForBrand(brandDoc) {
   return { brand: brandDoc._id };
 }
 
+function getReadState(threadLike, role) {
+  const safeRole = role === "brand" ? "brand" : "influencer";
+  const unreadField =
+    safeRole === "brand" ? "brandUnreadCount" : "influencerUnreadCount";
+  const readAtField =
+    safeRole === "brand" ? "brandLastReadAt" : "influencerLastReadAt";
+
+  const unreadCount = Math.max(0, Number(threadLike?.[unreadField] || 0));
+
+  return {
+    unreadCount,
+    isUnread: unreadCount > 0,
+    lastReadAt: threadLike?.[readAtField] || null,
+  };
+}
+
+function buildReadPatch(role) {
+  const now = new Date();
+
+  if (role === "brand") {
+    return {
+      brandLastReadAt: now,
+      brandUnreadCount: 0,
+    };
+  }
+
+  return {
+    influencerLastReadAt: now,
+    influencerUnreadCount: 0,
+  };
+}
+
+async function assertThreadAccessForRead({ thread, role, brandId, influencerId }) {
+  if (role === "brand") {
+    if (!brandId) {
+      const err = new Error("brandId is required to mark brand thread as read.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const brand = await findBrandById(brandId);
+    if (!brand) {
+      const err = new Error("Brand not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (!sameId(thread.brand, brand._id)) {
+      const err = new Error("Forbidden");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    return;
+  }
+
+  if (!influencerId) {
+    const err = new Error(
+      "influencerId is required to mark influencer thread as read."
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const influencer = await findInfluencerById(influencerId);
+  if (!influencer) {
+    const err = new Error("Influencer not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!sameId(thread.influencer, influencer._id)) {
+    const err = new Error("Forbidden");
+    err.statusCode = 403;
+    throw err;
+  }
+}
+
+async function markThreadAsRead(req, res) {
+  try {
+    const { threadId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(String(threadId))) {
+      return res.status(400).json({ error: "Invalid threadId" });
+    }
+
+    const role = safeLower(req.body?.role || req.query?.role);
+    const brandId = req.body?.brandId || req.query?.brandId;
+    const influencerId = req.body?.influencerId || req.query?.influencerId;
+
+    if (!["brand", "influencer"].includes(role)) {
+      return res.status(400).json({
+        error: 'role is required and must be either "brand" or "influencer".',
+      });
+    }
+
+    const thread = await EmailThread.findById(threadId).lean();
+
+    if (!thread) {
+      return res.status(404).json({ error: "Thread not found" });
+    }
+
+    await assertThreadAccessForRead({
+      thread,
+      role,
+      brandId,
+      influencerId,
+    });
+
+    const patch = buildReadPatch(role);
+
+    await EmailThread.updateOne(
+      { _id: thread._id },
+      {
+        $set: patch,
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      threadId: String(thread._id),
+      role,
+      unreadCount: 0,
+      isUnread: false,
+      lastReadAt:
+        role === "brand" ? patch.brandLastReadAt : patch.influencerLastReadAt,
+    });
+  } catch (err) {
+    console.error("markThreadAsRead error:", err);
+    return res.status(err.statusCode || 500).json({
+      error: err.message || "Internal server error",
+    });
+  }
+}
+
 // ===============================
 // Brand follow-up policy
 // ===============================
@@ -1102,7 +1237,21 @@ async function createAndSendMessage({
   thread.lastMessageAt = msg.createdAt;
   thread.lastMessageDirection = direction;
   thread.lastMessageSnippet = safeStr(finalTextBody).slice(0, 200);
+  const readAt = msg.createdAt || new Date();
 
+  if (direction === "brand_to_influencer") {
+    thread.brandLastReadAt = readAt;
+    thread.brandUnreadCount = 0;
+    thread.influencerUnreadCount =
+      Math.max(0, Number(thread.influencerUnreadCount || 0)) + 1;
+  }
+
+  if (direction === "influencer_to_brand") {
+    thread.influencerLastReadAt = readAt;
+    thread.influencerUnreadCount = 0;
+    thread.brandUnreadCount =
+      Math.max(0, Number(thread.brandUnreadCount || 0)) + 1;
+  }
   thread.brandSnapshot = {
     name: brandLabel,
     email: brand.email,
@@ -2091,6 +2240,7 @@ async function getBrandInbox(req, res) {
         snippet: t.lastMessageSnippet || "",
         lastMessageAt: t.lastMessageAt || null,
         lastMessageDirection: t.lastMessageDirection || null,
+        ...getReadState(t, "brand"),
         status: t.status || "active",
         messages: msgsByThread.get(String(t._id)) || [],
       };
@@ -2129,6 +2279,7 @@ async function getThreadsForBrand(req, res) {
         lastMessageAt: t.lastMessageAt || null,
         lastMessageDirection: t.lastMessageDirection || null,
         lastMessageSnippet: t.lastMessageSnippet || "",
+        ...getReadState(t, "brand"),
         campaign: serializeCampaign(t.campaign, t.campaignSnapshot),
         influencer: {
           ...publicInfluencer(t.influencer || t.influencerSnapshot || {}, t),
@@ -2169,6 +2320,7 @@ async function getThreadsForInfluencer(req, res) {
         lastMessageAt: t.lastMessageAt || null,
         lastMessageDirection: t.lastMessageDirection || null,
         lastMessageSnippet: t.lastMessageSnippet || "",
+        ...getReadState(t, "influencer"),
         campaign: serializeCampaign(t.campaign, t.campaignSnapshot),
         brand: {
           ...publicBrand(t.brand || t.brandSnapshot || {}, t),
@@ -2229,6 +2381,8 @@ async function getMessagesForThread(req, res) {
         subject: thread.subject || "",
         lastMessageAt: thread.lastMessageAt || null,
         lastMessageDirection: thread.lastMessageDirection || null,
+        brandReadState: getReadState(thread, "brand"),
+        influencerReadState: getReadState(thread, "influencer"),
         campaign: serializeCampaign(thread.campaign, thread.campaignSnapshot),
         brand: publicBrand(thread.brand || {}, thread),
         influencer: publicInfluencer(thread.influencer || {}, thread),
@@ -2650,6 +2804,7 @@ async function getConversationsForCurrentInfluencer(req, res) {
       lastMessageAt: t.lastMessageAt,
       lastMessageDirection: t.lastMessageDirection,
       lastMessageSnippet: t.lastMessageSnippet || "",
+      ...getReadState(t, "influencer"),
       influencerAliasEmail: t.influencerDisplayAlias || t.influencerAliasEmail,
     }));
 
@@ -2722,6 +2877,7 @@ async function getConversationForCurrentInfluencer(req, res) {
         influencer: publicInfluencer(thread.influencer || influencer || {}, thread),
         lastMessageAt: thread.lastMessageAt,
         lastMessageDirection: thread.lastMessageDirection,
+        ...getReadState(thread, "influencer"),
         messages: mappedMessages,
       },
     });
@@ -2749,6 +2905,7 @@ module.exports = {
   getTemplateByKey,
 
   createThread,
+  markThreadAsRead,
   sendBrandToInfluencer,
   sendInfluencerToBrand,
 

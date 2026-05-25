@@ -26,7 +26,7 @@ const emailThreadSchema = new mongoose.Schema(
       ref: "Influencer",
       index: true,
     },
-    createrEmail:{ type: String, lowercase: true},
+    createrEmail: { type: String, lowercase: true },
     campaign: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Campaign",
@@ -54,6 +54,30 @@ const emailThreadSchema = new mongoose.Schema(
     },
 
     lastMessageSnippet: { type: String },
+
+    brandLastReadAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    influencerLastReadAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    brandUnreadCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    influencerUnreadCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
 
     hasInfluencerReplied: {
       type: Boolean,
@@ -108,6 +132,12 @@ emailThreadSchema.statics.generateAliasEmail = function (displayName) {
   const domain = process.env.EMAIL_RELAY_DOMAIN || "mail.collabglam.cloud";
   return `${slug}@${domain}`;
 };
+emailThreadSchema.index({ brand: 1, brandUnreadCount: -1, lastMessageAt: -1 });
+emailThreadSchema.index({
+  influencer: 1,
+  influencerUnreadCount: -1,
+  lastMessageAt: -1,
+});
 
 emailThreadSchema.statics.generatePrettyAlias =
   emailThreadSchema.statics.generateAliasEmail;
