@@ -26,6 +26,11 @@ router.get("/creator/:userId", ModashController.getCreatorByUserId);
 router.get("/locations", ModashController.getModashLocations);
 
 router.post(
+  "/campaign-recommendation-source",
+  ModashController.getCampaignRecommendationSource
+);
+
+router.post(
   "/recommended-by-campaign", ModashController.getRecommendedInfluencersForCampaign
 );
 

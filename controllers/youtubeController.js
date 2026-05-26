@@ -1197,6 +1197,527 @@ async function globalYouTubeSearch(query, opts = {}) {
   };
 }
 
+function pickYouTubeThumb(thumbnails = {}) {
+  return (
+    thumbnails?.high?.url ||
+    thumbnails?.medium?.url ||
+    thumbnails?.default?.url ||
+    null
+  );
+}
+
+function youtubeTierFromFollowers(value) {
+  const followers = Number(value || 0);
+
+  if (followers >= 1000000) return { key: "mega", label: "Mega" };
+  if (followers >= 100000) return { key: "macro", label: "Macro" };
+  if (followers >= 10000) return { key: "micro", label: "Micro" };
+  if (followers >= 1000) return { key: "nano", label: "Nano" };
+
+  return { key: "starter", label: "Starter" };
+}
+
+function looksUsefulSearchText(value) {
+  const text = cleanStr(value);
+  if (!text) return false;
+
+  const lower = text.toLowerCase();
+
+  // Reject random repeated text like tyrytytyt / trytrytryrty
+  if (/([a-z]{2,6})\1{2,}/i.test(lower)) return false;
+
+  const words = lower
+    .replace(/[^a-z0-9\s]/gi, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!words.length) return false;
+
+  const uniqueWords = new Set(words);
+  if (words.length >= 3 && uniqueWords.size <= 2) return false;
+
+  return true;
+}
+
+function uniqClean(values = []) {
+  const seen = new Set();
+
+  return values
+    .flat()
+    .map((x) => cleanStr(x))
+    .filter(Boolean)
+    .filter((x) => {
+      const key = x.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function getCampaignSubcategoryTags(campaign = {}) {
+  return uniqClean(
+    Array.isArray(campaign.details?.subcategories)
+      ? campaign.details.subcategories.flatMap((x) =>
+        Array.isArray(x?.tags) ? x.tags : []
+      )
+      : []
+  );
+}
+
+function getCampaignGoals(campaign = {}) {
+  return uniqClean([
+    campaign.campaignGoal,
+    campaign.campaignObjective,
+    ...(Array.isArray(campaign.details?.campaignGoals)
+      ? campaign.details.campaignGoals.map((x) => x?.goal)
+      : []),
+  ]);
+}
+
+function getCampaignContentFormats(campaign = {}) {
+  return uniqClean([
+    ...(Array.isArray(campaign.contentFormats)
+      ? campaign.contentFormats
+      : []),
+    ...(Array.isArray(campaign.details?.contentFormats)
+      ? campaign.details.contentFormats.map((x) => x?.format)
+      : []),
+  ]);
+}
+
+function buildYouTubeCampaignCategories(campaign = {}) {
+  return uniqClean([
+    campaign.campaignCategory,
+    campaign.campaignSubcategory,
+    ...(Array.isArray(campaign.categories)
+      ? campaign.categories.flatMap((x) => [
+        x?.categoryName,
+        x?.subcategoryName,
+      ])
+      : []),
+    campaign.details?.category?.name,
+    ...(Array.isArray(campaign.details?.subcategories)
+      ? campaign.details.subcategories.map((x) => x?.name)
+      : []),
+    ...getCampaignSubcategoryTags(campaign).slice(0, 12),
+  ]);
+}
+
+function buildYouTubeCampaignCountries(campaign = {}) {
+  return uniqClean([
+    campaign.targetCountry,
+    campaign.targetCountryCode,
+    ...(Array.isArray(campaign.targetCountries)
+      ? campaign.targetCountries
+      : []),
+    ...(Array.isArray(campaign.details?.targetCountries)
+      ? campaign.details.targetCountries.flatMap((x) => [
+        x?.countryCode,
+        x?.countryName,
+      ])
+      : []),
+  ]);
+}
+
+function buildYouTubeCampaignQuery(campaign = {}) {
+  const categoryTerms = buildYouTubeCampaignCategories(campaign);
+  const goalTerms = getCampaignGoals(campaign);
+  const formatTerms = getCampaignContentFormats(campaign);
+
+  const usefulCampaignText = [
+    campaign.campaignTitle,
+    campaign.productOrServiceName,
+    campaign.description,
+    campaign.additionalNotes,
+    ...(Array.isArray(campaign.hashtags) ? campaign.hashtags : []),
+    ...(Array.isArray(campaign.preferredHashtags)
+      ? campaign.preferredHashtags
+      : []),
+  ].filter(looksUsefulSearchText);
+
+  const values = uniqClean([
+    ...categoryTerms,
+    ...goalTerms,
+    ...formatTerms,
+    ...usefulCampaignText,
+  ]);
+
+  return values.join(" ").replace(/\s+/g, " ").trim().slice(0, 220);
+}
+
+function getFollowerFitLabel(subscribers, minFollowers, maxFollowers) {
+  const subs = Number(subscribers || 0);
+
+  if (minFollowers && subs < minFollowers) return "below_min_followers";
+  if (maxFollowers && subs > maxFollowers) return "above_max_followers";
+
+  return "matched";
+}
+
+function matchAnyText(haystackValues = [], needles = []) {
+  const haystack = haystackValues
+    .map((x) => cleanStr(x))
+    .filter(Boolean)
+    .join(" || ")
+    .toLowerCase();
+
+  if (!haystack) return false;
+
+  return needles.some((needle) => {
+    const clean = cleanStr(needle).toLowerCase();
+    return clean && haystack.includes(clean);
+  });
+}
+
+function buildCampaignFit(rec = {}, campaign = {}) {
+  const minFollowers = Number(campaign.minFollowers || 0);
+  const maxFollowers = Number(campaign.maxFollowers || 0);
+
+  const categories = buildYouTubeCampaignCategories(campaign);
+  const countries = buildYouTubeCampaignCountries(campaign);
+  const goals = getCampaignGoals(campaign);
+  const contentFormats = getCampaignContentFormats(campaign);
+
+  const countryUpper = cleanStr(rec.country).toUpperCase();
+  const countryMatched = countries.length
+    ? countries.some((x) => cleanStr(x).toUpperCase() === countryUpper)
+    : null;
+
+  const categoryMatched = categories.length
+    ? matchAnyText(
+      [
+        rec.title,
+        rec.description,
+        rec.keywords,
+        ...(Array.isArray(rec.topicLabels) ? rec.topicLabels : []),
+      ],
+      categories
+    )
+    : null;
+
+  const goalMatched = goals.length
+    ? matchAnyText(
+      [
+        rec.title,
+        rec.description,
+        rec.keywords,
+        ...(Array.isArray(rec.matchedVideos)
+          ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
+          : []),
+      ],
+      goals
+    )
+    : null;
+
+  const contentFormatMatched = contentFormats.length
+    ? matchAnyText(
+      [
+        rec.title,
+        rec.description,
+        ...(Array.isArray(rec.matchedVideos)
+          ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
+          : []),
+      ],
+      contentFormats
+    )
+    : null;
+
+  const followerFit = getFollowerFitLabel(
+    rec.subscriberCount,
+    minFollowers,
+    maxFollowers
+  );
+
+  let score = 0;
+
+  if (followerFit === "matched") score += 35;
+  if (categoryMatched === true) score += 30;
+  if (countryMatched === true) score += 15;
+  if (goalMatched === true) score += 10;
+  if (contentFormatMatched === true) score += 10;
+
+  return {
+    score,
+    followerFit,
+    categoryMatched,
+    countryMatched,
+    goalMatched,
+    contentFormatMatched,
+    expected: {
+      minFollowers: minFollowers || null,
+      maxFollowers: maxFollowers || null,
+      countries,
+      categories,
+      goals,
+      contentFormats,
+    },
+    actual: {
+      subscriberCount: Number(rec.subscriberCount || 0),
+      country: rec.country || null,
+      topicLabels: Array.isArray(rec.topicLabels) ? rec.topicLabels : [],
+    },
+  };
+}
+
+function passesCampaignHardFilters(rec = {}, campaign = {}) {
+  const minFollowers = Number(campaign.minFollowers || 0);
+  const maxFollowers = Number(campaign.maxFollowers || 0);
+  const subscriberCount = Number(rec.subscriberCount || 0);
+
+  if (minFollowers && subscriberCount < minFollowers) return false;
+  if (maxFollowers && subscriberCount > maxFollowers) return false;
+
+  const countries = buildYouTubeCampaignCountries(campaign)
+    .map((x) => cleanStr(x).toUpperCase())
+    .filter(Boolean);
+
+  // Only apply country as a hard filter when campaign has a real country code/name.
+  if (countries.length) {
+    const recCountry = cleanStr(rec.country).toUpperCase();
+    if (recCountry && !countries.includes(recCountry)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function buildYouTubeRecommendationReason(rec = {}, campaign = {}) {
+  const fit = buildCampaignFit(rec, campaign);
+  const parts = [];
+
+  if (fit.followerFit === "matched") {
+    parts.push(
+      `${new Intl.NumberFormat("en", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(Number(rec.subscriberCount || 0))} subscribers within campaign range`
+    );
+  }
+
+  if (fit.categoryMatched) {
+    parts.push("Category match");
+  }
+
+  if (fit.countryMatched) {
+    parts.push(`Country match: ${rec.country}`);
+  }
+
+  if (fit.goalMatched) {
+    parts.push("Goal match");
+  }
+
+  if (fit.contentFormatMatched) {
+    parts.push("Content format match");
+  }
+
+  if (!parts.length && Array.isArray(rec.topicLabels) && rec.topicLabels.length) {
+    parts.push(`Matches ${rec.topicLabels.slice(0, 2).join(", ")}`);
+  }
+
+  return parts.slice(0, 4).join(" • ") || "YouTube API campaign match";
+}
+
+function mapYouTubeRecommendedInfluencer(rec, maxScore, campaign = {}) {
+  const campaignFit = buildCampaignFit(rec, campaign);
+  const rawScore = Number(rec.score || 0) + Number(campaignFit.score || 0);
+
+  const aiScore =
+    maxScore > 0
+      ? Math.max(1, Math.min(100, Math.round((rawScore / maxScore) * 100)))
+      : Math.max(1, Math.min(100, campaignFit.score));
+
+  const handle = normalizeHandle(rec.handle || rec.customUrl || "");
+  const username = handle
+    ? handle.replace(/^@/, "")
+    : String(rec.channelId || "");
+
+  const channelUrl =
+    rec.channelUrl ||
+    (handle
+      ? `https://www.youtube.com/${handle}`
+      : rec.channelId
+        ? `https://www.youtube.com/channel/${rec.channelId}`
+        : null);
+
+  return {
+    _id: rec.channelId,
+    ids: {
+      modashId: rec.channelId || null,
+      userId: rec.channelId || null,
+      youtubeChannelId: rec.channelId || null,
+    },
+    channelId: rec.channelId || null,
+    source: "youtube_api",
+    profileSource: "youtube_api",
+
+    name: rec.title || username || "YouTube Creator",
+    fullname: rec.title || username || "YouTube Creator",
+    username,
+    handle: handle || username,
+    platform: "youtube",
+
+    followers: Number(rec.subscriberCount || 0),
+    tier: youtubeTierFromFollowers(rec.subscriberCount),
+    categories: Array.isArray(rec.topicLabels) ? rec.topicLabels : [],
+    bio: cleanStr(rec.description || ""),
+    picture: pickYouTubeThumb(rec.thumbnails),
+    url: channelUrl,
+    urls: {
+      url: channelUrl,
+    },
+
+    isVerified: false,
+    isPrivate: false,
+
+    stats: {
+      engagementRate: Number(rec.engagementRateLast15 || 0),
+      engagements: 0,
+      averageViews: Number(rec.avgViewsLast15 || 0),
+      totalViews: Number(rec.totalViewCount || 0),
+      totalVideos: Number(rec.totalVideoCount || 0),
+      uploadFrequencyPerWeek: Number(rec.uploadFrequencyPerWeek || 0),
+    },
+
+    location: {
+      country: rec.country || null,
+      state: null,
+      city: null,
+    },
+
+    campaignFit,
+    aiScore,
+    rawAiScore: rawScore,
+    recommendationReason: buildYouTubeRecommendationReason(rec, campaign),
+  };
+}
+
+async function runCampaignYouTubeSearch(query, campaign, limit) {
+  return globalYouTubeSearch(query, {
+    channelLimit: Math.max(limit * 3, 30),
+    videoLimit: 50,
+
+    // Hard campaign follower range.
+    followersMin: campaign.minFollowers,
+    followersMax: campaign.maxFollowers,
+
+    // Country code/name support.
+    country: undefined,
+    countries: buildYouTubeCampaignCountries(campaign),
+
+    // Category, subcategory, and tags.
+    categories: buildYouTubeCampaignCategories(campaign),
+
+    sortBy: "relevance",
+  });
+}
+
+async function getYouTubeRecommendationsForCampaign(campaign = {}, opts = {}) {
+  if (!YT_API_KEY) {
+    const err = new Error("Missing YOUTUBE_API_KEY");
+    err.status = 500;
+    throw err;
+  }
+
+  const limit = Math.min(
+    30,
+    Math.max(1, parseInt(String(opts.limit || 15), 10) || 15)
+  );
+
+  const primaryQuery = buildYouTubeCampaignQuery(campaign);
+
+  if (!primaryQuery || primaryQuery.length < 2) {
+    const err = new Error(
+      "Campaign does not have enough searchable information to recommend YouTube influencers"
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  const categoryQuery = buildYouTubeCampaignCategories(campaign)
+    .slice(0, 12)
+    .join(" ");
+
+  const goalQuery = getCampaignGoals(campaign).join(" ");
+  const formatQuery = getCampaignContentFormats(campaign).join(" ");
+
+  const queryVariants = uniqClean([
+    primaryQuery,
+    [categoryQuery, goalQuery, formatQuery].filter(Boolean).join(" "),
+    categoryQuery,
+  ]).filter((x) => x.length >= 2);
+
+  const merged = new Map();
+  const metaRuns = [];
+
+  for (const query of queryVariants) {
+    const data = await runCampaignYouTubeSearch(query, campaign, limit);
+
+    metaRuns.push({
+      query,
+      channelsFound: data.channelsFound,
+      videoHits: data.videoHits,
+      scannedPages: data.scannedPages,
+      hasMore: data.hasMore,
+    });
+
+    const rows = Array.isArray(data.recommendations)
+      ? data.recommendations
+      : [];
+
+    rows.forEach((rec) => {
+      if (!passesCampaignHardFilters(rec, campaign)) return;
+
+      const key = rec.channelId || rec.handle || rec.title;
+      if (!key) return;
+
+      const fit = buildCampaignFit(rec, campaign);
+      const score = Number(rec.score || 0) + Number(fit.score || 0);
+      const next = { ...rec, score, campaignFit: fit };
+
+      const prev = merged.get(key);
+      if (!prev || Number(next.score || 0) > Number(prev.score || 0)) {
+        merged.set(key, next);
+      }
+    });
+
+    if (merged.size >= limit) break;
+  }
+
+  const sorted = Array.from(merged.values())
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, limit);
+
+  const maxScore = Math.max(
+    ...sorted.map((x) => Number(x.score || 0)),
+    0
+  );
+
+  return {
+    query: queryVariants[0],
+    results: sorted.map((item) =>
+      mapYouTubeRecommendedInfluencer(item, maxScore, campaign)
+    ),
+    total: sorted.length,
+    meta: {
+      source: "youtube_api",
+      runs: metaRuns,
+      channelsFound: sorted.length,
+      filters: {
+        minFollowers: campaign.minFollowers || null,
+        maxFollowers: campaign.maxFollowers || null,
+        countries: buildYouTubeCampaignCountries(campaign),
+        categories: buildYouTubeCampaignCategories(campaign),
+        goals: getCampaignGoals(campaign),
+        contentFormats: getCampaignContentFormats(campaign),
+      },
+    },
+  };
+}
+
+exports.getYouTubeRecommendationsForCampaign =
+  getYouTubeRecommendationsForCampaign;
+
 // ======================================================
 // POST /youtube/search
 // body: { query }
