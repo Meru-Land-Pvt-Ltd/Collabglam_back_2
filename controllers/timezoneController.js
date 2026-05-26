@@ -6,6 +6,7 @@ const { ApiResponse } = require("../core/http/ApiResponse");
 const { HttpStatus } = require("../core/http/HttpStatus");
 const CountryModel = require("../models/country");
 const { detectGeoFromRequest } = require("../utils/ipGeo");
+const saveErrorLog = require("../services/errorLog.service");
 
 const clean = (v) => (typeof v === "string" ? v.trim() : "");
 const getRequestId = (req) => req.requestId || req.id || req.headers?.["x-request-id"] || "NA";
@@ -195,6 +196,13 @@ const getTimezonesByCountries = async (req, res) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 500,
+      "GET_TIMEZONES_BY_COUNTRIES_ERROR"
+    );
+
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -250,6 +258,13 @@ const getAllTimezones = async (req, res) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 500,
+      "GET_ALL_TIMEZONES_ERROR"
+    );
+
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,

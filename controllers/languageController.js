@@ -1,4 +1,5 @@
 const Language = require('../models/language');
+const saveErrorLog = require('../services/errorLog.service');
 
 
 // GET /api/languages/all
@@ -8,6 +9,7 @@ exports.getAll = async (req, res, next) => {
         const data = await Language.find({}).sort({ name: 1 }).lean();
         res.json({ total: data.length, data });
     } catch (err) {
+        await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_ALL_LANGUAGES_ERROR');
         next(err);
     }
 };
@@ -49,6 +51,7 @@ exports.getList = async (req, res, next) => {
             data
         });
     } catch (err) {
+        await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_LANGUAGE_LIST_ERROR');
         next(err);
     }
 };

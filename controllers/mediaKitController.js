@@ -4,6 +4,7 @@ const MediaKit = require("../models/mediaKit");
 const { refreshMediaKitForInfluencer } = require("../jobs/mediakitSync");
 const Modash = require("../models/modash");
 const Language = require("../models/language");
+const saveErrorLog = require("../services/errorLog.service");
 
 // ------------------------------- Helpers --------------------------------
 
@@ -341,6 +342,7 @@ async function createByInfluencer(req, res) {
     });
   } catch (err) {
     console.error("Create MediaKit error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "CREATE_BY_INFLUENCER_ERROR");
 
     if (err?.code === 11000) {
       return res.status(409).json({
@@ -381,6 +383,7 @@ async function updateMediaKit(req, res) {
     });
   } catch (err) {
     console.error("Update MediaKit error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_MEDIA_KIT_ERROR");
 
     if (err?.code === 11000) {
       return res.status(409).json({
@@ -393,7 +396,7 @@ async function updateMediaKit(req, res) {
   }
 }
 
-async function getAllMediaKits(_req, res) {
+async function getAllMediaKits(req, res) {
   try {
     const docs = await MediaKit.find(
       {},
@@ -433,6 +436,7 @@ async function getAllMediaKits(_req, res) {
     return res.json(items);
   } catch (err) {
     console.error("Get all MediaKits error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_MEDIA_KITS_ERROR");
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -458,6 +462,7 @@ async function syncByInfluencer(req, res) {
     });
   } catch (err) {
     console.error("Sync MediaKit error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SYNC_BY_INFLUENCER_ERROR");
     return res.status(500).json({ error: "Internal server error" });
   }
 }

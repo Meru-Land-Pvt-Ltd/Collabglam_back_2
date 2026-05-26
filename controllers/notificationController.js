@@ -4,6 +4,7 @@ const Notification = require("../models/notification");
 const { AdminModel, ROLES } = require("../models/master");
 const BrandAssigned = require("../models/brandAssigned");
 const CampaignAssigned = require("../models/CampaignAssigned");
+const saveErrorLog = require("../services/errorLog.service");
 
 function normalizeRole(value = "") {
   return String(value || "").trim().toLowerCase();
@@ -325,7 +326,8 @@ async function listForBrand(req, res) {
     res.json({ data, total, unread, page: p, limit: l });
   } catch (err) {
     console.error("listForBrand error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "LIST_FOR_BRAND_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -346,7 +348,8 @@ async function markReadForBrand(req, res) {
     res.json({ ok: true, item: doc });
   } catch (err) {
     console.error("markReadForBrand error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_READ_FOR_BRAND_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -363,7 +366,8 @@ async function markAllReadForBrand(req, res) {
     res.json({ ok: true });
   } catch (err) {
     console.error("markAllReadForBrand error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_ALL_READ_FOR_BRAND_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -386,7 +390,8 @@ async function deleteForBrand(req, res) {
     return res.json({ ok: true, deletedId: targetId, previous: doc });
   } catch (err) {
     console.error("deleteForBrand error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DELETE_FOR_BRAND_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -413,7 +418,8 @@ async function listForInfluencer(req, res) {
     res.json({ data, total, unread, page: p, limit: l });
   } catch (err) {
     console.error("listForInfluencer error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "LIST_FOR_INFLUENCER_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -434,7 +440,8 @@ async function markReadForInfluencer(req, res) {
     res.json({ ok: true, item: doc });
   } catch (err) {
     console.error("markReadForInfluencer error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_READ_FOR_INFLUENCER_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -453,7 +460,8 @@ async function markAllReadForInfluencer(req, res) {
     res.json({ ok: true });
   } catch (err) {
     console.error("markAllReadForInfluencer error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_ALL_READ_FOR_INFLUENCER_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -473,7 +481,8 @@ async function deleteForInfluencer(req, res) {
     res.json({ ok: true, deletedId: id, previous: doc });
   } catch (err) {
     console.error("deleteForInfluencer error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DELETE_FOR_INFLUENCER_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -514,7 +523,8 @@ async function listForAdmin(req, res) {
     });
   } catch (err) {
     console.error("listForAdmin error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "LIST_FOR_ADMIN_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -539,7 +549,8 @@ async function markReadForAdmin(req, res) {
     res.json({ ok: true, item: { ...notification, isRead: true } });
   } catch (err) {
     console.error("markReadForAdmin error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_READ_FOR_ADMIN_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -555,7 +566,8 @@ async function markAllReadForAdmin(req, res) {
     res.json({ ok: true });
   } catch (err) {
     console.error("markAllReadForAdmin error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_ALL_READ_FOR_ADMIN_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 
@@ -582,7 +594,8 @@ async function deleteForAdmin(req, res) {
     });
   } catch (err) {
     console.error("deleteForAdmin error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DELETE_FOR_ADMIN_ERROR");res.status(500).json({ message: "Internal server error" });
   }
 }
 

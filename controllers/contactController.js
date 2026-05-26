@@ -5,6 +5,7 @@ const NewsLetter = require("../models/newsletter");
 const { Parser } = require("json2csv");
 const ExcelJS = require("exceljs");
 const nodemailer = require("nodemailer");
+const saveErrorLog = require("../services/errorLog.service");
 
 exports.sendContact = async (req, res) => {
   try {
@@ -50,6 +51,7 @@ exports.sendContact = async (req, res) => {
     });
   } catch (err) {
     console.error("ContactController Error:", err);
+    await saveErrorLog(req, err, 500, "SEND_CONTACT_ERROR");
     return res.status(500).json({ error: "Could not send message, please try again later" });
   }
 };
@@ -60,6 +62,7 @@ exports.getAllContacts = async (req, res) => {
     return res.status(200).json(contacts);
   } catch (err) {
     console.error("getAllContacts error", err);
+    await saveErrorLog(req, err, 500, "GET_ALL_CONTACTS_ERROR");
     return res.status(500).json({ error: "Server error" });
   }
 };
@@ -76,6 +79,7 @@ exports.createNewsletter = async (req, res) => {
     return res.status(201).json({ message: "Subscribed successfully", subscriber });
   } catch (err) {
     console.error("createNewsletter error:", err);
+    await saveErrorLog(req, err, 500, "CREATE_NEWSLETTER_ERROR");
     return res.status(500).json({ error: "Server error" });
   }
 };
@@ -86,6 +90,7 @@ exports.getNewsletterList = async (req, res) => {
     return res.status(200).json({ subscribers: list });
   } catch (err) {
     console.error("getNewsletterList error:", err);
+    await saveErrorLog(req, err, 500, "GET_NEWSLETTER_LIST_ERROR");
     return res.status(500).json({ error: "Server error" });
   }
 };
@@ -134,6 +139,7 @@ exports.downloadNewsletter = async (req, res) => {
     return res.send(buf);
   } catch (err) {
     console.error("downloadNewsletter error:", err);
+    await saveErrorLog(req, err, 500, "DOWNLOAD_NEWSLETTER_ERROR");
     return res.status(500).json({ error: "Could not generate download" });
   }
 };

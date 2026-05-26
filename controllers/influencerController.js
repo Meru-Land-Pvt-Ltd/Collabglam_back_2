@@ -48,6 +48,7 @@ const { linkConversationsForInfluencer } = require("../services/emailLinking");
 const { attachExternalEmailToInfluencer } = require("../utils/emailAliases");
 const { escapeRegExp } = require("../utils/searchTokens");
 const { buildOtpEmailTemplate } = require("../template/buildOtpEmailTemplate");
+const saveErrorLog = require("../services/errorLog.service");
 
 const UUIDv4Regex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1495,6 +1496,7 @@ exports.sendSignupOtpInfluencer = async (req, res) => {
       email: normalizedEmail,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "SEND_SIGNUP_OTP_INFLUENCER_ERROR");
     if (otpDoc?._id) {
       try {
         await VerifyOtpModel.deleteOne({ _id: otpDoc._id }).exec();
@@ -1802,6 +1804,7 @@ exports.verifyOtpSignUpInfluencer = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFY_OTP_SIGN_UP_INFLUENCER_ERROR");
     console.error("verifyOtpSignUpInfluencer error:", err);
 
     if (err?.code === 11000) {
@@ -2104,6 +2107,7 @@ exports.saveQuickOnboarding = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SAVE_QUICK_ONBOARDING_ERROR");
     console.error("saveQuickOnboarding error:", err);
 
     return res.status(err?.statusCode || 500).json({
@@ -2195,6 +2199,7 @@ exports.signInInfluencer = async (req, res) => {
       ispage3Skip: influencer.ispage3Skip || false,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SIGN_IN_INFLUENCER_ERROR");
     console.error("signInInfluencer error:", err);
 
     return res.status(err?.statusCode || 500).json({
@@ -2234,6 +2239,7 @@ exports.getList = async (req, res) => {
     const influencers = await Influencer.find({}, "-password -__v");
     return res.status(200).json(influencers);
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_LIST_ERROR");
     console.error("Error fetching influencers:", error);
     return res.status(500).json({
       message: "Internal server error",
@@ -2273,6 +2279,7 @@ exports.getById = async (req, res) => {
       influencer,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BY_ID_ERROR");
     console.error("Error in getById:", err);
 
     return res.status(500).json({
@@ -2338,6 +2345,7 @@ exports.getBulkByIds = async (req, res) => {
       influencers: result,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BULK_BY_IDS_ERROR");
     console.error("Error in getBulkByIds:", err);
 
     return res.status(500).json({
@@ -2443,6 +2451,7 @@ exports.getLiteById = async (req, res) => {
         : 0,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_LITE_BY_ID_ERROR");
     console.error("Error in getLiteById:", err);
 
     return res.status(500).json({
@@ -2483,6 +2492,7 @@ exports.getLiteInfluencerByIdPost = async (req, res) => {
       email: influencer.email || "",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_LITE_INFLUENCER_BY_ID_POST_ERROR");
     console.error("Error in getLiteInfluencerByIdPost:", err);
 
     return res.status(500).json({
@@ -2822,6 +2832,7 @@ exports.getCampaignsByInfluencer = async (req, res) => {
       campaigns: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_CAMPAIGNS_BY_INFLUENCER_ERROR");
     console.error("Error in getCampaignsByInfluencer:", error);
 
     return res.status(500).json({
@@ -2895,6 +2906,7 @@ exports.requestPasswordResetOtpInfluencer = async (req, res) => {
       email: normalizedEmail,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "REQUEST_PASSWORD_RESET_OTP_INFLUENCER_ERROR");
     if (otpDoc?._id) {
       try {
         await VerifyOtpModel.deleteOne({ _id: otpDoc._id }).exec();
@@ -2962,6 +2974,7 @@ exports.verifyPasswordResetOtpInfluencer = async (req, res) => {
       resetToken,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFY_PASSWORD_RESET_OTP_INFLUENCER_ERROR");
     console.error("Error in verifyPasswordResetOtpInfluencer:", err);
 
     return res.status(err?.statusCode || 500).json({
@@ -3089,6 +3102,7 @@ exports.resetPasswordInfluencer = async (req, res) => {
       message: "Password updated successfully",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "RESET_PASSWORD_INFLUENCER_ERROR");
     console.error("Error in resetPasswordInfluencer:", err);
 
     if (err?.name === "TokenExpiredError" || err?.name === "JsonWebTokenError") {
@@ -3210,6 +3224,7 @@ exports.addPaymentMethod = async (req, res) => {
       paymentMethods: inf.paymentMethods,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ADD_PAYMENT_METHOD_ERROR");
     console.error("Error in addPaymentMethod:", err);
 
     return res.status(500).json({
@@ -3265,6 +3280,7 @@ exports.deletePaymentMethod = async (req, res) => {
       paymentMethods: inf.paymentMethods,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DELETE_PAYMENT_METHOD_ERROR");
     console.error("Error in deletePaymentMethod:", err);
 
     return res.status(500).json({
@@ -3332,6 +3348,7 @@ exports.viewPaymentByType = async (req, res) => {
       paymentMethods: methods,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VIEW_PAYMENT_BY_TYPE_ERROR");
     console.error("Error in viewPaymentByType:", err);
 
     return res.status(500).json({
@@ -3476,6 +3493,7 @@ exports.updatePaymentMethod = async (req, res) => {
       paymentMethods: inf.paymentMethods,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_PAYMENT_METHOD_ERROR");
     console.error("Error in updatePaymentMethod:", err);
 
     return res.status(500).json({
@@ -3534,6 +3552,7 @@ exports.searchInfluencers = async (req, res) => {
       results,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEARCH_INFLUENCERS_ERROR");
     console.error("Error in searchInfluencers:", err);
 
     return res.status(500).json({
@@ -3582,6 +3601,7 @@ exports.searchBrands = async (req, res) => {
       results,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEARCH_BRANDS_ERROR");
     console.error("Error in searchBrands:", err);
 
     return res.status(500).json({
@@ -3637,6 +3657,7 @@ exports.suggestInfluencers = async (req, res) => {
       suggestions: ordered,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SUGGEST_INFLUENCERS_ERROR");
     console.error("Suggestion error:", err);
 
     return res.status(500).json({
@@ -3820,6 +3841,7 @@ exports.updateProfile = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_PROFILE_ERROR");
     const status = err.statusCode || 500;
 
     console.error("Error in updateProfile:", err);
@@ -3952,6 +3974,7 @@ exports.requestEmailUpdate = async (req, res) => {
       message: "OTP sent to new email",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "REQUEST_EMAIL_UPDATE_ERROR");
     console.error("Error in requestEmailUpdate:", err);
 
     return res.status(500).json({
@@ -4060,6 +4083,7 @@ exports.verifyotp = async (req, res) => {
       message: "Email updated successfully",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFYOTP_ERROR");
     console.error("Error in verifyotp:", err);
 
     return res.status(500).json({
@@ -4161,6 +4185,7 @@ exports.requestClaimEmailOtp = async (req, res) => {
       message: "OTP sent to external email",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "REQUEST_CLAIM_EMAIL_OTP_ERROR");
     console.error("requestClaimEmailOtp error:", err);
 
     return res.status(500).json({
@@ -4224,6 +4249,7 @@ exports.verifyClaimEmailOtp = async (req, res) => {
         "Email linked successfully. Your past conversations are now attached.",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFY_CLAIM_EMAIL_OTP_ERROR");
     console.error("verifyClaimEmailOtp error:", err);
 
     return res.status(500).json({
@@ -4260,6 +4286,7 @@ exports.getInfluencerOnboarding = async (req, res) => {
       influencerTourSeenAt: inf?.onboarding?.influencerTourSeenAt ?? null,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_INFLUENCER_ONBOARDING_ERROR");
     console.error("getInfluencerOnboarding error:", err);
 
     return res.status(500).json({
@@ -4302,6 +4329,7 @@ exports.markInfluencerTourSeen = async (req, res) => {
       influencerTourSeenAt: now,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_INFLUENCER_TOUR_SEEN_ERROR");
     console.error("markInfluencerTourSeen error:", err);
 
     return res.status(500).json({

@@ -1,4 +1,5 @@
 const MatchedCreator = require('../models/machedCreators');
+const saveErrorLog = require('../services/errorLog.service');
 
 const createMatchedCreator = async (req, res) => {
   try {
@@ -27,6 +28,8 @@ const createMatchedCreator = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating matched creator:', error);
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, 'CREATE_MATCHED_CREATOR_ERROR');
+
     return res.status(500).json({
       success: false,
       message: 'Server error while saving matched creator data.',
@@ -46,6 +49,8 @@ const getMatchedCreatorList = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching matched creator list:', error);
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, 'GET_MATCHED_CREATOR_LIST_ERROR');
+
     return res.status(500).json({
       success: false,
       message: 'Server error while fetching matched creator list.',

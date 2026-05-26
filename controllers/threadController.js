@@ -16,6 +16,7 @@ const {
   getMailboxDisplayName,
   nameFromEmail,
 } = require("../utils/mailboxDisplayName");
+const saveErrorLog = require("../services/errorLog.service");
 
 
 function uniqueNotificationIds(values = []) {
@@ -799,6 +800,7 @@ exports.listBmeThreads = async (req, res) => {
       data: sorted.map((thread) => serializeThread(thread, req.admin)),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_BME_THREADS_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load threads",
@@ -824,6 +826,7 @@ exports.markThreadAsRead = async (req, res) => {
       thread: serializeThread(thread, req.admin),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "MARK_THREAD_AS_READ_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to mark thread as read",
@@ -851,6 +854,7 @@ exports.getThreadMessages = async (req, res) => {
       ),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_THREAD_MESSAGES_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load thread",
@@ -1012,7 +1016,8 @@ exports.replyToThread = async (req, res) => {
       message: error?.message,
     });
 
-    return res.status(error?.response?.status || error?.statusCode || 500).json({
+    
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "REPLY_TO_THREAD_ERROR");return res.status(error?.response?.status || error?.statusCode || 500).json({
       success: false,
       message:
         error?.response?.data?.message ||

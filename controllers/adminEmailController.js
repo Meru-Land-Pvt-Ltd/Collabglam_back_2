@@ -12,6 +12,8 @@ const {
   sendSelectedBrandOutreachEmailsService,
 } = require("../services/adminEmail.service");
 
+const saveErrorLog = require("../services/errorLog.service");
+
 function getLoggedInAdminId(req) {
   return (
     req.admin?.adminId ||
@@ -40,6 +42,7 @@ async function getMailboxScope(req, res) {
     const result = await getMailboxScopeService({ actorAdminId: adminId });
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "GET_MAILBOX_SCOPE_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to fetch mailbox scope",
@@ -81,6 +84,7 @@ async function sendBulkCsv(req, res) {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "SEND_BULK_CSV_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to send bulk emails from CSV",
@@ -113,6 +117,7 @@ async function composeEmail(req, res) {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "COMPOSE_EMAIL_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to send email",
@@ -150,6 +155,7 @@ async function getThreads(req, res) {
 
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "GET_THREADS_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to fetch threads",
@@ -166,6 +172,7 @@ async function getMessages(req, res) {
     const result = await getThreadMessages({ threadId, actorAdminId: adminId });
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
+    await saveErrorLog(req, error, 404, "GET_MESSAGES_ERROR");
     return res.status(404).json({
       success: false,
       message: error?.message || "Failed to fetch messages",
@@ -198,6 +205,7 @@ async function reply(req, res) {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "REPLY_TO_THREAD_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to send reply",
@@ -227,6 +235,7 @@ async function updateThread(req, res) {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "UPDATE_THREAD_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to update thread",
@@ -253,6 +262,7 @@ async function getPipelineRecipientsForCompose(req, res) {
       data: { items: result },
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "GET_PIPELINE_RECIPIENTS_FOR_COMPOSE_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to fetch selected pipeline recipients",
@@ -285,6 +295,7 @@ async function sendSelectedPipelineEmailsController(req, res) {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "SEND_SELECTED_PIPELINE_EMAILS_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to send selected pipeline emails",
@@ -309,6 +320,7 @@ async function getBrandOutreachRecipientsForCompose(req, res) {
       data: { items: result },
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "GET_BRAND_OUTREACH_RECIPIENTS_FOR_COMPOSE_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to fetch selected brand outreach recipients",
@@ -339,6 +351,7 @@ async function sendSelectedBrandOutreachEmailsController(req, res) {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "SEND_SELECTED_BRAND_OUTREACH_EMAILS_ERROR");
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to send selected brand outreach emails",

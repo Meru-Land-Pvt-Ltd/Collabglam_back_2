@@ -8,6 +8,7 @@ const CampaignPerformance = require("../models/campaignPerformance");
 const { InfluencerModel: Influencer } = require("../models/influencer");
 const Milestone = require("../models/milestone");
 const Contract = require("../models/contract");
+const saveErrorLog = require("../services/errorLog.service");
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -301,6 +302,7 @@ exports.getCampaignIntelligence = async (req, res) => {
     });
   } catch (error) {
     console.error("Campaign intelligence error:", error);
+    await saveErrorLog(req, error, 500, "GET_CAMPAIGN_INTELLIGENCE_ERROR");
 
     return res.status(500).json({
       success: false,

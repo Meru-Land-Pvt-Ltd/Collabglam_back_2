@@ -1,5 +1,6 @@
 const PaymentDetails = require("../models/paymentDetails");
 const mongoose = require("mongoose");
+const saveErrorLog = require("../services/errorLog.service");
 
 // Add new payment method
 exports.addPaymentDetails = async (req, res) => {
@@ -97,6 +98,13 @@ exports.addPaymentDetails = async (req, res) => {
       data: paymentDetails,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "ADD_PAYMENT_DETAILS_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: "Failed to add payment method",
@@ -182,6 +190,13 @@ exports.editPaymentDetails = async (req, res) => {
       data: paymentDetails,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "EDIT_PAYMENT_DETAILS_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: "Failed to update payment method",
@@ -225,6 +240,13 @@ exports.deletePaymentDetails = async (req, res) => {
       message: "Payment method deleted successfully",
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "DELETE_PAYMENT_DETAILS_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: "Failed to delete payment method",
@@ -256,6 +278,13 @@ exports.getPaymentDetails = async (req, res) => {
       data: paymentDetails,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_PAYMENT_DETAILS_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch payment methods",

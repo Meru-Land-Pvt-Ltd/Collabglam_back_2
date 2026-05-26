@@ -6,6 +6,7 @@ const { InfluencerModel: Influencer } = require("../models/influencer"); // adju
 const Milestone = require("../models/milestone");
 const Notification = require("../models/notification");
 const ApplyCampaign = require("../models/applyCampaign");
+const saveErrorLog = require("../services/errorLog.service");
 
 const escapeRegex = (s = "") => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -237,6 +238,7 @@ exports.createDeliverableApproval = async (req, res) => {
       data: normalizeDoc(doc),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "CREATE_DELIVERABLE_APPROVAL_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to create deliverable approval.",
@@ -331,6 +333,7 @@ exports.updateDeliverableApprovalStatus = async (req, res) => {
       data: normalizeDoc(doc),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "UPDATE_DELIVERABLE_APPROVAL_STATUS_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to update deliverable status.",
@@ -432,6 +435,7 @@ exports.listDeliverablesByCampaign = async (req, res) => {
       data,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "LIST_DELIVERABLES_BY_CAMPAIGN_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverables.",
@@ -495,6 +499,7 @@ exports.listInfluencerDeliverablesByCampaign = async (req, res) => {
       data: docs,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "LIST_INFLUENCER_DELIVERABLES_BY_CAMPAIGN_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverables.",
@@ -595,6 +600,7 @@ exports.listInfluencerDeliverablesByCampaign2 = async (req, res) => {
       influencers: influencersWithMeta,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "LIST_INFLUENCER_DELIVERABLES_BY_CAMPAIGN2_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch totals + influencer list.",
@@ -800,6 +806,7 @@ exports.getAllDeliverables = async (req, res) => {
       data,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_ALL_DELIVERABLES_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverables.",
@@ -1023,6 +1030,7 @@ exports.getAllDeliverablesByBrandOrInfluencerPost = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_ALL_DELIVERABLES_BY_BRAND_OR_INFLUENCER_POST_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverables.",
@@ -1095,6 +1103,7 @@ exports.getAllDeliverablesByMilestoneIdPost = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_ALL_DELIVERABLES_BY_MILESTONE_ID_POST_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverables by milestoneId.",
@@ -1171,6 +1180,7 @@ exports.getDeliverableStatusByInfluencerIdPost = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_DELIVERABLE_STATUS_BY_INFLUENCER_ID_POST_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverable status by influencerId and campaignId.",
@@ -1368,6 +1378,7 @@ exports.adminCreateDeliverableApproval = async (req, res) => {
       data: normalizeDoc(doc),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_CREATE_DELIVERABLE_APPROVAL_ERROR");
     console.error("adminCreateDeliverableApproval error:", err);
 
     return res.status(500).json({
@@ -1484,6 +1495,7 @@ exports.getDeliverablesByMilestoneHistoryIdPost = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_DELIVERABLES_BY_MILESTONE_HISTORY_ID_POST_ERROR");
     return res.status(500).json({
       success: false,
       message: "Failed to fetch deliverables by milestoneHistoryId.",

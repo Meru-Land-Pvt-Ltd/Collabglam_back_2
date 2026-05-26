@@ -2,6 +2,7 @@
 
 const mongoose = require('mongoose');
 const { BrandNetwork } = require('../models/brandNetwork');
+const saveErrorLog = require('../services/errorLog.service');
 
 function cleanStr(v) {
   if (v === undefined || v === null) return '';
@@ -213,6 +214,7 @@ exports.createBrandNetworkRow = async (req, res) => {
     });
   } catch (err) {
     console.error('[createBrandNetworkRow] Error:', err);
+    await saveErrorLog(req, err, 500, 'CREATE_BRAND_NETWORK_ROW_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -282,6 +284,7 @@ exports.listBrandNetwork = async (req, res) => {
     });
   } catch (err) {
     console.error('[listBrandNetwork] Error:', err);
+    await saveErrorLog(req, err, 500, 'LIST_BRAND_NETWORK_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -305,6 +308,7 @@ exports.getBrandNetworkById = async (req, res) => {
     });
   } catch (err) {
     console.error('[getBrandNetworkById] Error:', err);
+    await saveErrorLog(req, err, 500, 'GET_BRAND_NETWORK_BY_ID_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -401,6 +405,7 @@ exports.updateBrandNetwork = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateBrandNetwork] Error:', err);
+    await saveErrorLog(req, err, 500, 'UPDATE_BRAND_NETWORK_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };

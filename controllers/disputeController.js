@@ -15,6 +15,7 @@ const { createAndEmit } = require('../utils/notifier');
 const { v4: uuidv4 } = require("uuid");
 // ⬇️ Adjust this path to your GridFS helper file if needed
 const { uploadToGridFS } = require('../utils/gridfs');
+const saveErrorLog = require("../services/errorLog.service");
 
 const {
   handleSendDisputeCreated,
@@ -962,6 +963,7 @@ exports.brandRevokeDispute = async (req, res) => {
       status: dispute.status,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_REVOKE_DISPUTE_ERROR");
     console.error("Error in brandRevokeDispute:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -1196,6 +1198,7 @@ exports.brandEditDispute = async (req, res) => {
       dispute,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_EDIT_DISPUTE_ERROR");
     console.error('Error in brandEditDispute:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -1362,6 +1365,7 @@ exports.brandCreateDispute = async (req, res) => {
       otherIssueDescription: dispute.otherIssueDescription,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_CREATE_DISPUTE_ERROR");
     console.error("Error in brandCreateDispute:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -1461,6 +1465,7 @@ exports.brandList = async (req, res) => {
       disputes,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_LIST_ERROR");
     console.error("Error in brandList:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -1483,6 +1488,7 @@ exports.publicGetDisputeById = async (req, res) => {
 
     return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "PUBLIC_GET_DISPUTE_BY_ID_ERROR");
     console.error("Error in publicGetDisputeById:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -1522,6 +1528,7 @@ exports.brandGetById = async (req, res) => {
 
     return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_GET_BY_ID_ERROR");
     console.error("Error in brandGetById:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -1593,6 +1600,7 @@ exports.brandAddComment = async (req, res) => {
 
     return res.status(200).json({ message: "Comment added" });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_ADD_COMMENT_ERROR");
     console.error("Error in brandAddComment:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -1709,6 +1717,7 @@ exports.brandEditComment = async (req, res) => {
       comment,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_EDIT_COMMENT_ERROR");
     console.error('Error in brandEditComment:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -1796,6 +1805,7 @@ exports.brandDeleteComment = async (req, res) => {
       disputeId: dispute.disputeId,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_DELETE_COMMENT_ERROR");
     console.error('Error in brandDeleteComment:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -1884,6 +1894,7 @@ exports.influencerRevokeDispute = async (req, res) => {
       status: d.status,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_REVOKE_DISPUTE_ERROR");
     console.error('Error in influencerRevokeDispute:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -1998,6 +2009,7 @@ exports.influencerCreateDispute = async (req, res) => {
         otherIssueDescription: dispute.otherIssueDescription,
       });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_CREATE_DISPUTE_ERROR");
     console.error('Error in influencerCreateDispute:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -2099,6 +2111,7 @@ exports.influencerList = async (req, res) => {
       disputes,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_LIST_ERROR");
     console.error("Error in influencerList:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2142,6 +2155,7 @@ exports.influencerGetById = async (req, res) => {
 
     return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_GET_BY_ID_ERROR");
     console.error("Error in influencerGetById:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2213,6 +2227,7 @@ exports.influencerAddComment = async (req, res) => {
 
     return res.status(200).json({ message: "Comment added" });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_ADD_COMMENT_ERROR");
     console.error("Error in influencerAddComment:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2309,6 +2324,7 @@ exports.influencerRevokeDispute = async (req, res) => {
       status: dispute.status,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_REVOKE_DISPUTE_ERROR");
     console.error("Error in influencerRevokeDispute:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2511,6 +2527,7 @@ exports.influencerEditDispute = async (req, res) => {
       dispute,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_EDIT_DISPUTE_ERROR");
     console.error("Error in influencerEditDispute:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2537,6 +2554,7 @@ exports.adminGetById = async (req, res) => {
 
     return res.status(200).json({ dispute: enrichedDispute });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_GET_BY_ID_ERROR");
     console.error("Error in adminGetById:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2675,6 +2693,7 @@ exports.adminCreateDisputeEvidence = async (req, res) => {
       evidence: evidenceEntry,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_CREATE_DISPUTE_EVIDENCE_ERROR");
     console.error("Error in adminCreateDisputeEvidence:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2773,6 +2792,7 @@ exports.adminAddComment = async (req, res) => {
       message: parentComment ? "Reply added" : "Comment added",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_ADD_COMMENT_ERROR");
     console.error("Error in adminAddComment:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2868,6 +2888,7 @@ exports.adminList = async (req, res) => {
       disputes,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_LIST_ERROR");
     console.error("Error in adminList:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -2983,6 +3004,7 @@ exports.adminUpdateStatus = async (req, res) => {
       statusLabel: STATUS_LABELS[d.status] || d.status,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_UPDATE_STATUS_ERROR");
     console.error("Error in adminUpdateStatus:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -3025,6 +3047,7 @@ exports.adminMarkNotInterested = async (req, res) => {
       status: dispute.status,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_MARK_NOT_INTERESTED_ERROR");
     console.error("Error in adminMarkNotInterested:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -3081,6 +3104,7 @@ exports.adminAssign = async (req, res) => {
       .status(200)
       .json({ message: 'Assigned', assignedTo: d.assignedTo });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_ASSIGN_ERROR");
     console.error('Error in adminAssign:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -3225,6 +3249,7 @@ exports.influencerCampaignsForDispute = async (req, res) => {
       campaigns,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_CAMPAIGNS_FOR_DISPUTE_ERROR");
     console.error('Error in influencerCampaignsForDispute:', err);
     return res.status(500).json({
       message:

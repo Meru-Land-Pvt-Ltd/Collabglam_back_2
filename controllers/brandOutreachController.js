@@ -10,6 +10,7 @@ const { BrandNetwork } = require('../models/brandNetwork');
 const {
   getBrandThreadConversationState,
 } = require('../services/adminEmail.service');
+const saveErrorLog = require('../services/errorLog.service');
 
 function cleanStr(v) {
   if (v === undefined || v === null) return '';
@@ -241,6 +242,7 @@ exports.createBrandOutreachRow = async (req, res) => {
     });
   } catch (err) {
     console.error('[createBrandOutreachRow] Error:', err);
+    await saveErrorLog(req, err, 500, 'CREATE_BRAND_OUTREACH_ROW_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -311,6 +313,7 @@ exports.listBrandOutreach = async (req, res) => {
     });
   } catch (err) {
     console.error('[listBrandOutreach] Error:', err);
+    await saveErrorLog(req, err, 500, 'LIST_BRAND_OUTREACH_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -337,6 +340,7 @@ exports.getBrandOutreachById = async (req, res) => {
     });
   } catch (err) {
     console.error('[getBrandOutreachById] Error:', err);
+    await saveErrorLog(req, err, 500, 'GET_BRAND_OUTREACH_BY_ID_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -412,6 +416,7 @@ exports.updateBrandOutreach = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateBrandOutreach] Error:', err);
+    await saveErrorLog(req, err, 500, 'UPDATE_BRAND_OUTREACH_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -449,6 +454,7 @@ exports.markOutreachSent = async (req, res) => {
     return res.json({ success: true, data });
   } catch (err) {
     console.error('[markOutreachSent] Error:', err);
+    await saveErrorLog(req, err, 500, 'MARK_OUTREACH_SENT_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -491,6 +497,7 @@ exports.markFollowUp = async (req, res) => {
     return res.json({ success: true, data });
   } catch (err) {
     console.error('[markFollowUp] Error:', err);
+    await saveErrorLog(req, err, 500, 'MARK_FOLLOW_UP_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -533,6 +540,7 @@ exports.markReplyReceived = async (req, res) => {
     });
   } catch (err) {
     console.error('[markReplyReceived] Error:', err);
+    await saveErrorLog(req, err, 500, 'MARK_REPLY_RECEIVED_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
@@ -618,6 +626,7 @@ exports.moveToNetwork = async (req, res) => {
     });
   } catch (err) {
     console.error('[moveToNetwork] Error:', err);
+    await saveErrorLog(req, err, 500, 'MOVE_TO_NETWORK_ERROR');
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };

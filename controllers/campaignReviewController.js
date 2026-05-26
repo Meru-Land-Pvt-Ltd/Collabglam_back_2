@@ -20,6 +20,7 @@ const { InfluencerModel: Influencer } = require("../models/influencer");
 const { AdminModel } = require("../models/master");
 const Modash = require("../models/modash");
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 const BRAND_PUBLIC_SELECT =
   "brandName name companyName email profilePic logo image avatar profileImage brandLogo picture page1 page2 page3";
@@ -1319,6 +1320,7 @@ async function submitDirectReview(req, res, { reviewType, submittedVia }) {
       data: await hydrateReview(await CampaignReview.findById(review._id).populate(REVIEW_POPULATE).lean()),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "SUBMIT_DIRECT_REVIEW_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to submit review",
@@ -1448,6 +1450,7 @@ async function getReviewPromptState(req, res, { reviewType }) {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GET_REVIEW_PROMPT_STATE_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to check review prompt state",
@@ -1546,6 +1549,7 @@ async function skipDirectReview(req, res, { reviewType, skippedVia }) {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "SKIP_DIRECT_REVIEW_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to skip review",
@@ -1711,6 +1715,7 @@ exports.getPublicPlatformFeedbackQuestionnaire = async (req, res) => {
       data: getPublicPlatformFeedbackPayload(),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GET_PUBLIC_PLATFORM_FEEDBACK_QUESTIONNAIRE_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load platform feedback questionnaire",
@@ -1791,6 +1796,7 @@ exports.submitPublicPlatformFeedback = async (req, res) => {
       data: await hydrateReview(await CampaignReview.findById(review._id).populate(REVIEW_POPULATE).lean()),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "SUBMIT_PUBLIC_PLATFORM_FEEDBACK_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to submit platform feedback",
@@ -1809,6 +1815,7 @@ exports.getReviewQuestionnaires = async (req, res) => {
       data: REVIEW_QUESTIONNAIRES,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GET_REVIEW_QUESTIONNAIRES_ERROR");
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to load review questionnaires",
@@ -1853,6 +1860,7 @@ exports.getReviewByToken = async (req, res) => {
       data: await publicReviewPayload(review),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GET_REVIEW_BY_TOKEN_ERROR");
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to load review link",
@@ -2070,6 +2078,7 @@ exports.listAdminReviewOptions = async (req, res) => {
 
     return res.status(200).json({ success: true, data });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "LIST_ADMIN_REVIEW_OPTIONS_ERROR");
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to load review options",
@@ -2248,6 +2257,7 @@ exports.generateReviewLinks = async (req, res) => {
       data: results,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GENERATE_REVIEW_LINKS_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to generate review link",
@@ -2370,6 +2380,7 @@ exports.listAdminReviewLinks = async (req, res) => {
       data,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "LIST_ADMIN_REVIEW_LINKS_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load review links",
@@ -2440,6 +2451,7 @@ exports.listAdminReviews = async (req, res) => {
 
     return res.status(200).json({ success: true, data, total, page, limit });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "LIST_ADMIN_REVIEWS_ERROR");
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to list reviews",
@@ -2473,6 +2485,7 @@ exports.revokeReviewLink = async (req, res) => {
       data: review,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "REVOKE_REVIEW_LINK_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to revoke review link",
@@ -2580,6 +2593,7 @@ exports.getReviewSummary = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GET_REVIEW_SUMMARY_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load review summary",
@@ -2829,6 +2843,7 @@ exports.getAdminReviewPage = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || 500, "GET_ADMIN_REVIEW_PAGE_ERROR");
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load review page",

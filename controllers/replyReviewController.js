@@ -5,6 +5,7 @@ const { ConversationThread } = require("../models/conversationThread");
 const { AdminModel, ROLES } = require("../models/master");
 const { PROSPECT_STAGE, REVIEW_STATUS, OWNER_ROLE } = require("../constants/outreach");
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 const BME_ROLE = ROLES?.BME || "bme";
 
@@ -216,6 +217,13 @@ exports.listPendingReplies = async (req, res) => {
       data,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "LIST_PENDING_REPLIES_ERROR"
+    );
+
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load pending replies",
@@ -314,6 +322,13 @@ exports.assignReplyToBme = async (req, res) => {
       data: review,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "ASSIGN_REPLY_TO_BME_ERROR"
+    );
+
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to assign reply to BME",
@@ -382,6 +397,13 @@ exports.rejectReply = async (req, res) => {
       data: review,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "REJECT_REPLY_ERROR"
+    );
+
     return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to reject reply",
