@@ -62,6 +62,46 @@ const getCampaignIdMatchFilterForDispute = (campaignId) => {
 };
 
 const mapCampaignForDisputeDropdown = (campaign) => {
+  const categories = Array.isArray(campaign.categories)
+    ? campaign.categories
+    : [];
+
+  const categoryId =
+    campaign.categoryId
+      ? String(campaign.categoryId)
+      : categories[0]?.categoryId
+        ? String(categories[0].categoryId)
+        : "";
+
+  const categoryName =
+    campaign.campaignCategory ||
+    categories[0]?.categoryName ||
+    "";
+
+  const subcategoryIds = Array.isArray(campaign.subcategoryIds)
+    ? campaign.subcategoryIds.map((id) => String(id))
+    : categories
+      .map((item) => item?.subcategoryId)
+      .filter(Boolean)
+      .map((id) => String(id));
+
+  const subcategories = categories.length
+    ? categories.map((item) => ({
+      categoryId: item.categoryId ? String(item.categoryId) : categoryId,
+      categoryName: item.categoryName || categoryName,
+      subcategoryId: item.subcategoryId ? String(item.subcategoryId) : "",
+      subcategoryName: item.subcategoryName || "",
+    }))
+    : String(campaign.campaignSubcategory || "")
+      .split(",")
+      .map((name, index) => ({
+        categoryId,
+        categoryName,
+        subcategoryId: subcategoryIds[index] || "",
+        subcategoryName: name.trim(),
+      }))
+      .filter((item) => item.subcategoryName);
+
   return {
     _id: String(campaign._id),
     campaignId: String(campaign._id),
@@ -80,7 +120,25 @@ const mapCampaignForDisputeDropdown = (campaign) => {
     startAt: campaign.startAt,
     endAt: campaign.endAt,
     createdBy: campaign.createdBy || null,
-    category: campaign.category || null,
+
+    // fixed category fields
+    category: categoryName
+      ? {
+        id: categoryId,
+        name: categoryName,
+      }
+      : null,
+
+    categoryId,
+    categoryName,
+    campaignCategory: categoryName,
+
+    subcategoryIds,
+    subcategory: campaign.campaignSubcategory || "",
+    campaignSubcategory: campaign.campaignSubcategory || "",
+    subcategories,
+    categories: subcategories,
+
     numberOfInfluencers: campaign.numberOfInfluencers,
     campaignBudget: campaign.campaignBudget,
     budget: campaign.budget,
