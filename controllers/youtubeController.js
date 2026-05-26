@@ -603,6 +603,94 @@ async function searchChannelsByKeyword(query, limit = 5) {
   return Array.isArray(data?.items) ? data.items : [];
 }
 
+function isMongoObjectIdLike(value) {
+  return /^[a-f\d]{24}$/i.test(String(value || "").trim());
+}
+
+function cleanSearchValue(value) {
+  const text = cleanStr(value);
+  if (!text) return "";
+  if (isMongoObjectIdLike(text)) return "";
+  return text;
+}
+
+function uniqCleanSearch(values = []) {
+  const seen = new Set();
+
+  return values
+    .flat()
+    .map((x) => cleanSearchValue(x))
+    .filter(Boolean)
+    .filter((x) => {
+      const key = x.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function getCampaignSubcategoryTags(campaign = {}) {
+  return uniqCleanSearch(
+    Array.isArray(campaign.details?.subcategories)
+      ? campaign.details.subcategories.flatMap((x) =>
+        Array.isArray(x?.tags) ? x.tags : []
+      )
+      : []
+  );
+}
+
+function getCampaignGoals(campaign = {}) {
+  return uniqCleanSearch([
+    campaign.campaignGoal,
+    campaign.campaignObjective,
+    ...(Array.isArray(campaign.details?.campaignGoals)
+      ? campaign.details.campaignGoals.map((x) => x?.goal)
+      : []),
+  ]);
+}
+
+function getCampaignContentFormats(campaign = {}) {
+  return uniqCleanSearch([
+    // Do not use raw campaign.contentFormats here because it can contain ObjectIds.
+    ...(Array.isArray(campaign.details?.contentFormats)
+      ? campaign.details.contentFormats.map((x) => x?.format)
+      : []),
+    campaign.contentFormat,
+    campaign.deliverable,
+  ]);
+}
+
+function buildYouTubeCampaignCategories(campaign = {}) {
+  return uniqCleanSearch([
+    campaign.campaignCategory,
+    campaign.campaignSubcategory,
+    ...(Array.isArray(campaign.categories)
+      ? campaign.categories.flatMap((x) => [
+        x?.categoryName,
+        x?.subcategoryName,
+      ])
+      : []),
+    campaign.details?.category?.name,
+    ...(Array.isArray(campaign.details?.subcategories)
+      ? campaign.details.subcategories.map((x) => x?.name)
+      : []),
+    ...getCampaignSubcategoryTags(campaign).slice(0, 12),
+  ]);
+}
+
+function buildYouTubeCampaignCountries(campaign = {}) {
+  return uniqCleanSearch([
+    campaign.targetCountry,
+    campaign.targetCountryCode,
+    ...(Array.isArray(campaign.details?.targetCountries)
+      ? campaign.details.targetCountries.flatMap((x) => [
+        x?.countryCode,
+        x?.countryName,
+      ])
+      : []),
+  ]);
+}
+
 /**
  * Global keyword search for videos
  */
@@ -1325,17 +1413,14 @@ function buildYouTubeCampaignQuery(campaign = {}) {
   const formatTerms = getCampaignContentFormats(campaign);
 
   const usefulCampaignText = [
-    campaign.campaignTitle,
     campaign.productOrServiceName,
-    campaign.description,
-    campaign.additionalNotes,
     ...(Array.isArray(campaign.hashtags) ? campaign.hashtags : []),
     ...(Array.isArray(campaign.preferredHashtags)
       ? campaign.preferredHashtags
       : []),
   ].filter(looksUsefulSearchText);
 
-  const values = uniqClean([
+  const values = uniqCleanSearch([
     ...categoryTerms,
     ...goalTerms,
     ...formatTerms,
@@ -1378,48 +1463,31 @@ function buildCampaignFit(rec = {}, campaign = {}) {
   const goals = getCampaignGoals(campaign);
   const contentFormats = getCampaignContentFormats(campaign);
 
+  const haystackValues = [
+    rec.title,
+    rec.description,
+    rec.keywords,
+    ...(Array.isArray(rec.topicLabels) ? rec.topicLabels : []),
+    ...(Array.isArray(rec.matchedVideos)
+      ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
+      : []),
+  ];
+
   const countryUpper = cleanStr(rec.country).toUpperCase();
   const countryMatched = countries.length
     ? countries.some((x) => cleanStr(x).toUpperCase() === countryUpper)
     : null;
 
   const categoryMatched = categories.length
-    ? matchAnyText(
-      [
-        rec.title,
-        rec.description,
-        rec.keywords,
-        ...(Array.isArray(rec.topicLabels) ? rec.topicLabels : []),
-      ],
-      categories
-    )
+    ? matchAnyText(haystackValues, categories)
     : null;
 
   const goalMatched = goals.length
-    ? matchAnyText(
-      [
-        rec.title,
-        rec.description,
-        rec.keywords,
-        ...(Array.isArray(rec.matchedVideos)
-          ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
-          : []),
-      ],
-      goals
-    )
+    ? matchAnyText(haystackValues, goals)
     : null;
 
   const contentFormatMatched = contentFormats.length
-    ? matchAnyText(
-      [
-        rec.title,
-        rec.description,
-        ...(Array.isArray(rec.matchedVideos)
-          ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
-          : []),
-      ],
-      contentFormats
-    )
+    ? matchAnyText(haystackValues, contentFormats)
     : null;
 
   const followerFit = getFollowerFitLabel(
@@ -1430,11 +1498,11 @@ function buildCampaignFit(rec = {}, campaign = {}) {
 
   let score = 0;
 
-  if (followerFit === "matched") score += 35;
+  if (followerFit === "matched") score += 45;
   if (categoryMatched === true) score += 30;
-  if (countryMatched === true) score += 15;
+  if (countryMatched === true) score += 10;
   if (goalMatched === true) score += 10;
-  if (contentFormatMatched === true) score += 10;
+  if (contentFormatMatched === true) score += 5;
 
   return {
     score,
@@ -1466,18 +1534,6 @@ function passesCampaignHardFilters(rec = {}, campaign = {}) {
 
   if (minFollowers && subscriberCount < minFollowers) return false;
   if (maxFollowers && subscriberCount > maxFollowers) return false;
-
-  const countries = buildYouTubeCampaignCountries(campaign)
-    .map((x) => cleanStr(x).toUpperCase())
-    .filter(Boolean);
-
-  // Only apply country as a hard filter when campaign has a real country code/name.
-  if (countries.length) {
-    const recCountry = cleanStr(rec.country).toUpperCase();
-    if (recCountry && !countries.includes(recCountry)) {
-      return false;
-    }
-  }
 
   return true;
 }
@@ -1592,21 +1648,18 @@ function mapYouTubeRecommendedInfluencer(rec, maxScore, campaign = {}) {
   };
 }
 
-async function runCampaignYouTubeSearch(query, campaign, limit) {
+async function runCampaignYouTubeSearch(query, campaign, limit, opts = {}) {
   return globalYouTubeSearch(query, {
-    channelLimit: Math.max(limit * 3, 30),
+    channelLimit: Math.max(limit * 5, 50),
     videoLimit: 50,
 
-    // Hard campaign follower range.
     followersMin: campaign.minFollowers,
     followersMax: campaign.maxFollowers,
 
-    // Country code/name support.
-    country: undefined,
-    countries: buildYouTubeCampaignCountries(campaign),
+    categories: [],
 
-    // Category, subcategory, and tags.
-    categories: buildYouTubeCampaignCategories(campaign),
+    country: undefined,
+    countries: [],
 
     sortBy: "relevance",
   });
