@@ -7,6 +7,7 @@ const {
   OUTREACH_CAMPAIGN_STATUS,
 } = require("../constants/outreach");
 const { ensureRole } = require("../utils/outreachGuards");
+const saveErrorLog = require("../services/errorLog.service");
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
@@ -381,6 +382,13 @@ const threadMeta = await getThreadMeta(req.admin);
       },
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_SIDEBAR_SUMMARY_ERROR"
+    );
+
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load sidebar summary",

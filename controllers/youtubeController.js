@@ -4,8 +4,22 @@ require('dotenv').config();
 const { fetch, Agent } = require('undici');
 
 const InfluencerProfile = require('../models/youtube');
+const saveErrorLog = require('../services/errorLog.service');
 
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const asyncHandler = (fn, errorCode = 'YOUTUBE_CONTROLLER_ERROR') => async (req, res, next) => {
+  try {
+    return await fn(req, res, next);
+  } catch (err) {
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 500,
+      errorCode
+    );
+
+    return next(err);
+  }
+};
 
 const YT_API_KEY = process.env.YOUTUBE_API_KEY;
 const YT_TIMEOUT_MS = Number(process.env.YOUTUBE_TIMEOUT_MS || 12000);
@@ -1785,6 +1799,13 @@ exports.getAllInfluencers = asyncHandler(async (req, res) => {
     });
   } catch (err) {
     console.error('getAllInfluencers error:', err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 400,
+      'GET_ALL_INFLUENCERS_ERROR'
+    );
+
     return res.status(400).json({
       status: 'error',
       message: err?.message || 'Failed to fetch influencers.',
@@ -2110,6 +2131,13 @@ exports.exportInfluencersCsv = asyncHandler(async (req, res) => {
     return res.status(200).send(csv);
   } catch (err) {
     console.error('exportInfluencersCsv error:', err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 400,
+      'EXPORT_INFLUENCERS_CSV_ERROR'
+    );
+
     return res.status(400).json({
       status: 'error',
       message: err?.message || 'Failed to export influencers.',
@@ -2163,4 +2191,3 @@ exports.previewYouTubeProfile = asyncHandler(async (req, res) => {
     },
   });
 });
-

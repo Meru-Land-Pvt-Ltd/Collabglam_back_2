@@ -10,6 +10,7 @@ const ChatRoom = require('../models/chat');
 const Brand = require('../models/brand');
 const Influencer = require('../models/influencer');
 const { createAndEmit } = require('../utils/notifier');
+const saveErrorLog = require('../services/errorLog.service');
 
 /* ---------------- Config / GridFS helpers ---------------- */
 const GRIDFS_BUCKET = process.env.GRIDFS_BUCKET || 'uploads';
@@ -128,6 +129,7 @@ exports.createRoom = async (req, res) => {
 
     return res.json({ message, roomId: room.roomId });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'CREATE_ROOM_ERROR');
     console.error('createRoom error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -153,6 +155,7 @@ exports.getRooms = async (req, res) => {
 
     return res.json({ message: 'Rooms retrieved', rooms: summary });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_ROOMS_ERROR');
     console.error('getRooms error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -173,6 +176,7 @@ exports.getMessages = async (req, res) => {
 
     return res.json({ message: 'Messages fetched', messages: msgs });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_MESSAGES_ERROR');
     console.error('getMessages error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -228,6 +232,7 @@ exports.postMessage = async (req, res) => {
 
     return res.status(201).json({ message: 'Message sent', messageData: msg });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'POST_MESSAGE_ERROR');
     console.error('postMessage error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -287,6 +292,7 @@ exports.postFileMessage = [
 
       return res.status(201).json({ message: 'File message sent', messageData: msg });
     } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'POST_FILE_MESSAGE_ERROR');
       console.error('postFileMessage error:', err);
       return res.status(500).json({ message: 'Internal server error' });
     }
@@ -325,6 +331,7 @@ exports.editMessage = async (req, res) => {
 
     return res.json({ message: 'Message edited', messageData: msg });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'EDIT_MESSAGE_ERROR');
     console.error('editMessage error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -368,6 +375,7 @@ exports.deleteMessage = async (req, res) => {
 
     return res.json({ message: 'Message deleted', messageId });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'DELETE_MESSAGE_ERROR');
     console.error('deleteMessage error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -443,6 +451,7 @@ exports.markAsSeen = async (req, res) => {
 
     return res.json({ message: 'Messages marked as seen', markedCount: updatedMessages.length, updatedMessages });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'MARK_AS_SEEN_ERROR');
     console.error('markAsSeen error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -465,6 +474,7 @@ exports.getUnseenCount = async (req, res) => {
 
     return res.json({ message: 'Unseen count retrieved', roomId, userId, unseenCount });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_UNSEEN_COUNT_ERROR');
     console.error('getUnseenCount error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -512,6 +522,7 @@ exports.streamAttachment = async (req, res) => {
 
     return res.status(500).json({ message: 'Attachment is not streamable' });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'STREAM_ATTACHMENT_ERROR');
     console.error('streamAttachment error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -523,7 +534,8 @@ exports.streamGridFsFile = async (req, res) => {
   const asAttachment = req.query.download === '1';
   if (!filename) return res.status(400).json({ message: 'filename is required' });
   try { return streamGridFsByFilename(req, res, filename, { asAttachment }); }
-  catch (err) { console.error('streamGridFsFile error:', err); return res.status(500).json({ message: 'Internal server error' }); }
+  catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'STREAM_GRID_FS_FILE_ERROR'); console.error('streamGridFsFile error:', err); return res.status(500).json({ message: 'Internal server error' }); }
 };
 
 /* ---------------- 11) Legacy POST download ---------------- */
@@ -562,6 +574,7 @@ exports.downloadAttachmentPost = async (req, res) => {
 
     return res.status(500).json({ message: 'Attachment is not downloadable' });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'DOWNLOAD_ATTACHMENT_POST_ERROR');
     console.error('downloadAttachment (POST) error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }

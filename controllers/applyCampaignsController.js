@@ -7,6 +7,7 @@ const { createAndEmit } = require('../utils/notifier');
 const Modash = require('../models/modash');
 const Brand = require('../models/brand');
 const { sendMail } = require('../utils/mailer');
+const saveErrorLog = require('../services/errorLog.service');
 const ACTIVE_CONTRACT_STATUSES = [
   'draft',
   'sent',
@@ -429,6 +430,7 @@ ${dashboardLink}
     });
   } catch (err) {
     console.error('Error in applyToCampaign:', err);
+    await saveErrorLog(req, err, 500, 'APPLY_TO_CAMPAIGN_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -1421,6 +1423,7 @@ exports.getListByCampaign = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in getListByCampaign:', err);
+    await saveErrorLog(req, err, 500, 'GET_LIST_BY_CAMPAIGN_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -1516,6 +1519,7 @@ exports.approveInfluencer = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in approveInfluencer:', err);
+    await saveErrorLog(req, err, 500, 'APPROVE_INFLUENCER_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -1581,6 +1585,7 @@ exports.setApplicantDecisionStatus = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in setApplicantDecisionStatus:', err);
+    await saveErrorLog(req, err, 500, 'SET_APPLICANT_DECISION_STATUS_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -1944,6 +1949,7 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getBrandCampaignsWithAppliedInfluencers:", err);
+    await saveErrorLog(req, err, 500, "GET_BRAND_CAMPAIGNS_WITH_APPLIED_INFLUENCERS_ERROR");
 
     return res.status(500).json({
       success: false,

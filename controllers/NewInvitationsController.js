@@ -13,6 +13,8 @@ const {
   cleanStr,
 } = require('../services/email/invitationEmailService');
 
+const saveErrorLog = require('../services/errorLog.service');
+
 const HANDLE_RX = /^@[A-Za-z0-9._\-]+$/;
 const EMAIL_RX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 
@@ -801,6 +803,9 @@ exports.createInvitation = async (req, res) => {
   } catch (err) {
     console.error('createInvitation error:', err);
 
+    const statusCode = err?.code === 11000 ? 409 : err?.statusCode || err?.status || 500;
+    await saveErrorLog(req, err, statusCode, 'CREATE_INVITATION_ERROR');
+
     if (err?.code === 11000) {
       return res.status(409).json({
         status: 'error',
@@ -888,6 +893,7 @@ exports.updateInvitationStatus = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in updateInvitationStatus:', err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'UPDATE_INVITATION_STATUS_ERROR');
 
     return res.status(500).json({
       status: 'error',
@@ -1233,6 +1239,7 @@ exports.listInvitations = async (req, res) => {
     });
   } catch (err) {
     console.error('listInvitations error:', err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'LIST_INVITATIONS_ERROR');
 
     return res.status(500).json({
       status: 'error',
@@ -1369,6 +1376,7 @@ exports.getInvitationList = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in getInvitationList:', err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_INVITATION_LIST_ERROR');
 
     return res.status(500).json({
       status: 'error',
@@ -1557,6 +1565,7 @@ exports.getInvitationSendEligibility = async (req, res) => {
     });
   } catch (err) {
     console.error('getInvitationSendEligibility error:', err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_INVITATION_SEND_ELIGIBILITY_ERROR');
 
     return res.status(500).json({
       canSend: false,

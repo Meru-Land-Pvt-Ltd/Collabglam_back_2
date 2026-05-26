@@ -17,6 +17,7 @@ const Influencer =
 
 const subscriptionHelper = require("../utils/subscriptionHelper");
 const { sendEmail, uploadEmailRecordToS3 } = require("../services/emailService");
+const saveErrorLog = require("../services/errorLog.service");
 
 function assertValidModel(Model, label) {
   if (!Model || typeof Model.find !== "function") {
@@ -429,7 +430,8 @@ exports.createPlan = async (req, res) => {
   } catch (err) {
     console.error("createPlan error:", err);
 
-    if (err?.code === 11000) {
+    
+    await saveErrorLog(req, err, err?.code === 11000 ? 409 : err?.response?.status || err?.statusCode || err?.status || 500, "CREATE_PLAN_ERROR");if (err?.code === 11000) {
       return res.status(409).json({
         message: "Plan already exists (duplicate role+name or planId).",
         detail: err.keyValue,
@@ -458,7 +460,8 @@ exports.getPlans = async (req, res) => {
     return res.status(200).json({ message: "Plans retrieved", plans: safePlans });
   } catch (err) {
     console.error("getPlans error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "GET_PLANS_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -475,7 +478,8 @@ exports.getPlanById = async (req, res) => {
     return res.status(200).json({ message: "Plan retrieved", plan: safePlan });
   } catch (err) {
     console.error("getPlanById error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "GET_PLAN_BY_ID_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -503,7 +507,8 @@ exports.updatePlan = async (req, res) => {
   } catch (err) {
     console.error("updatePlan error:", err);
 
-    if (err?.code === 11000) {
+    
+    await saveErrorLog(req, err, err?.code === 11000 ? 409 : err?.response?.status || err?.statusCode || err?.status || 500, "UPDATE_PLAN_ERROR");if (err?.code === 11000) {
       return res.status(409).json({
         message: "Update causes duplicate role+name (or duplicate unique field).",
         detail: err.keyValue,
@@ -530,7 +535,8 @@ exports.deletePlan = async (req, res) => {
     return res.status(200).json({ message: "Plan deleted" });
   } catch (err) {
     console.error("deletePlan error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "DELETE_PLAN_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -630,6 +636,13 @@ exports.assignPlan = async (req, res) => {
     });
   } catch (error) {
     console.error("assignPlan error:", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "ASSIGN_PLAN_ERROR"
+    );
+
     return res
       .status(500)
       .json({ message: "Internal server error while assigning plan." });
@@ -717,7 +730,8 @@ exports.renewPlan = async (req, res) => {
     });
   } catch (err) {
     console.error("renewPlan error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "RENEW_PLAN_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -759,7 +773,8 @@ exports.getMyPlan = async (req, res) => {
     });
   } catch (err) {
     console.error("getMyPlan error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "GET_MY_PLAN_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -871,7 +886,8 @@ exports.checkBrandPlanChange = async (req, res) => {
     });
   } catch (err) {
     console.error("checkBrandPlanChange error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "CHECK_BRAND_PLAN_CHANGE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -918,7 +934,8 @@ exports.getCurrentBrandPlanLite = async (req, res) => {
     });
   } catch (err) {
     console.error("getCurrentBrandPlanLite error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "GET_CURRENT_BRAND_PLAN_LITE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1003,7 +1020,8 @@ exports.sendExpiringSoonEmails = async (req, res) => {
     });
   } catch (err) {
     console.error("sendExpiringSoonEmails error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "SEND_EXPIRING_SOON_EMAILS_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1121,7 +1139,8 @@ exports.sendExpiredSubscriptionEmails = async (req, res) => {
     });
   } catch (err) {
     console.error("sendExpiredSubscriptionEmails error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "SEND_EXPIRED_SUBSCRIPTION_EMAILS_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1333,7 +1352,8 @@ exports.moveExpiredBrandsToFree = async (req, res) => {
     });
   } catch (err) {
     console.error("moveExpiredBrandsToFree error:", err);
-    return res.status(500).json({
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "MOVE_EXPIRED_BRANDS_TO_FREE_ERROR");return res.status(500).json({
       message: "Internal server error while moving brands to free",
     });
   }

@@ -4,6 +4,7 @@ const instantlyService = require("../services/instantlyService");
 const { OWNER_ROLE } = require("../constants/outreach");
 const { ensureRole } = require("../utils/outreachGuards");
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 
 function getActorPayloadFromReq(req = {}) {
@@ -467,6 +468,7 @@ exports.listMailboxAssignments = async (req, res) => {
       data: rows,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_MAILBOX_ASSIGNMENTS_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Internal error",
@@ -617,6 +619,7 @@ exports.assignMailbox = async (req, res) => {
       data: doc,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "ASSIGN_MAILBOX_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message:
@@ -672,6 +675,7 @@ exports.unassignMailbox = async (req, res) => {
       data: row,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UNASSIGN_MAILBOX_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Internal error",
@@ -734,6 +738,7 @@ exports.listMyMailboxAccounts = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_MY_MAILBOX_ACCOUNTS_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load accounts",
@@ -790,6 +795,7 @@ exports.setMyMailboxPrimary = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "SET_MY_MAILBOX_PRIMARY_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message:
@@ -949,6 +955,7 @@ exports.getMyMailboxAccountDetails = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_MY_MAILBOX_ACCOUNT_DETAILS_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to load account details",
@@ -972,6 +979,7 @@ exports.updateMyMailboxSettings = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPDATE_MY_MAILBOX_SETTINGS_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to update mailbox settings",
@@ -994,6 +1002,7 @@ exports.pauseMyMailbox = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "PAUSE_MY_MAILBOX_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to pause mailbox",
@@ -1016,6 +1025,7 @@ exports.resumeMyMailbox = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "RESUME_MY_MAILBOX_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to resume mailbox",
@@ -1040,6 +1050,7 @@ exports.enableMyMailboxWarmup = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "ENABLE_MY_MAILBOX_WARMUP_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to enable warmup",
@@ -1064,6 +1075,7 @@ exports.disableMyMailboxWarmup = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DISABLE_MY_MAILBOX_WARMUP_ERROR");
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to disable warmup",

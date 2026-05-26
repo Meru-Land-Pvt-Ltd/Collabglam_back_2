@@ -1,6 +1,7 @@
 // controllers/businessController.js
 const BusinessType = require('../models/businessType');
 const { escapeRegExp } = require('../utils/searchTokens'); // same helper used elsewhere
+const saveErrorLog = require('../services/errorLog.service');
 
 
 exports.getList = async (req, res) => {
@@ -39,6 +40,7 @@ exports.getList = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in BusinessType.getList:', err);
+    await saveErrorLog(req, err, 500, 'BUSINESS_TYPE_GET_LIST_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };

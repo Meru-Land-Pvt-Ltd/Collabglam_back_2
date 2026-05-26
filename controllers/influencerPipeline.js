@@ -18,6 +18,7 @@ const { getThreadConversationState } = require('../services/adminEmail.service')
 const CampaignInvitation = require("../models/campaignInvitation");
 const Campaign = require("../models/campaign");
 const { InfluencerModel: Influencer } = require("../models/influencer");
+const saveErrorLog = require('../services/errorLog.service');
 
 function cleanStr(v) {
   if (v === undefined || v === null) return '';
@@ -618,6 +619,7 @@ exports.bulkAddToOutreach = async (req, res) => {
       matched: result.matchedCount || 0,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'BULK_ADD_TO_OUTREACH_ERROR');
     console.error('[bulkAddToOutreach] Error:', err);
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
@@ -680,6 +682,7 @@ exports.listPipeline = async (req, res) => {
       results,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'LIST_PIPELINE_ERROR');
     console.error('[listPipeline] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -723,6 +726,7 @@ exports.updateOutreach = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'UPDATE_OUTREACH_ERROR');
     console.error('[updateOutreach] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -757,6 +761,7 @@ exports.markOutreachSent = async (req, res) => {
 
     return res.json({ success: true });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'MARK_OUTREACH_SENT_ERROR');
     console.error('[markOutreachSent] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -786,6 +791,7 @@ exports.markFollowUp = async (req, res) => {
       data,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'MARK_FOLLOW_UP_ERROR');
     console.error('[markFollowUp] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -836,6 +842,7 @@ exports.saveReplyAndMoveToRoster = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'SAVE_REPLY_AND_MOVE_TO_ROSTER_ERROR');
     console.error('[saveReplyAndMoveToRoster] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -879,6 +886,7 @@ exports.updateRoster = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'UPDATE_ROSTER_ERROR');
     console.error('[updateRoster] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -909,6 +917,7 @@ exports.moveToPitch = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'MOVE_TO_PITCH_ERROR');
     console.error('[moveToPitch] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -950,6 +959,7 @@ exports.updatePitch = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'UPDATE_PITCH_ERROR');
     console.error('[updatePitch] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -992,6 +1002,7 @@ exports.generatePortalLink = async (req, res) => {
       url: portalUrl,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GENERATE_PORTAL_LINK_ERROR');
     console.error('[generatePortalLink] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -1032,6 +1043,7 @@ exports.addMilestone = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'ADD_MILESTONE_ERROR');
     console.error('[addMilestone] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -1060,6 +1072,7 @@ exports.getPipelineById = async (req, res) => {
       data,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_PIPELINE_BY_ID_ERROR');
     console.error('[getPipelineById] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -1113,6 +1126,7 @@ exports.moveToRoster = async (req, res) => {
       data,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'MOVE_TO_ROSTER_ERROR');
     console.error('[moveToRoster] Error:', err);
     return res.status(500).json({ error: 'Internal error' });
   }
@@ -1259,6 +1273,7 @@ exports.createPipelineRow = async (req, res) => {
       data: doc,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'CREATE_PIPELINE_ROW_ERROR');
     console.error('[createPipelineRow] Error:', err);
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
@@ -1322,6 +1337,7 @@ exports.getBrandPitchSheetByCampaign = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_BRAND_PITCH_SHEET_BY_CAMPAIGN_ERROR');
     console.error('[getBrandPitchSheetByCampaign] Error:', err);
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
@@ -1371,6 +1387,7 @@ exports.updateBrandPitchGoodFit = async (req, res) => {
       data: updated,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'UPDATE_BRAND_PITCH_GOOD_FIT_ERROR');
     console.error('[updateBrandPitchGoodFit] Error:', err);
     return res.status(500).json({ error: err?.message || 'Internal error' });
   }
@@ -1458,22 +1475,22 @@ exports.sendCampaignInvitationFromPitch = async (req, res) => {
       }
     ).lean();
 
-const hasInvited = ["sent", "accepted", "reject"].includes(invitation.status);
+    const hasInvited = ["sent", "accepted", "reject"].includes(invitation.status);
 
-await InfluencerPipeline.updateOne(
-  { _id: row._id },
-  {
-    $set: {
-      linkedInfluencerId: influencer._id,
-      campaignInvitationId: invitation._id,
-      campaignInvitationStatus: invitation.status,
-      campaignInvitationSentAt: invitation.sentAt || new Date(),
-      hasInvited,
-      hasInvitedAt: hasInvited ? (invitation.sentAt || new Date()) : null,
-      updatedByAdmin: actorId || null,
-    },
-  }
-);
+    await InfluencerPipeline.updateOne(
+      { _id: row._id },
+      {
+        $set: {
+          linkedInfluencerId: influencer._id,
+          campaignInvitationId: invitation._id,
+          campaignInvitationStatus: invitation.status,
+          campaignInvitationSentAt: invitation.sentAt || new Date(),
+          hasInvited,
+          hasInvitedAt: hasInvited ? (invitation.sentAt || new Date()) : null,
+          updatedByAdmin: actorId || null,
+        },
+      }
+    );
 
     return res.json({
       success: true,
@@ -1490,6 +1507,7 @@ await InfluencerPipeline.updateOne(
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'SEND_CAMPAIGN_INVITATION_FROM_PITCH_ERROR');
     console.error("[sendCampaignInvitationFromPitch] Error:", err);
     return res.status(500).json({ error: err?.message || "Internal error" });
   }

@@ -1,5 +1,6 @@
 // controllers/category.controller.js
 const { Category } = require('../models/categories');
+const saveErrorLog = require('../services/errorLog.service');
 
 
 exports.getAllCategoriesWithSubcategories = async (req, res) => {
@@ -17,6 +18,7 @@ exports.getAllCategoriesWithSubcategories = async (req, res) => {
     });
   } catch (err) {
     console.error('getAllCategoriesWithSubcategories error:', err);
+    await saveErrorLog(req, err, 500, 'GET_ALL_CATEGORIES_WITH_SUBCATEGORIES_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -46,6 +48,7 @@ exports.postSubcategoriesByCategoryId = async (req, res) => {
     });
   } catch (err) {
     console.error('postSubcategoriesByCategoryId error:', err);
+    await saveErrorLog(req, err, 500, 'POST_SUBCATEGORIES_BY_CATEGORY_ID_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -71,6 +74,7 @@ exports.postCategoryById = async (req, res) => {
     return res.status(200).json(doc);
   } catch (err) {
     console.error('postCategoryById error:', err);
+    await saveErrorLog(req, err, 500, 'POST_CATEGORY_BY_ID_ERROR');
     return res.status(500).json({ message: 'Internal server error' });
   }
 };

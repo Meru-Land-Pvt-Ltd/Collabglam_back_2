@@ -1,6 +1,7 @@
 // controllers/filterController.js
 const Influencer = require('../models/influencer');
 const { escapeRegExp } = require('../utils/searchTokens');
+const saveErrorLog = require('../services/errorLog.service');
 
 /**
  * POST /api/influencers/getlist
@@ -108,6 +109,7 @@ exports.getFilteredInfluencers = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in getFilteredInfluencers:', err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_FILTERED_INFLUENCERS_ERROR');
     res.status(500).json({ success: false, message: err.message });
   }
 };

@@ -2,6 +2,7 @@ const Stripe = require("stripe");
 const { ApiResponse } = require("../core/http/ApiResponse");
 const { HttpStatus } = require("../core/http/HttpStatus");
 const { BrandWalletModel } = require("../models/brandWallet");
+const saveErrorLog = require("../services/errorLog.service");
 
 // ---------------- Helpers ----------------
 const clean = (v) => String(v ?? "").trim();
@@ -234,6 +235,7 @@ const getBrandWallet = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "GET_BRAND_WALLET_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -334,6 +336,7 @@ const topupBrandWallet = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "TOPUP_BRAND_WALLET_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -479,6 +482,7 @@ const confirmBrandWalletTopup = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "CONFIRM_BRAND_WALLET_TOPUP_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -606,6 +610,7 @@ const freezeAmountForCampaign = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "FREEZE_AMOUNT_FOR_CAMPAIGN_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -807,6 +812,7 @@ const allocateToInfluencer = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "ALLOCATE_TO_INFLUENCER_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -920,6 +926,7 @@ const withdrawBrandWalletAmount = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "WITHDRAW_BRAND_WALLET_AMOUNT_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -1066,6 +1073,7 @@ const getFrozenAmountForCampaign = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "GET_FROZEN_AMOUNT_FOR_CAMPAIGN_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -1131,6 +1139,7 @@ const getWalletTopup = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "GET_WALLET_TOPUP_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(
@@ -1253,6 +1262,7 @@ const getBrandWalletHistory = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, 500, "GET_BRAND_WALLET_HISTORY_ERROR");
     const message = err instanceof Error ? err.message : "Internal error";
 
     return ApiResponse.sendFail(

@@ -15,6 +15,7 @@ const {
 } = require("../constants/outreach");
 const { cleanName, getMailboxDisplayName } = require("../utils/mailboxDisplayName");
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 
 function uniqueNotificationIds(values = []) {
@@ -528,6 +529,12 @@ exports.handleInstantlyWebhook = async (req, res) => {
     });
   } catch (error) {
     console.error("Instantly webhook error", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.statusCode || error?.status || 500,
+      "HANDLE_INSTANTLY_WEBHOOK_ERROR"
+    );
 
     return res.status(500).json({
       success: false,

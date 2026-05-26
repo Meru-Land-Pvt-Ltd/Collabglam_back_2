@@ -5,6 +5,8 @@ const {
   deleteEmailTemplate,
 } = require("../services/adminEmailTemplate.service");
 
+const saveErrorLog = require("../services/errorLog.service");
+
 function getLoggedInAdminId(req) {
   return (
     req.admin?.adminId ||
@@ -46,6 +48,8 @@ async function getTemplates(req, res) {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "GET_TEMPLATES_ERROR");
+
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to fetch templates",
@@ -73,6 +77,8 @@ async function createTemplate(req, res) {
       data,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "CREATE_TEMPLATE_ERROR");
+
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to create template",
@@ -102,6 +108,8 @@ async function updateTemplate(req, res) {
       data,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "UPDATE_TEMPLATE_ERROR");
+
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to update template",
@@ -127,6 +135,8 @@ async function removeTemplate(req, res) {
       data,
     });
   } catch (error) {
+    await saveErrorLog(req, error, 400, "REMOVE_TEMPLATE_ERROR");
+
     return res.status(400).json({
       success: false,
       message: error?.message || "Failed to delete template",

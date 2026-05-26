@@ -33,6 +33,7 @@ const EXECUTIVE_ROLES = [ROLES.IME, ROLES.BME, ROLES.SDR];
 const CampaignAssigned = require("../models/CampaignAssigned");
 
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 function getActorPayloadFromReq(req = {}) {
   const admin = req?.admin || req?.user || {};
@@ -522,6 +523,7 @@ exports.adminLogin = async (req, res) => {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ADMIN_LOGIN_ERROR");
     return res.status(500).json({ message: err.message || "Internal error" });
   }
 };
@@ -709,6 +711,7 @@ exports.inviteAdmin = async (req, res) => {
 
     return res.status(201).json(response);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "INVITE_ADMIN_ERROR");
     if (err.message === "Proxy email already in use") {
       return res.status(409).json({ message: err.message });
     }
@@ -787,6 +790,7 @@ exports.verifyInviteEmail = async (req, res) => {
       })
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFY_INVITE_EMAIL_ERROR");
     return res.redirect(
       buildRedirectUrl({
         verified: "0",
@@ -877,6 +881,7 @@ exports.acceptInviteSetPassword = async (req, res) => {
       proxyEmail: admin.proxyEmail,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ACCEPT_INVITE_SET_PASSWORD_ERROR");
     return res.status(500).json({
       message: err.message || "Internal error",
     });
@@ -906,6 +911,7 @@ exports.listAdmins = async (req, res) => {
 
     return res.status(200).json(admins);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "LIST_ADMINS_ERROR");
     return res.status(500).json({
       message: err.message || "Internal error",
     });
@@ -1010,6 +1016,7 @@ exports.updateStatus = async (req, res) => {
       message: "Admin updated successfully",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_STATUS_ERROR");
     return res.status(500).json({
       message: err.message || "Internal error",
     });
@@ -1069,6 +1076,7 @@ exports.adminMe = async (req, res) => {
       canEditPermissions,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ADMIN_ME_ERROR");
     return res.status(500).json({
       message: err.message || "Internal error",
     });
@@ -1115,6 +1123,7 @@ exports.sendBulkEmailCsv = async (req, res) => {
       data: result,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "SEND_BULK_EMAIL_CSV_ERROR");
     return res.status(500).json({
       success: false,
       message: e?.message || "Internal error",
@@ -1166,6 +1175,7 @@ exports.fullyManagedBrandList = async (req, res) => {
       data: enrichedBrandList,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "FULLY_MANAGED_BRAND_LIST_ERROR");
     console.error("fullyManagedBrandList error:", e);
     return res.status(500).json({
       success: false,
@@ -1397,6 +1407,7 @@ exports.assignCampaignIme = async (req, res) => {
       data: doc,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "ASSIGN_CAMPAIGN_IME_ERROR");
     console.error("assignCampaignIme error:", error);
     return res.status(500).json({
       success: false,
@@ -1577,6 +1588,7 @@ exports.assignBrand = async (req, res) => {
       data: updated,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "ASSIGN_BRAND_ERROR");
     console.error("assignBrand error:", error);
     return res.status(500).json({
       success: false,
@@ -1668,6 +1680,7 @@ exports.updateBrandAssignment = async (req, res) => {
       data: assignment,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "UPDATE_BRAND_ASSIGNMENT_ERROR");
     return res.status(500).json({
       success: false,
       message: e?.message || "Internal error",
@@ -1764,6 +1777,7 @@ exports.updateBrandAssignmentStatusAndRH = async (req, res) => {
       data: assignment,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "UPDATE_BRAND_ASSIGNMENT_STATUS_AND_RH_ERROR");
     return res.status(500).json({
       success: false,
       message: e?.message || "Internal error",
@@ -1855,6 +1869,7 @@ exports.listExecutiveAdmin = async (req, res) => {
       data,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "LIST_EXECUTIVE_ADMIN_ERROR");
     return res.status(500).json({
       success: false,
       message: e?.message || "Internal error",
@@ -1875,6 +1890,7 @@ exports.rmlist = async (req, res) => {
       data: rms,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "RMLIST_ERROR");
     return res.status(500).json({
       success: false,
       message: e?.message || "Internal error",
@@ -1923,6 +1939,7 @@ exports.allocateBrand = async (req, res) => {
       data: allocations,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "ALLOCATE_BRAND_ERROR");
     console.error("allocateBrand error:", e);
     return res.status(500).json({
       success: false,
@@ -2152,6 +2169,7 @@ exports.listCampaignsForAdmin = async (req, res) => {
       data: enrichedCampaigns,
     });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "LIST_CAMPAIGNS_FOR_ADMIN_ERROR");
     console.error("listCampaignsForAdmin error:", e);
     return res.status(500).json({
       success: false,
@@ -3306,6 +3324,7 @@ exports.BrandInformation = async (req, res) => {
       data: savedBrand,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "BRAND_INFORMATION_ERROR");
     console.error("BrandInformation error:", error);
 
     return res.status(500).json({
@@ -3585,6 +3604,7 @@ exports.CreateBrandCoupon = async (req, res) => {
       data: brandCoupon,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "CREATE_BRAND_COUPON_ERROR");
     console.error("CreateBrandCoupon error:", error);
 
     return res.status(500).json({
@@ -3611,6 +3631,7 @@ exports.subscriptionList = async (req, res) => {
       data: list,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "SUBSCRIPTION_LIST_ERROR");
     console.error("subscriptionList error:", error);
 
     return res.status(500).json({
@@ -3688,6 +3709,7 @@ exports.ListBrand = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "LIST_BRAND_ERROR");
     console.error("ListBrand error:", error);
     return res.status(500).json({
       success: false,
@@ -3774,6 +3796,7 @@ exports.updateEmployeePassword = async (req, res) => {
       message: "Employee password updated successfully",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_EMPLOYEE_PASSWORD_ERROR");
     return res.status(500).json({
       success: false,
       message: err.message || "Internal error",

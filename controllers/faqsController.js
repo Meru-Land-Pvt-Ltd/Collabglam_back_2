@@ -1,5 +1,6 @@
 const FAQ = require('../models/faqs');
 const { v4: uuidv4 } = require('uuid');
+const saveErrorLog = require('../services/errorLog.service');
 
 /**
  * Create or update the full FAQ page
@@ -59,6 +60,7 @@ exports.saveFAQPage = async (req, res) => {
     return res.json(faqPage);
   } catch (error) {
     console.error('Error saving FAQ page:', error);
+    await saveErrorLog(req, error, 500, 'SAVE_FAQ_PAGE_ERROR');
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };
@@ -85,6 +87,7 @@ exports.getFAQPage = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching FAQ page:', error);
+    await saveErrorLog(req, error, 500, 'GET_FAQ_PAGE_ERROR');
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };
@@ -104,6 +107,7 @@ exports.getFAQPageAdmin = async (req, res) => {
     return res.json(faqPage);
   } catch (error) {
     console.error('Error fetching admin FAQ page:', error);
+    await saveErrorLog(req, error, 500, 'GET_FAQ_PAGE_ADMIN_ERROR');
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };
@@ -152,6 +156,7 @@ exports.addFAQItem = async (req, res) => {
     return res.json(faqPage);
   } catch (error) {
     console.error('Error adding FAQ item:', error);
+    await saveErrorLog(req, error, 500, 'ADD_FAQ_ITEM_ERROR');
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };
@@ -200,6 +205,7 @@ exports.updateFAQItem = async (req, res) => {
     return res.json(faqPage);
   } catch (error) {
     console.error('Error updating FAQ item:', error);
+    await saveErrorLog(req, error, 500, 'UPDATE_FAQ_ITEM_ERROR');
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };
@@ -234,6 +240,7 @@ exports.deleteFAQItem = async (req, res) => {
     return res.json({ message: 'FAQ item deleted successfully.', faqPage });
   } catch (error) {
     console.error('Error deleting FAQ item:', error);
+    await saveErrorLog(req, error, 500, 'DELETE_FAQ_ITEM_ERROR');
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };

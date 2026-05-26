@@ -19,6 +19,7 @@ const MissingEmail = require("../models/MissingEmail");
 
 const { buildInvitationEmail } = require("../template/invitationTemplate");
 const { uploadToGridFS } = require("../utils/gridfs");
+const saveErrorLog = require("../services/errorLog.service");
 
 // ===============================
 // Constants
@@ -919,6 +920,7 @@ async function markThreadAsRead(req, res) {
         role === "brand" ? patch.brandLastReadAt : patch.influencerLastReadAt,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_THREAD_AS_READ_ERROR");
     console.error("markThreadAsRead error:", err);
     return res.status(err.statusCode || 500).json({
       error: err.message || "Internal server error",
@@ -1612,6 +1614,7 @@ async function getTemplateByKey(req, res) {
       textBody: renderTemplateString(template.textBody || "", ctx),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_TEMPLATE_BY_KEY_ERROR");
     console.error("getTemplateByKey error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -1729,6 +1732,7 @@ async function sendBrandToInfluencer(req, res) {
       usedAttachmentLinksOnly: !!result.usedAttachmentLinksOnly,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEND_BRAND_TO_INFLUENCER_ERROR");
     console.error("sendBrandToInfluencer error:", err);
     return res.status(err.statusCode || 500).json({
       error: err.message || "Internal server error",
@@ -1877,6 +1881,7 @@ async function sendInfluencerToBrand(req, res) {
       usedAttachmentLinksOnly: !!result.usedAttachmentLinksOnly,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEND_INFLUENCER_TO_BRAND_ERROR");
     console.error("sendInfluencerToBrand error:", err);
     return res.status(err.statusCode || 500).json({
       error: err.message || "Internal server error",
@@ -1936,6 +1941,7 @@ async function getEmailParticipants(req, res) {
       influencer: influencer ? publicInfluencer(influencer, thread || {}) : null,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_EMAIL_PARTICIPANTS_ERROR");
     console.error("getEmailParticipants error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2155,6 +2161,7 @@ async function getBrandContacts(req, res) {
       influencers: list,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_CONTACTS_ERROR");
     console.error("getBrandContacts error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2251,6 +2258,7 @@ async function getBrandInbox(req, res) {
       conversations,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_INBOX_ERROR");
     console.error("getBrandInbox error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2290,6 +2298,7 @@ async function getThreadsForBrand(req, res) {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_THREADS_FOR_BRAND_ERROR");
     console.error("getThreadsForBrand error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2331,6 +2340,7 @@ async function getThreadsForInfluencer(req, res) {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_THREADS_FOR_INFLUENCER_ERROR");
     console.error("getThreadsForInfluencer error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2403,6 +2413,7 @@ async function getMessagesForThread(req, res) {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_MESSAGES_FOR_THREAD_ERROR");
     console.error("getMessagesForThread error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2418,6 +2429,7 @@ async function sendCampaignInvitation(req, res) {
 
     return res.status(200).json(result);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEND_CAMPAIGN_INVITATION_ERROR");
     console.error("sendCampaignInvitation error:", err);
     return res.status(err.statusCode || 500).json({
       error: err.message || "Internal server error",
@@ -2541,6 +2553,7 @@ async function getCampaignInvitationPreview(req, res) {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CAMPAIGN_INVITATION_PREVIEW_ERROR");
     console.error("getCampaignInvitationPreview error:", err);
     return res.status(err.statusCode || 500).json({
       error: err.message || "Internal server error",
@@ -2754,6 +2767,7 @@ async function handleEmailInvitation(req, res) {
       isNewInvitation,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "HANDLE_EMAIL_INVITATION_ERROR");
     console.error("Error in handleEmailInvitation:", err);
     return res.status(err.statusCode || 500).json({
       status: "error",
@@ -2810,6 +2824,7 @@ async function getConversationsForCurrentInfluencer(req, res) {
 
     return res.status(200).json({ conversations });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CONVERSATIONS_FOR_CURRENT_INFLUENCER_ERROR");
     console.error("getConversationsForCurrentInfluencer error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2882,6 +2897,7 @@ async function getConversationForCurrentInfluencer(req, res) {
       },
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CONVERSATION_FOR_CURRENT_INFLUENCER_ERROR");
     console.error("getConversationForCurrentInfluencer error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -2893,6 +2909,7 @@ async function getInfluencerEmailListForBrand(req, res) {
     if (req.method === "POST") return await getBrandInbox(req, res);
     return await getBrandContacts(req, res);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_INFLUENCER_EMAIL_LIST_FOR_BRAND_ERROR");
     console.error("getInfluencerEmailListForBrand error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }

@@ -9,6 +9,7 @@ const {
   formatYoutubeInsightReport,
   getYoutubeLinkInsightSummary
 } = require('../services/youtubeReportDashboard.service');
+const saveErrorLog = require('../services/errorLog.service');
 
 const ADMIN_ROLES_WITH_FULL_REPORT_ACCESS = new Set(['super_admin', 'revenue_head']);
 
@@ -320,6 +321,13 @@ async function createYoutubeInsightPublicLink(req, res, next) {
       }
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "CREATE_YOUTUBE_INSIGHT_PUBLIC_LINK_ERROR"
+    );
+
     return next(error);
   }
 }
@@ -397,6 +405,13 @@ async function getYoutubeInsightPublicShare(req, res, next) {
       }
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_YOUTUBE_INSIGHT_PUBLIC_SHARE_ERROR"
+    );
+
     return next(error);
   }
 }
@@ -453,6 +468,13 @@ async function analyzeYoutubeVideo(req, res, next) {
       finalVerdict: formattedReport.finalVerdict
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "ANALYZE_YOUTUBE_VIDEO_ERROR"
+    );
+
     return next(error);
   }
 }
@@ -474,6 +496,13 @@ async function getYoutubeInsightReports(req, res, next) {
     ]);
     return res.status(200).json({ success: true, data: items.map(formatYoutubeInsightListItem), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_YOUTUBE_INSIGHT_REPORTS_ERROR"
+    );
+
     return next(error);
   }
 }
@@ -501,6 +530,13 @@ async function getYoutubeInsightReportById(req, res, next) {
       finalVerdict: formattedReport.finalVerdict
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_YOUTUBE_INSIGHT_REPORT_BY_ID_ERROR"
+    );
+
     return next(error);
   }
 }
@@ -631,6 +667,13 @@ async function getYoutubeInsightSummary(req, res, next) {
     const summary = await getYoutubeLinkInsightSummary({ filter, limit: input.limit || 500 });
     return res.status(200).json({ success: true, data: summary });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_YOUTUBE_INSIGHT_SUMMARY_ERROR"
+    );
+
     return next(error);
   }
 }
@@ -643,6 +686,13 @@ async function deleteYoutubeInsightReport(req, res, next) {
     if (!report) return res.status(404).json({ success: false, message: 'YouTube insight report not found.' });
     return res.status(200).json({ success: true, message: 'YouTube insight report deleted successfully.' });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "DELETE_YOUTUBE_INSIGHT_REPORT_ERROR"
+    );
+
     return next(error);
   }
 }
