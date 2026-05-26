@@ -51,7 +51,6 @@ const getCampaignIdMatchFilterForDispute = (campaignId) => {
   const objectId = getSafeObjectId(id);
 
   const or = [
-    { campaignsId: id },
     { campaignId: id },
   ];
 
@@ -66,7 +65,6 @@ const mapCampaignForDisputeDropdown = (campaign) => {
   return {
     _id: String(campaign._id),
     campaignId: String(campaign._id),
-    campaignsId: campaign.campaignsId ? String(campaign.campaignsId) : undefined,
 
     campaignTitle: campaign.campaignTitle || campaign.productOrServiceName || "",
     productOrServiceName: campaign.productOrServiceName || "",
@@ -2359,7 +2357,6 @@ function serializeNonFullManagedCampaign(campaignDoc = {}) {
       campaignDoc.productOrServiceName,
       campaignDoc.title,
       campaignDoc.name,
-      campaignDoc.campaignsId,
     ],
     id ? `Campaign ${id.slice(-6)}` : "Campaign"
   );
@@ -2368,7 +2365,6 @@ function serializeNonFullManagedCampaign(campaignDoc = {}) {
     id,
     _id: id,
     campaignId: id,
-    campaignsId: clean(campaignDoc.campaignsId),
     label: label || id,
 
     campaignTitle: clean(campaignDoc.campaignTitle || campaignDoc.title || campaignDoc.name),
@@ -2502,7 +2498,6 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
       Campaign.find(filter)
         .select([
           "_id",
-          "campaignsId",
           "brandId",
           "brandName",
           "campaignTitle",
@@ -3129,14 +3124,13 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
       });
     }
 
-    // ✅ campaignId may be stored as Campaign._id OR Campaign.campaignsId
     const campaignObjectIds = campaignIds.filter((id) =>
       mongoose.Types.ObjectId.isValid(id)
     );
 
     const campaignIdFilter = {
       $or: [
-        { campaignsId: { $in: campaignIds } },
+        { campaignId: { $in: campaignIds } },
         ...(campaignObjectIds.length ? [{ _id: { $in: campaignObjectIds } }] : [])
       ]
     };
@@ -3215,9 +3209,9 @@ exports.getAcceptedCampaigns = async (req, res) => {
     return res.json({
       meta: { total, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(total / Math.max(1, parseInt(limit, 10))) },
       campaigns: campaigns.map((camp) => ({
-        ...camp, contractId: contractMap.get(String(camp.campaignsId)) || null,
-        influencerId: influencerMap.get(String(camp.campaignsId)) || null, feeAmount: feeMap.get(String(camp.campaignsId)) || 0,
-        contractStatus: statusMap.get(String(camp.campaignsId)) || null, isAccepted: 1,
+        ...camp, contractId: contractMap.get(String(camp.campaignId)) || null,
+        influencerId: influencerMap.get(String(camp.campaignId)) || null, feeAmount: feeMap.get(String(camp.campaignId)) || 0,
+        contractStatus: statusMap.get(String(camp.campaignId)) || null, isAccepted: 1,
         totalAcceptedMembers: signedCountByCampaign.get(String(camp._id)) || 0, applicantCount: Math.max(0, (Number(camp.applicantCount) || 0)),
       })),
     });
@@ -3461,7 +3455,6 @@ exports.getContractedCampaignsByInfluencer = async (req, res) => {
     const uuidIds = []; const oIds = [];
     for (const id of candidateCampaignIds) { if (mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id) { oIds.push(new mongoose.Types.ObjectId(id)); } else { uuidIds.push(String(id)); } }
 
-    let baseFilter = (uuidIds.length && oIds.length) ? { $or: [{ campaignsId: { $in: uuidIds } }, { _id: { $in: oIds } }] } : uuidIds.length ? { campaignsId: { $in: uuidIds } } : { _id: { $in: oIds } };
     let filter = search?.trim() ? { $and: [baseFilter, { $or: buildSearchOr(search.trim()) }] } : baseFilter;
 
     const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
@@ -3553,7 +3546,7 @@ exports.getRejectedCampaignsByInfluencer = async (req, res) => {
       if (!prev || new Date(c.createdAt) > new Date(prev.createdAt)) latestByCampaign.set(key, c);
     }
 
-    const campFilter = { campaignsId: { $in: Array.from(latestByCampaign.keys()) } };
+    const campFilter = { campaignId: { $in: Array.from(latestByCampaign.keys()) } };
     if (typeof search === 'string' && search.trim()) campFilter.$or = buildSearchOr(search.trim());
 
     const allMatched = await Campaign.find(campFilter).sort({ createdAt: -1 }).lean();
@@ -3563,7 +3556,7 @@ exports.getRejectedCampaignsByInfluencer = async (req, res) => {
     return res.json({
       meta: { total: allMatched.length, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(allMatched.length / Math.max(1, parseInt(limit, 10))) },
       campaigns: slice.map((camp) => {
-        const parent = latestByCampaign.get(String(camp.campaignsId)) || {};
+        const parent = latestByCampaign.get(String(camp.campaignId)) || {};
         let rejectedAt = parent.createdAt || null; let reason = '';
         if (Array.isArray(parent.audit)) {
           const rejEvents = parent.audit.filter(e => e?.type === 'REJECTED');
@@ -4440,9 +4433,7 @@ exports.getRecommendedInfluencersByCampaignId = async (req, res) => {
     if (Types.ObjectId.isValid(campaignIdRaw)) {
       campaignOr.push({ _id: new Types.ObjectId(campaignIdRaw) });
     }
-
-    // support legacy campaignsId
-    campaignOr.push({ campaignsId: campaignIdRaw });
+    campaignOr.push({ campaignId: campaignIdRaw });
 
     const campaign = await Campaign.findOne({
       $and: [
@@ -4455,7 +4446,7 @@ exports.getRecommendedInfluencersByCampaignId = async (req, res) => {
         },
       ],
     })
-      .select("_id campaignsId brandId categoryId status")
+      .select("_id campaignId brandId categoryId status")
       .lean();
 
     if (!campaign) {
@@ -4789,7 +4780,6 @@ exports.viewCampaignByIdForInfluencer = async (req, res) => {
     }
 
     const campaignObjectId = String(campaign._id);
-    const campaignLegacyId = String(campaign.campaignsId || "").trim();
 
     const hasApplied = await ApplyCampaign.exists({
       $and: [
@@ -4909,7 +4899,7 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
       filter.$and = [
         {
           $nor: [
-            { campaignsId: { $in: appliedCampaignIds } },
+            { campaignId: { $in: appliedCampaignIds } },
             ...(appliedObjectIds.length ? [{ _id: { $in: appliedObjectIds } }] : [])
           ]
         }
@@ -5203,7 +5193,6 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       {
         $or: [
           { _id: { $in: campaignObjectIds } },
-          { campaignsId: { $in: campaignIds } },
           { campaignId: { $in: campaignIds } },
         ],
       },
@@ -6504,7 +6493,7 @@ exports.getInfluencerListByCampaignId = async (req, res) => {
     const campaignIdValues = [
       String(campaignId || "").trim(),
       String(campaign._id),
-      campaign.campaignsId ? String(campaign.campaignsId) : "",
+      campaign.campaignId ? String(campaign.campaignId) : "",
     ].filter(Boolean);
 
     const appliedDocs = await ApplyCampaign.find(
@@ -6688,7 +6677,7 @@ exports.getInfluencerMatchScore = async (req, res) => {
       );
     }
 
-    const campaignOr = [{ campaignsId: campaignId }];
+    const campaignOr = [{ campaignId: campaignId }];
 
     if (isOid(campaignId)) {
       campaignOr.push({ _id: toObjectId(campaignId) });

@@ -1596,8 +1596,6 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
   }
 
   try {
-    const normalizeId = (value) => String(value || "").trim();
-
     const toNumber = (value) => {
       if (value == null) return 0;
       if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -1754,6 +1752,17 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
       );
     };
 
+    // Only show pure applied influencers.
+    // Hide influencer if shortlisted, undecided, or rejected is 1.
+    const isOnlyAppliedApplicant = (applicant) => {
+      return (
+        Number(applicant?.isShortlisted) !== 1 &&
+        Number(applicant?.isUndicided) !== 1 &&
+        Number(applicant?.isUndecided) !== 1 &&
+        Number(applicant?.isRejected) !== 1
+      );
+    };
+
     const brandObjectIdFilters = [];
 
     if (mongoose.Types.ObjectId.isValid(String(brandId))) {
@@ -1764,7 +1773,11 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
 
     const brandDoc = await Brand.findOne({
       $or: [
-        { _id: mongoose.Types.ObjectId.isValid(String(brandId)) ? new mongoose.Types.ObjectId(String(brandId)) : brandId },
+        {
+          _id: mongoose.Types.ObjectId.isValid(String(brandId))
+            ? new mongoose.Types.ObjectId(String(brandId))
+            : brandId,
+        },
         { brandId: String(brandId) },
       ],
     })
@@ -1827,10 +1840,17 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
     const influencerIdsSet = new Set();
 
     for (const record of applyRecords) {
-      const applicants = Array.isArray(record?.applicants) ? record.applicants : [];
+      const applicants = Array.isArray(record?.applicants)
+        ? record.applicants
+        : [];
 
-      for (const applicant of applicants) {
-        if (applicant?.influencerId && mongoose.Types.ObjectId.isValid(String(applicant.influencerId))) {
+      const onlyAppliedApplicants = applicants.filter(isOnlyAppliedApplicant);
+
+      for (const applicant of onlyAppliedApplicants) {
+        if (
+          applicant?.influencerId &&
+          mongoose.Types.ObjectId.isValid(String(applicant.influencerId))
+        ) {
           influencerIdsSet.add(String(applicant.influencerId));
         }
       }
@@ -1889,7 +1909,9 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
         ? applyRecord.applicants
         : [];
 
-      const appliedInfluencers = applicants
+      const onlyAppliedApplicants = applicants.filter(isOnlyAppliedApplicant);
+
+      const appliedInfluencers = onlyAppliedApplicants
         .map((applicant) => {
           const influencerId = String(applicant?.influencerId || "");
           const inf = influencerById.get(influencerId);
@@ -1915,6 +1937,11 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
             followers,
             engagementRate,
             appliedAt: applicant?.appliedAt || null,
+
+            isShortlisted: Number(applicant?.isShortlisted) || 0,
+            isUndicided: Number(applicant?.isUndicided) || 0,
+            isUndecided: Number(applicant?.isUndecided) || 0,
+            isRejected: Number(applicant?.isRejected) || 0,
           };
         })
         .filter(Boolean);
@@ -1938,7 +1965,11 @@ exports.getBrandCampaignsWithAppliedInfluencers = async (req, res) => {
       success: true,
       brand: {
         brandId: String(brandId),
-        name: brandDoc?.name || brandDoc?.brandName || campaigns?.[0]?.brandName || "",
+        name:
+          brandDoc?.name ||
+          brandDoc?.brandName ||
+          campaigns?.[0]?.brandName ||
+          "",
         campaigns: formattedCampaigns,
       },
     });
