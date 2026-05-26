@@ -15,6 +15,9 @@ const BrandProfileView = require('../models/brandProfileView');
 const { ensureBrandQuota } = require('../utils/quota');
 const Campaign = require('../models/campaign');
 const saveErrorLog = require('../services/errorLog.service');
+const {
+  getYouTubeRecommendationsForCampaign,
+} = require('./youtubeController');
 
 /* -------------------------------------------------------------------------- */
 /*                                   Config                                   */
@@ -5280,21 +5283,96 @@ function mapRecommendedInfluencer(item, maxScore) {
   };
 }
 
+async function getCampaignRecommendationSource(req, res) {
+  try {
+    const brandId = cleanStr(req.body?.brandId || req.query?.brandId);
+    const campaignId = cleanStr(req.body?.campaignId || req.query?.campaignId);
+
+    if (!mongoose.Types.ObjectId.isValid(brandId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Valid brandId is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(campaignId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Valid campaignId is required",
+      });
+    }
+
+    const campaign = await Campaign.findOne({
+      _id: new mongoose.Types.ObjectId(campaignId),
+      brandId: new mongoose.Types.ObjectId(brandId),
+    })
+      .select("_id brandId platformSelection campaignTitle")
+      .lean();
+
+    if (!campaign) {
+      return res.status(404).json({
+        status: "error",
+        message: "Campaign not found for this brand",
+      });
+    }
+
+    const requestedPlatforms = buildRequestedPlatforms(
+      campaign.platformSelection || []
+    );
+
+    const hasYoutube = requestedPlatforms.includes("youtube");
+
+    return res.json({
+      status: "success",
+      campaignId,
+      requestedPlatforms,
+
+      // ✅ Final frontend decision
+      source: hasYoutube ? "youtube_api" : "modash_ai",
+
+      // ✅ Final platforms frontend should expect
+      effectivePlatforms: hasYoutube
+        ? ["youtube"]
+        : requestedPlatforms.filter((p) => p !== "youtube"),
+
+      rule: hasYoutube
+        ? "youtube_selected_use_youtube_api_only"
+        : "no_youtube_use_modash_ai_only",
+    });
+  } catch (err) {
+    console.error("getCampaignRecommendationSource error:", err);
+
+    return res.status(err.status || 500).json({
+      status: "error",
+      message: err.message || "Failed to check campaign platforms",
+    });
+  }
+}
+
 async function getRecommendedInfluencersForCampaign(req, res) {
   try {
     const brandId = cleanStr(req.body?.brandId || req.query?.brandId);
     const campaignId = cleanStr(req.body?.campaignId || req.query?.campaignId);
     const limit = Math.min(
       30,
-      Math.max(1, parseInt(String(req.body?.limit || req.query?.limit || 15), 10) || 15)
+      Math.max(
+        1,
+        parseInt(String(req.body?.limit || req.query?.limit || 15), 10) || 15
+      )
     );
 
     if (!mongoose.Types.ObjectId.isValid(brandId)) {
-      return res.status(400).json({ status: 'error', message: 'Valid brandId is required' });
+      return res.status(400).json({
+        status: "error",
+        message: "Valid brandId is required",
+      });
     }
 
     if (!mongoose.Types.ObjectId.isValid(campaignId)) {
-      return res.status(400).json({ status: 'error', message: 'Valid campaignId is required' });
+      return res.status(400).json({
+        status: "error",
+        message: "Valid campaignId is required",
+      });
     }
 
     const campaign = await Campaign.findOne({
@@ -5304,8 +5382,33 @@ async function getRecommendedInfluencersForCampaign(req, res) {
 
     if (!campaign) {
       return res.status(404).json({
-        status: 'error',
-        message: 'Campaign not found for this brand',
+        status: "error",
+        message: "Campaign not found for this brand",
+      });
+    }
+
+    const requestedPlatforms = buildRequestedPlatforms(
+      campaign.platformSelection || []
+    );
+
+    if (requestedPlatforms.includes("youtube")) {
+      const youtubeResult = await getYouTubeRecommendationsForCampaign(
+        campaign,
+        { limit }
+      );
+
+      return res.json({
+        status: "success",
+        campaignId,
+        query: youtubeResult.query,
+        results: youtubeResult.results,
+        total: youtubeResult.total,
+        meta: {
+          ...youtubeResult.meta,
+          requestedPlatforms,
+          platforms: ["youtube"],
+          rule: "youtube_selected_use_youtube_api_only",
+        },
       });
     }
 
@@ -5313,12 +5416,15 @@ async function getRecommendedInfluencersForCampaign(req, res) {
 
     if (!query || query.length < 2) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Campaign does not have enough text to recommend influencers',
+        status: "error",
+        message: "Campaign does not have enough text to recommend influencers",
       });
     }
 
-    const platforms = buildRequestedPlatforms(campaign.platformSelection || []);
+    // ✅ When YouTube is not selected, use Modash AI Search only.
+    // Example:
+    // ["instagram", "tiktok"] => Modash AI Search only
+    const platforms = requestedPlatforms.filter((p) => p !== "youtube");
     const body = buildCampaignRecommendationBody(campaign);
     const fetchPlan = buildBalancedPlatformFetchPlan(platforms, limit);
     const fetchLimitByPlatform = new Map(
@@ -5331,10 +5437,6 @@ async function getRecommendedInfluencersForCampaign(req, res) {
     for (const platform of platforms) {
       const fetchLimit = fetchLimitByPlatform.get(platform) || limit;
 
-      responses.push(
-        await runStandardPlatformSearch(platform, body, query, 0, fetchLimit)
-      );
-
       try {
         responses.push(
           await runAiPlatformSearch(
@@ -5342,7 +5444,7 @@ async function getRecommendedInfluencersForCampaign(req, res) {
             {
               brandId,
               query,
-              searchMode: 'combined',
+              searchMode: "ai",
               body,
               ai: { query },
             },
@@ -5354,8 +5456,9 @@ async function getRecommendedInfluencersForCampaign(req, res) {
         if (isAuthError(err)) {
           warnings.push({
             platform,
-            kind: 'ai',
-            message: 'AI search skipped because Modash AI endpoint is not allowed for this key.',
+            kind: "ai",
+            message:
+              "AI search skipped because Modash AI endpoint is not allowed for this key.",
           });
         } else {
           throw err;
@@ -5364,7 +5467,9 @@ async function getRecommendedInfluencersForCampaign(req, res) {
     }
 
     const merged = mergeUnifiedSearchItems(
-      responses.flatMap((entry) => (Array.isArray(entry.results) ? entry.results : []))
+      responses.flatMap((entry) =>
+        Array.isArray(entry.results) ? entry.results : []
+      )
     );
 
     const cachedEnriched = await enrichResultsFromCache(merged);
@@ -5372,29 +5477,42 @@ async function getRecommendedInfluencersForCampaign(req, res) {
 
     const balancedResults =
       platforms.length > 1
-        ? balanceRankedResultsAcrossPlatforms(orderedResults, platforms, limit, query)
+        ? balanceRankedResultsAcrossPlatforms(
+          orderedResults,
+          platforms,
+          limit,
+          query
+        )
         : orderedResults;
 
     const sliced = balancedResults.slice(0, limit);
-    const maxScore = Math.max(...sliced.map((x) => Number(x.__relevanceScore || 0)), 0);
+    const maxScore = Math.max(
+      ...sliced.map((x) => Number(x.__relevanceScore || 0)),
+      0
+    );
 
     return res.json({
-      status: 'success',
+      status: "success",
       campaignId,
       query,
-      results: sliced.map((item) => mapRecommendedInfluencer(item, maxScore)),
+      results: sliced.map((item) =>
+        mapRecommendedInfluencer(item, maxScore)
+      ),
       total: sliced.length,
       meta: {
+        source: "modash_ai",
+        requestedPlatforms,
         platforms,
         warnings,
+        rule: "no_youtube_use_modash_ai_only",
       },
     });
   } catch (err) {
-    console.error('getRecommendedInfluencersForCampaign error:', err);
-    await saveErrorLog(req, err, err.status || 500, "GET_RECOMMENDED_INFLUENCERS_FOR_CAMPAIGN_ERROR");
+    console.error("getRecommendedInfluencersForCampaign error:", err);
+
     return res.status(err.status || 500).json({
-      status: 'error',
-      message: err.message || 'Failed to recommend influencers',
+      status: "error",
+      message: err.message || "Failed to recommend influencers",
     });
   }
 }
@@ -5781,9 +5899,9 @@ function getCreatorFocusLabels(normalizedReport, influencerDoc) {
 
   const interests = asArray(
     normalizedReport?.audience?.interests ||
-      normalizedReport?.interests ||
-      influencerDoc?.audience?.interests ||
-      influencerDoc?.interests
+    normalizedReport?.interests ||
+    influencerDoc?.audience?.interests ||
+    influencerDoc?.interests
   )
     .map((item) => (typeof item === 'string' ? item : item?.name || item?.code || item?.label))
     .filter(Boolean);
@@ -5885,8 +6003,7 @@ function buildSelectionReason({
     reasons.push(
       `Audience quality supports the selection with ${Math.round(
         credibility * 100
-      )}% credibility${topCountries.length ? ` and strongest audience presence in ${topCountries.join(', ')}` : ''}${
-        topLanguages.length ? `, with language signals around ${topLanguages.join(', ')}` : ''
+      )}% credibility${topCountries.length ? ` and strongest audience presence in ${topCountries.join(', ')}` : ''}${topLanguages.length ? `, with language signals around ${topLanguages.join(', ')}` : ''
       }.`
     );
   } else if (topCountries.length) {
@@ -6238,5 +6355,6 @@ module.exports = {
   getModashLocations,
   exportSavedInfluencersCsv,
   getMediaKitLink,
+  getCampaignRecommendationSource,
   getRecommendedInfluencersForCampaign,
 };
