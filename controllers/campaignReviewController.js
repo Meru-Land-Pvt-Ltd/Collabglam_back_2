@@ -1397,6 +1397,8 @@ async function getReviewPromptState(req, res, { reviewType }) {
         success: true,
         data: {
           shouldPrompt: false,
+          showSendFeedbackButton: false,
+          canManualSubmit: false,
           reason: "review_already_submitted",
           review: handledReview,
         },
@@ -1412,6 +1414,8 @@ async function getReviewPromptState(req, res, { reviewType }) {
           success: true,
           data: {
             shouldPrompt: canPromptAgain,
+            showSendFeedbackButton: true,
+            canManualSubmit: true,
             reason: canPromptAgain
               ? "review_skip_window_expired"
               : "review_skipped_until",
@@ -1425,6 +1429,8 @@ async function getReviewPromptState(req, res, { reviewType }) {
         success: true,
         data: {
           shouldPrompt: false,
+          showSendFeedbackButton: true,
+          canManualSubmit: true,
           reason: "review_already_skipped",
           review: handledReview,
         },
@@ -1435,6 +1441,8 @@ async function getReviewPromptState(req, res, { reviewType }) {
       success: true,
       data: {
         shouldPrompt: true,
+        showSendFeedbackButton: false,
+        canManualSubmit: true,
         reason: "not_handled_yet",
         review: null,
       },
@@ -1527,6 +1535,8 @@ async function skipDirectReview(req, res, { reviewType, skippedVia }) {
       message: "Review skipped",
       data: {
         shouldPrompt: false,
+        showSendFeedbackButton: true,
+        canManualSubmit: true,
         status: review.status,
         reviewId: review._id,
         reviewRequestId: review.reviewRequestId,
@@ -1894,7 +1904,7 @@ exports.submitReviewByToken = async (req, res) => {
       reviewType: review.reviewType,
     });
 
-    
+
 
     const input = normalizeReviewInput(req.body || {});
     await applyReviewSubmissionFields({

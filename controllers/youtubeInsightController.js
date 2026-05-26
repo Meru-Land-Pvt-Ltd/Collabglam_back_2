@@ -32,26 +32,26 @@ function toObjectId(value) {
 function getBrandIdFromRequest(req = {}) {
   return clean(
     req.brand?._id ||
-      req.brand?.id ||
-      req.brand?.brandId ||
-      req.user?.brandId ||
-      req.user?.brand?._id ||
-      req.user?.brand?.id ||
-      req.admin?.brandId ||
-      req.body?.brandId ||
-      req.query?.brandId
+    req.brand?.id ||
+    req.brand?.brandId ||
+    req.user?.brandId ||
+    req.user?.brand?._id ||
+    req.user?.brand?.id ||
+    req.admin?.brandId ||
+    req.body?.brandId ||
+    req.query?.brandId
   );
 }
 
 function getBrandNameFromRequest(req = {}) {
   return clean(
     req.brand?.brandName ||
-      req.brand?.name ||
-      req.user?.brandName ||
-      req.user?.brand?.brandName ||
-      req.admin?.brandName ||
-      req.body?.brandName ||
-      req.query?.brandName
+    req.brand?.name ||
+    req.user?.brandName ||
+    req.user?.brand?.brandName ||
+    req.admin?.brandName ||
+    req.body?.brandName ||
+    req.query?.brandName
   );
 }
 
@@ -83,17 +83,17 @@ function getYoutubeLinkFromRequest(req = {}) {
   const query = req.query || {};
   return clean(
     body.videoUrl ||
-      body.youtubeVideoUrl ||
-      body.youtubeUrl ||
-      body.videoLink ||
-      body.link ||
-      body.url ||
-      body.videoId ||
-      query.videoUrl ||
-      query.youtubeUrl ||
-      query.link ||
-      query.url ||
-      query.videoId
+    body.youtubeVideoUrl ||
+    body.youtubeUrl ||
+    body.videoLink ||
+    body.link ||
+    body.url ||
+    body.videoId ||
+    query.videoUrl ||
+    query.youtubeUrl ||
+    query.link ||
+    query.url ||
+    query.videoId
   );
 }
 
@@ -210,11 +210,11 @@ function getSnapshotTitle(snapshot = {}) {
   if (!isObject(snapshot)) return '';
   return clean(
     snapshot.videoOverview?.title ||
-      snapshot.hero?.videoTitle ||
-      snapshot.videoTitle ||
-      snapshot.title ||
-      snapshot.profile?.name ||
-      snapshot.hero?.influencerName
+    snapshot.hero?.videoTitle ||
+    snapshot.videoTitle ||
+    snapshot.title ||
+    snapshot.profile?.name ||
+    snapshot.hero?.influencerName
   );
 }
 
@@ -222,10 +222,10 @@ function getSnapshotCreatorName(snapshot = {}) {
   if (!isObject(snapshot)) return '';
   return clean(
     snapshot.profile?.name ||
-      snapshot.hero?.influencerName ||
-      snapshot.influencerName ||
-      snapshot.channelOverview?.name ||
-      snapshot.creatorName
+    snapshot.hero?.influencerName ||
+    snapshot.influencerName ||
+    snapshot.channelOverview?.name ||
+    snapshot.creatorName
   );
 }
 
@@ -233,9 +233,9 @@ function getSnapshotVideoUrl(snapshot = {}) {
   if (!isObject(snapshot)) return '';
   return clean(
     snapshot.videoOverview?.videoUrl ||
-      snapshot.hero?.livePublishedLink ||
-      snapshot.videoUrl ||
-      snapshot.url
+    snapshot.hero?.livePublishedLink ||
+    snapshot.videoUrl ||
+    snapshot.url
   );
 }
 
@@ -505,6 +505,125 @@ async function getYoutubeInsightReportById(req, res, next) {
   }
 }
 
+async function refreshYoutubeInsightReportById(req, res, next) {
+  try {
+    const reportId = clean(req.params.id);
+
+    if (!mongoose.Types.ObjectId.isValid(reportId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid YouTube insight report id.'
+      });
+    }
+
+    const existingReport = await YoutubeInsightReport.findOne({
+      ...buildAccessFilter(req),
+      _id: reportId
+    }).lean();
+
+    if (!existingReport) {
+      return res.status(404).json({
+        success: false,
+        message: 'YouTube insight report not found.'
+      });
+    }
+
+    const videoUrl = clean(
+      existingReport.videoUrl ||
+      existingReport.hero?.livePublishedLink ||
+      existingReport.videoMetrics?.videoUrl ||
+      existingReport.dashboard?.videoOverview?.videoUrl
+    );
+
+    if (!videoUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Video URL is missing for this report.'
+      });
+    }
+
+    const actor = getRequestActor(req);
+
+    const refreshedReport = await createInsightReport({
+      actor,
+      payload: {
+        videoUrl,
+        saveReport: false,
+        sourceContext: existingReport.sourceContext || 'brand_insight_os',
+        brandId: existingReport.brandId ? String(existingReport.brandId) : getBrandIdFromRequest(req),
+        brandName: existingReport.brandName || getBrandNameFromRequest(req),
+
+        maxComments: req.body?.maxComments,
+        creatorAverageLimit: req.body?.creatorAverageLimit,
+        includeReplies: req.body?.includeReplies,
+        includeRepliesInAnalysis: req.body?.includeRepliesInAnalysis,
+        maxRepliesPerThread: req.body?.maxRepliesPerThread,
+        commentOrder: req.body?.commentOrder,
+        rpmLow: req.body?.rpmLow,
+        rpmHigh: req.body?.rpmHigh
+      }
+    });
+
+    const updateData = refreshedReport.toObject
+      ? refreshedReport.toObject()
+      : { ...refreshedReport };
+
+    delete updateData._id;
+    delete updateData.id;
+    delete updateData.reportId;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
+    delete updateData.brandId;
+    delete updateData.brandName;
+    delete updateData.createdByAdminId;
+    delete updateData.createdByUserId;
+    delete updateData.createdByEmail;
+    delete updateData.userId;
+
+    updateData.lastRefreshedAt = new Date();
+
+    const updatedReport = await YoutubeInsightReport.findOneAndUpdate(
+      {
+        ...buildAccessFilter(req),
+        _id: reportId
+      },
+      {
+        $set: updateData
+      },
+      {
+        new: true
+      }
+    ).lean();
+
+    if (!updatedReport) {
+      return res.status(404).json({
+        success: false,
+        message: 'YouTube insight report not found after refresh.'
+      });
+    }
+
+    const formattedReport = formatYoutubeInsightReport(updatedReport, {
+      includeRawData: req.query.includeRaw === 'true',
+      includeRawReport: req.query.includeRaw === 'true',
+      includeDebug: req.query.debug === 'true'
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'YouTube insight report refreshed successfully.',
+      data: formattedReport,
+      reportId: formattedReport.reportId,
+      frontendReport: formattedReport.frontendReport,
+      dashboard: formattedReport.dashboard,
+      aiSummary: formattedReport.aiSummary,
+      aiInsights: formattedReport.aiInsights,
+      finalVerdict: formattedReport.finalVerdict
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function getYoutubeInsightSummary(req, res, next) {
   try {
     const input = getListInput(req);
@@ -532,6 +651,7 @@ module.exports = {
   analyzeYoutubeVideo,
   getYoutubeInsightReports,
   getYoutubeInsightReportById,
+  refreshYoutubeInsightReportById,
   getYoutubeInsightSummary,
   deleteYoutubeInsightReport,
   createYoutubeInsightPublicLink,
