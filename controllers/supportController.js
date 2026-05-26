@@ -24,6 +24,7 @@ const {
 // ✅ Use the SAME helper as disputes
 // Adjust path if your shared helper file is elsewhere.
 const { buildAttachmentsFromReq } = require("../utils/attachmentUpload");
+const saveErrorLog = require("../services/errorLog.service");
 
 const ALLOWED_STATUSES = new Set([
   "open",
@@ -201,7 +202,8 @@ exports.brandCreate = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in brandCreate support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "BRAND_CREATE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -282,7 +284,8 @@ exports.influencerCreate = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in influencerCreate support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "INFLUENCER_CREATE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -356,7 +359,8 @@ exports.brandList = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in brandList support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "BRAND_LIST_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -432,7 +436,8 @@ exports.influencerList = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in influencerList support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "INFLUENCER_LIST_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -462,7 +467,8 @@ exports.brandGetOne = async (req, res) => {
     return res.status(200).json({ ticket });
   } catch (err) {
     console.error("Error in brandGetOne support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "BRAND_GET_ONE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -492,7 +498,8 @@ exports.influencerGetOne = async (req, res) => {
     return res.status(200).json({ ticket });
   } catch (err) {
     console.error("Error in influencerGetOne support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "INFLUENCER_GET_ONE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -571,7 +578,8 @@ exports.brandReply = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in brandReply support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "BRAND_REPLY_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -650,7 +658,8 @@ exports.influencerReply = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in influencerReply support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "INFLUENCER_REPLY_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -715,7 +724,8 @@ exports.adminList = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminList support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "ADMIN_LIST_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -738,7 +748,8 @@ exports.adminGetOne = async (req, res) => {
     return res.status(200).json({ ticket });
   } catch (err) {
     console.error("Error in adminGetOne support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "ADMIN_GET_ONE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -832,7 +843,8 @@ exports.adminReply = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminReply support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "ADMIN_REPLY_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -890,6 +902,7 @@ exports.adminUpdateStatus = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminUpdateStatus support:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, "ADMIN_UPDATE_STATUS_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };

@@ -8,6 +8,7 @@ const Contract = require("../models/contract");
 const { BrandWalletModel } = require("../models/brandWallet");
 
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 const { CONTRACT_STATUS } = require("../constants/contract");
 
 const {
@@ -1178,7 +1179,8 @@ exports.createMilestone = async (req, res) => {
 
     console.error("Error in createMilestone:", err);
 
-    if (err.status) {
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "CREATE_MILESTONE_ERROR");if (err.status) {
       return res.status(err.status).json({
         message: err.message,
         ...(err.extra || {}),
@@ -1544,7 +1546,8 @@ exports.editMilestone = async (req, res) => {
 
     console.error("Error in editMilestone:", err);
 
-    if (err.status) {
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "EDIT_MILESTONE_ERROR");if (err.status) {
       return res.status(err.status).json({
         message: err.message,
         ...(err.extra || {}),
@@ -1697,7 +1700,8 @@ exports.getMilestonesByCampaign = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getMilestonesByCampaign:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_MILESTONES_BY_CAMPAIGN_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1789,7 +1793,8 @@ exports.getMilestonesByInfluencerAndCampaign = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getMilestonesByInfluencerAndCampaign:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_MILESTONES_BY_INFLUENCER_AND_CAMPAIGN_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1827,7 +1832,8 @@ exports.getMilestonesByInfluencer = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getMilestonesByInfluencer:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_MILESTONES_BY_INFLUENCER_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1872,7 +1878,8 @@ exports.getMilestonesByBrand = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getMilestonesByBrand:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_MILESTONES_BY_BRAND_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -1898,7 +1905,8 @@ exports.getWalletBalance = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getWalletBalance:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_WALLET_BALANCE_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -2062,7 +2070,8 @@ exports.releaseMilestone = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in releaseMilestone:", err);
-    return res.status(500).json({ message: "Internal server error." });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "RELEASE_MILESTONE_ERROR");return res.status(500).json({ message: "Internal server error." });
   }
 };
 
@@ -2143,7 +2152,8 @@ exports.getInfluencerPaidTotal = async (req, res) => {
     });
   } catch (err) {
     console.error("Error getting influencer payout totals:", err);
-    return res.status(500).json({ message: "Internal server error." });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_INFLUENCER_PAID_TOTAL_ERROR");return res.status(500).json({ message: "Internal server error." });
   }
 };
 
@@ -2317,7 +2327,8 @@ exports.adminListPayouts = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminListPayouts:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "ADMIN_LIST_PAYOUTS_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -2420,7 +2431,8 @@ exports.adminMarkMilestonePaid = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in adminMarkMilestonePaid:", err);
-    return res.status(500).json({ message: "Internal server error." });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "ADMIN_MARK_MILESTONE_PAID_ERROR");return res.status(500).json({ message: "Internal server error." });
   }
 };
 
@@ -2494,7 +2506,8 @@ exports.getPayoutDetailsByInfluencer = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getPayoutDetailsByInfluencer:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_PAYOUT_DETAILS_BY_INFLUENCER_ERROR");return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -2630,7 +2643,8 @@ exports.getAllDeliverablesByMilestone = async (req, res) => {
   } catch (err) {
     console.error("Error in getAllDeliverablesByMilestone:", err);
 
-    return res.status(500).json({
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "GET_ALL_DELIVERABLES_BY_MILESTONE_ERROR");return res.status(500).json({
       success: false,
       message: "Internal server error",
     });
@@ -3099,7 +3113,8 @@ exports.addRevision = async (req, res) => {
 
     console.error("Error in addRevision:", err);
 
-    if (err.status) {
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "ADD_REVISION_ERROR");if (err.status) {
       return res.status(err.status).json({
         success: false,
         message: err.message,
@@ -3336,7 +3351,8 @@ exports.submitDeliverable = async (req, res) => {
   } catch (err) {
     console.error("Error in submitDeliverable:", err);
 
-    return res.status(500).json({
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "SUBMIT_DELIVERABLE_ERROR");return res.status(500).json({
       success: false,
       message: "Internal server error",
     });
@@ -3519,7 +3535,8 @@ exports.approveDeliverable = async (req, res) => {
   } catch (err) {
     console.error("Error in approveDeliverable:", err);
 
-    return res.status(500).json({
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "APPROVE_DELIVERABLE_ERROR");return res.status(500).json({
       success: false,
       message: "Internal server error",
     });
@@ -3650,7 +3667,8 @@ exports.acceptMilestoneByInfluencer = async (req, res) => {
   } catch (err) {
     console.error("Error in acceptMilestoneByInfluencer:", err);
 
-    return res.status(500).json({
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "ACCEPT_MILESTONE_BY_INFLUENCER_ERROR");return res.status(500).json({
       success: false,
       message: "Internal server error",
     });
@@ -3761,7 +3779,8 @@ exports.updateDeliverableStatus = async (req, res) => {
   } catch (err) {
     console.error("Error in updateDeliverableStatus:", err);
 
-    return res.status(500).json({
+    
+    await saveErrorLog(req, err, err?.statusCode || err?.status || err?.statusCode || 500, "UPDATE_DELIVERABLE_STATUS_ERROR");return res.status(500).json({
       success: false,
       message: "Internal server error",
     });

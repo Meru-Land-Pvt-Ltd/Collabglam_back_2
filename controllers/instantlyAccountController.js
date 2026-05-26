@@ -1,4 +1,5 @@
 const instantlyService = require("../services/instantlyService");
+const saveErrorLog = require("../services/errorLog.service");
 
 function getErrorPayload(error) {
   return {
@@ -22,6 +23,7 @@ exports.testInstantlyConnection = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "TEST_INSTANTLY_CONNECTION_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -38,6 +40,7 @@ exports.listInstantlyAccounts = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "LIST_INSTANTLY_ACCOUNTS_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -56,6 +59,7 @@ exports.getInstantlyAccount = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "GET_INSTANTLY_ACCOUNT_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -75,6 +79,7 @@ exports.pauseInstantlyAccount = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "PAUSE_INSTANTLY_ACCOUNT_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -94,6 +99,7 @@ exports.resumeInstantlyAccount = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "RESUME_INSTANTLY_ACCOUNT_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -115,6 +121,7 @@ exports.enableInstantlyWarmup = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "ENABLE_INSTANTLY_WARMUP_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -136,6 +143,7 @@ exports.disableInstantlyWarmup = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "DISABLE_INSTANTLY_WARMUP_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -169,6 +177,7 @@ exports.initInstantlyOAuth = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "INIT_INSTANTLY_OAUTH_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,
@@ -187,6 +196,7 @@ exports.getInstantlyOAuthSessionStatus = async (req, res) => {
     });
   } catch (error) {
     const payload = getErrorPayload(error);
+    await saveErrorLog(req, error, payload.statusCode, "GET_INSTANTLY_OAUTH_SESSION_STATUS_ERROR");
     return res.status(payload.statusCode).json({
       success: false,
       ...payload,

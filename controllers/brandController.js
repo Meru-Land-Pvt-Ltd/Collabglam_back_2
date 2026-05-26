@@ -34,6 +34,7 @@ const ApiErrorImport = require("../core/http/ApiError");
 const SubscriptionPlan = require("../models/subscription");
 const { uploadBrandProfilePicToS3 } = require("../utils/uploadBase64ImagesToS3");
 const { BookmarkFolder } = require("../models/bookMarkFolder");
+const saveErrorLog = require("../services/errorLog.service");
 
 void OpenAI;
 void BrandInfo;
@@ -712,6 +713,7 @@ async function sendSignupOtp(req, res, next) {
       }
     }
 
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEND_SIGNUP_OTP_ERROR");
     return handleControllerError(next, err, "sendSignupOtp");
   }
 }
@@ -828,6 +830,7 @@ async function verifyOtpSignUp(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFY_OTP_SIGN_UP_ERROR");
     return handleControllerError(next, err, "verifyOtpSignUp");
   }
 }
@@ -998,6 +1001,7 @@ async function saveBrandOnboarding(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SAVE_BRAND_ONBOARDING_ERROR");
     return handleControllerError(next, err, "saveBrandOnboarding");
   }
 }
@@ -1109,6 +1113,7 @@ async function signInBrand(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SIGN_IN_BRAND_ERROR");
     return handleControllerError(next, err, "signInBrand");
   }
 }
@@ -1174,6 +1179,7 @@ async function sendOtpForgotBrand(req, res, next) {
       }
     }
 
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SEND_OTP_FORGOT_BRAND_ERROR");
     return handleControllerError(next, err, "sendOtpForgotBrand");
   }
 }
@@ -1227,6 +1233,7 @@ async function verifyOtpForgotBrand(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VERIFY_OTP_FORGOT_BRAND_ERROR");
     return handleControllerError(next, err, "verifyOtpForgotBrand");
   }
 }
@@ -1317,6 +1324,7 @@ async function updatePasswordBrand(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_PASSWORD_BRAND_ERROR");
     return handleControllerError(next, err, "updatePasswordBrand");
   }
 }
@@ -1351,6 +1359,7 @@ async function getBrandById(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_BY_ID_ERROR");
     return handleControllerError(next, err, "getBrandById");
   }
 }
@@ -1396,6 +1405,7 @@ async function getBrandLiteById(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_LITE_BY_ID_ERROR");
     return handleControllerError(next, err, "getBrandLiteById");
   }
 }
@@ -1431,6 +1441,7 @@ async function getBrandProfile(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_PROFILE_ERROR");
     return handleControllerError(next, err, "getBrandProfile");
   }
 }
@@ -1523,6 +1534,7 @@ async function updateBrandProfile(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_BRAND_PROFILE_ERROR");
     return handleControllerError(next, err, "updateBrandProfile");
   }
 }
@@ -1548,6 +1560,7 @@ const uploadBrandProfilePic = async (req, res) => {
     });
   } catch (error) {
     console.error("Brand profile image upload error:", error);
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "UPLOAD_BRAND_PROFILE_PIC_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -1663,6 +1676,7 @@ async function verifyBrandCoupon(req, res) {
     });
   } catch (error) {
     console.error("verifyBrandCoupon error:", error);
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "VERIFY_BRAND_COUPON_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -1934,6 +1948,7 @@ async function addbookmarkProfile(req, res) {
     });
   } catch (err) {
     console.error("[addbookmarkProfile] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ADD_BOOKMARK_PROFILE_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -1998,6 +2013,7 @@ async function getbookmarkProfile(req, res) {
     });
   } catch (err) {
     console.error("[getbookmarkProfile] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BOOKMARK_PROFILE_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3048,6 +3064,7 @@ async function saveCampaignGoodFitItem(req, res) {
     });
   } catch (err) {
     console.error("[saveCampaignGoodFitItem] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SAVE_CAMPAIGN_GOOD_FIT_ITEM_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3085,6 +3102,7 @@ async function getCampaignGoodFitList(req, res) {
     return res.status(result.statusCode).json(result.body);
   } catch (err) {
     console.error("[getCampaignGoodFitList] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CAMPAIGN_GOOD_FIT_LIST_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3187,6 +3205,7 @@ async function getFolderList(req, res) {
     });
   } catch (err) {
     console.error("[getFolderList] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_FOLDER_LIST_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3285,6 +3304,7 @@ async function createFolder(req, res) {
     });
   } catch (err) {
     console.error("[createFolder] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "CREATE_FOLDER_ERROR");
 
     const duplicate = err?.code === 11000;
 
@@ -3367,6 +3387,7 @@ async function saveGoodFitInfluencer(req, res) {
     });
   } catch (err) {
     console.error("[saveGoodFitInfluencer] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SAVE_GOOD_FIT_INFLUENCER_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3406,6 +3427,7 @@ async function getGoodFitInfluencers(req, res) {
     });
   } catch (err) {
     console.error("[getGoodFitInfluencers] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_GOOD_FIT_INFLUENCERS_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3472,6 +3494,7 @@ async function addbookmarkProfile(req, res) {
     });
   } catch (err) {
     console.error("[addbookmarkProfile] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ADD_BOOKMARK_PROFILE_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3511,6 +3534,7 @@ async function getbookmarkProfile(req, res) {
     });
   } catch (err) {
     console.error("[getbookmarkProfile] Error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BOOKMARK_PROFILE_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3856,6 +3880,7 @@ async function getBrandSettingOverview(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_SETTING_OVERVIEW_ERROR");
     return handleControllerError(next, err, "getBrandSettingOverview");
   }
 }
@@ -3886,6 +3911,7 @@ async function getBrandSettingProfile(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_BRAND_SETTING_PROFILE_ERROR");
     return handleControllerError(next, err, "getBrandSettingProfile");
   }
 }
@@ -4049,6 +4075,7 @@ if (
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_BRAND_SETTING_PROFILE_ERROR");
     return handleControllerError(next, err, "updateBrandSettingProfile");
   }
 }
@@ -4118,6 +4145,7 @@ async function updateBrandSettingPassword(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_BRAND_SETTING_PASSWORD_ERROR");
     return handleControllerError(next, err, "updateBrandSettingPassword");
   }
 }
@@ -4176,6 +4204,7 @@ async function updateBrandSettingProfilePhoto(req, res, next) {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_BRAND_SETTING_PROFILE_PHOTO_ERROR");
     return handleControllerError(next, err, "updateBrandSettingProfilePhoto");
   }
 }

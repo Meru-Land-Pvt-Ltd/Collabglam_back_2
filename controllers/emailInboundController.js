@@ -9,6 +9,8 @@ const {
   getOrCreateInfluencerAlias,
 } = require("../utils/emailAliases");
 
+const saveErrorLog = require("../services/errorLog.service");
+
 const RELAY_DOMAIN = (process.env.EMAIL_RELAY_DOMAIN || "mail.collabglam.com").toLowerCase();
 
 function slugifyLocalPart(name) {
@@ -350,6 +352,7 @@ exports.handleInboundEmail = async (req, res) => {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("handleInboundEmail error:", err);
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "HANDLE_INBOUND_EMAIL_ERROR");
     return res.status(500).json({ error: "Internal server error" });
   }
 };

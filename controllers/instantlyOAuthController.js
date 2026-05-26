@@ -1,4 +1,5 @@
 const axios = require("axios");
+const saveErrorLog = require("../services/errorLog.service");
 
 exports.initInstantlyGoogleOAuth = async (req, res) => {
   try {
@@ -23,6 +24,13 @@ exports.initInstantlyGoogleOAuth = async (req, res) => {
       raw: data,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || 500,
+      "INIT_INSTANTLY_GOOGLE_OAUTH_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: error?.response?.data?.message || error.message,
@@ -50,6 +58,13 @@ exports.getInstantlyOAuthStatus = async (req, res) => {
       data: response.data,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || 500,
+      "GET_INSTANTLY_OAUTH_STATUS_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: error?.response?.data?.message || error.message,

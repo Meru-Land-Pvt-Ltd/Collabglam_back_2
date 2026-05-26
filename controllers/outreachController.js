@@ -15,6 +15,7 @@ const OutreachTemplate = require("../models/OutreachTemplate");
 const OutreachSubsequence = require("../models/OutreachSubsequence");
 const instantlyService = require("../services/instantlyService");
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 const SDR_ROLE = ROLES?.SDR || "sdr";
 const RH_ROLE = ROLES?.REVENUE_HEAD || "revenue_head";
@@ -1437,6 +1438,7 @@ exports.createOutreachCampaign = async (req, res) => {
       data: populated,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "CREATE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
     return res.status(payload.statusCode).json({
       success: false,
@@ -1483,6 +1485,7 @@ exports.listOutreachCampaigns = async (req, res) => {
       data: rows,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_OUTREACH_CAMPAIGNS_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to list campaigns");
     return res.status(payload.statusCode).json({
       success: false,
@@ -1520,6 +1523,7 @@ exports.getOutreachCampaignById = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_OUTREACH_CAMPAIGN_BY_ID_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
     return res.status(payload.statusCode).json({
       success: false,
@@ -1563,6 +1567,7 @@ exports.updateOutreachCampaign = async (req, res) => {
       data: campaign,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPDATE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to update campaign");
     return res.status(payload.statusCode).json({
       success: false,
@@ -1581,6 +1586,7 @@ exports.deleteOutreachCampaign = async (req, res) => {
       try {
         await instantlyService.deleteCampaign(campaign.instantly.campaignId);
       } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DELETE_OUTREACH_CAMPAIGN_ERROR");
         if (error?.response?.status !== 404) {
           const payload = getAxiosErrorPayload(error, "Failed to delete Instantly campaign");
           return res.status(payload.statusCode).json({
@@ -1613,6 +1619,7 @@ exports.deleteOutreachCampaign = async (req, res) => {
       message: "Campaign deleted successfully",
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DELETE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to delete campaign");
     return res.status(payload.statusCode).json({
       success: false,
@@ -1649,6 +1656,7 @@ exports.getOutreachCampaignConfiguration = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_OUTREACH_CAMPAIGN_CONFIGURATION_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
     return res.status(payload.statusCode).json({
       success: false,
@@ -1889,6 +1897,7 @@ exports.updateOutreachCampaignConfiguration = async (req, res) => {
       data: campaign,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPDATE_OUTREACH_CAMPAIGN_CONFIGURATION_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to update campaign configuration");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2001,6 +2010,7 @@ exports.syncOutreachCampaignConfiguration = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "SYNC_OUTREACH_CAMPAIGN_CONFIGURATION_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to sync campaign with Instantly");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2239,6 +2249,7 @@ exports.previewCampaignSequence = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "PREVIEW_CAMPAIGN_SEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to preview sequence");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2332,6 +2343,7 @@ exports.sendCampaignTestEmail = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "SEND_CAMPAIGN_TEST_EMAIL_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to send test email");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2359,6 +2371,7 @@ exports.listCampaignContacts = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_CAMPAIGN_CONTACTS_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2408,6 +2421,7 @@ exports.addProspectsToCampaign = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "ADD_PROSPECTS_TO_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2478,6 +2492,7 @@ exports.uploadCampaignContactsCsv = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPLOAD_CAMPAIGN_CONTACTS_CSV_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to upload campaign contacts CSV");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2520,6 +2535,7 @@ exports.addCampaignContactsManual = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "ADD_CAMPAIGN_CONTACTS_MANUAL_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to add manual contact");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2552,6 +2568,7 @@ exports.importCampaignContactsFromGoogleSheet = async (req, res) => {
       });
       csvText = String(response.data || "");
     } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "IMPORT_CAMPAIGN_CONTACTS_FROM_GOOGLE_SHEET_ERROR");
       return res.status(400).json({
         success: false,
         message:
@@ -2585,6 +2602,7 @@ exports.importCampaignContactsFromGoogleSheet = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "IMPORT_CAMPAIGN_CONTACTS_FROM_GOOGLE_SHEET_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to import Google Sheet");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2654,6 +2672,7 @@ exports.duplicateOutreachCampaign = async (req, res) => {
       data: populated,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DUPLICATE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to duplicate campaign");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2723,6 +2742,7 @@ exports.shareOutreachCampaign = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "SHARE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to share campaign");
     return res.status(payload.statusCode).json({
       success: false,
@@ -2765,6 +2785,7 @@ exports.downloadOutreachCampaignAnalyticsCsv = async (req, res) => {
 
     return res.status(200).send(csv);
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DOWNLOAD_OUTREACH_CAMPAIGN_ANALYTICS_CSV_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to download analytics CSV");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3107,6 +3128,7 @@ exports.launchOutreachCampaign = async (req, res) => {
 
         await instantlyService.activateCampaign(campaign.instantly.campaignId);
       } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LAUNCH_OUTREACH_CAMPAIGN_ERROR");
         campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
         campaign.sync.providerStatus = "error";
         campaign.sync.lastErrorCode = String(
@@ -3193,6 +3215,7 @@ exports.launchOutreachCampaign = async (req, res) => {
         createCampaignPayload,
       });
     } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LAUNCH_OUTREACH_CAMPAIGN_ERROR");
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
       campaign.sync.providerStatus = "error";
       campaign.sync.lastErrorCode = String(
@@ -3237,6 +3260,7 @@ exports.launchOutreachCampaign = async (req, res) => {
         leads: prospects.map((prospect) => buildInstantlyLeadFromProspect(prospect, getCampaignMappedTemplateVariables(campaign))),
       });
     } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LAUNCH_OUTREACH_CAMPAIGN_ERROR");
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
       campaign.sync.providerStatus = "error";
       campaign.sync.lastErrorCode = String(error?.response?.status || "");
@@ -3273,6 +3297,7 @@ exports.launchOutreachCampaign = async (req, res) => {
 
       await instantlyService.activateCampaign(instantlyCampaignId);
     } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LAUNCH_OUTREACH_CAMPAIGN_ERROR");
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
       campaign.sync.providerStatus = "error";
       campaign.sync.lastErrorCode = String(
@@ -3353,6 +3378,7 @@ exports.launchOutreachCampaign = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LAUNCH_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
 
     return res.status(payload.statusCode).json({
@@ -3385,6 +3411,7 @@ exports.pauseOutreachCampaign = async (req, res) => {
     try {
       await instantlyService.pauseCampaign(campaign.instantly.campaignId);
     } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "PAUSE_OUTREACH_CAMPAIGN_ERROR");
       campaign.status = OUTREACH_CAMPAIGN_STATUS.ERROR;
       campaign.sync.providerStatus = "error";
       campaign.sync.lastErrorCode = String(error?.response?.status || "");
@@ -3424,6 +3451,7 @@ exports.pauseOutreachCampaign = async (req, res) => {
       message: "Campaign paused successfully",
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "PAUSE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Internal error");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3759,6 +3787,7 @@ exports.getOutreachCampaignAnalyticsOverview = async (req, res) => {
       data: normalized,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_OUTREACH_CAMPAIGN_ANALYTICS_OVERVIEW_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load campaign analytics overview");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3795,6 +3824,7 @@ exports.getOutreachCampaignAnalyticsDaily = async (req, res) => {
       raw: providerPayload,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_OUTREACH_CAMPAIGN_ANALYTICS_DAILY_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load campaign analytics daily");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3831,6 +3861,7 @@ exports.getOutreachCampaignAnalyticsSteps = async (req, res) => {
       raw: providerPayload,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_OUTREACH_CAMPAIGN_ANALYTICS_STEPS_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load campaign analytics steps");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3865,6 +3896,7 @@ exports.getOutreachCampaignSendingStatus = async (req, res) => {
       data: providerPayload,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_OUTREACH_CAMPAIGN_SENDING_STATUS_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load campaign sending status");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3943,6 +3975,7 @@ exports.diagnoseOutreachCampaign = async (req, res) => {
       data: diagnostics,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DIAGNOSE_OUTREACH_CAMPAIGN_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to diagnose campaign");
     return res.status(payload.statusCode).json({
       success: false,
@@ -3988,6 +4021,7 @@ exports.updateCampaignContactStage = async (req, res) => {
       data: updated,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPDATE_CAMPAIGN_CONTACT_STAGE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to update lead stage");
     return res.status(payload.statusCode).json({
       success: false,
@@ -4017,6 +4051,7 @@ exports.removeCampaignContact = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "REMOVE_CAMPAIGN_CONTACT_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to remove lead from campaign");
     return res.status(payload.statusCode).json({
       success: false,
@@ -4447,6 +4482,7 @@ exports.previewCampaignContactsCsv = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "PREVIEW_CAMPAIGN_CONTACTS_CSV_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to preview CSV");
     return res.status(payload.statusCode).json({
       success: false,
@@ -4471,6 +4507,7 @@ exports.getCampaignTemplateVariables = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_CAMPAIGN_TEMPLATE_VARIABLES_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load template variables");
     return res.status(payload.statusCode).json({
       success: false,
@@ -4612,6 +4649,7 @@ exports.listCampaignTemplates = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_CAMPAIGN_TEMPLATES_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load templates");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4637,6 +4675,7 @@ exports.createCampaignTemplate = async (req, res) => {
       data: template,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "CREATE_CAMPAIGN_TEMPLATE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to create template");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4665,6 +4704,7 @@ exports.updateCampaignTemplate = async (req, res) => {
       data: template,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPDATE_CAMPAIGN_TEMPLATE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to update template");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4680,6 +4720,7 @@ exports.deleteCampaignTemplate = async (req, res) => {
       message: "Template deleted successfully",
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DELETE_CAMPAIGN_TEMPLATE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to delete template");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4706,6 +4747,7 @@ exports.listCampaignSubsequences = async (req, res) => {
       data: subsequences,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LIST_CAMPAIGN_SUBSEQUENCES_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load subsequences");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4744,6 +4786,7 @@ exports.createCampaignSubsequence = async (req, res) => {
       data: subsequence,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "CREATE_CAMPAIGN_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to create subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4763,6 +4806,7 @@ exports.getCampaignSubsequenceById = async (req, res) => {
       data: subsequence,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "GET_CAMPAIGN_SUBSEQUENCE_BY_ID_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to load subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4799,6 +4843,7 @@ exports.updateCampaignSubsequence = async (req, res) => {
       data: subsequence,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "UPDATE_CAMPAIGN_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to update subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4818,6 +4863,7 @@ exports.deleteCampaignSubsequence = async (req, res) => {
       message: "Subsequence deleted successfully",
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DELETE_CAMPAIGN_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to delete subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4839,6 +4885,7 @@ exports.launchCampaignSubsequence = async (req, res) => {
       data: subsequence,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "LAUNCH_CAMPAIGN_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to launch subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4860,6 +4907,7 @@ exports.pauseCampaignSubsequence = async (req, res) => {
       data: subsequence,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "PAUSE_CAMPAIGN_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to pause subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4897,6 +4945,7 @@ exports.duplicateCampaignSubsequence = async (req, res) => {
       data: duplicated,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "DUPLICATE_CAMPAIGN_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to duplicate subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4941,6 +4990,7 @@ exports.moveLeadsToSubsequence = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "MOVE_LEADS_TO_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to move leads to subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }
@@ -4974,6 +5024,7 @@ exports.removeLeadFromSubsequence = async (req, res) => {
       data: providerResult,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.response?.status || error?.statusCode || error?.status || 500, "REMOVE_LEAD_FROM_SUBSEQUENCE_ERROR");
     const payload = getAxiosErrorPayload(error, "Failed to remove lead from subsequence");
     return res.status(payload.statusCode).json({ success: false, ...payload });
   }

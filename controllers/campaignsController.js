@@ -31,6 +31,7 @@ const { createAndEmit } = require("../utils/notifier");
 const { detectGeoFromRequest } = require("../utils/ipGeo");
 const { ApiResponse } = require("../core/http/ApiResponse.js");
 const { HttpStatus } = require("../core/http/HttpStatus.js");
+const saveErrorLog = require("../services/errorLog.service");
 
 // ===============================
 // helpers
@@ -1830,6 +1831,7 @@ exports.createCampaign = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "CREATE_CAMPAIGN_ERROR");
     console.timeEnd("createCampaign.total");
     return sendControllerError(res, requestId, err);
   }
@@ -1967,6 +1969,11 @@ const uploadedProductImages = imgs
     return "";
   })
   .filter(Boolean);
+
+
+
+
+  
 
     const productLink = clean(req.body.productLink);
     
@@ -2267,6 +2274,7 @@ const uploadedProductImages = imgs
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "PREFILL_CAMPAIGN_WITH_AI_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -2603,6 +2611,7 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
       requestId,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_NON_FULL_MANAGED_CAMPAIGNS_ERROR");
     console.error("[getNonFullManagedCampaigns] Error:", err);
     return sendControllerError(res, requestId, err);
   }
@@ -2645,6 +2654,7 @@ exports.getAllCampaigns = async (req, res) => {
       }
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_ALL_CAMPAIGNS_ERROR");
     return res.status(500).json({
       message: "Internal server error while fetching campaigns."
     });
@@ -2697,6 +2707,7 @@ exports.getCampaignById = async (req, res) => {
 
     return res.json(campaign);
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_CAMPAIGN_BY_ID_ERROR");
     return res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -2773,6 +2784,7 @@ exports.deleteCampaignByCampaignId = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DELETE_CAMPAIGN_BY_CAMPAIGN_ID_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -2805,6 +2817,7 @@ exports.getActiveCampaignsByBrand = async (req, res) => {
       pagination: { total: totalCount, page: pageNum, limit: perPage, totalPages: Math.ceil(totalCount / perPage) }
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_ACTIVE_CAMPAIGNS_BY_BRAND_ERROR");
     return res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -2827,6 +2840,7 @@ exports.getPreviousCampaigns = async (req, res) => {
 
     return res.json({ data: campaigns, pagination: { total: totalCount, page: Math.max(parseInt(page, 10), 1), limit: Math.max(parseInt(limit, 10), 1), totalPages: Math.ceil(totalCount / Math.max(parseInt(limit, 10), 1)) } });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_PREVIOUS_CAMPAIGNS_ERROR");
     return res.status(500).json({ message: 'Internal server error.' });
   }
 };
@@ -2846,6 +2860,7 @@ exports.getActiveCampaignsByCategories = async (req, res) => {
     ]);
     return res.json({ meta: { total, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(total / Math.max(1, parseInt(limit, 10))) }, campaigns });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ACTIVE_CAMPAIGNS_BY_CATEGORIES_ERROR");
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -2863,6 +2878,7 @@ exports.checkApplied = async (req, res) => {
     campaign.hasApplied = await ApplyCampaign.exists({ campaignId, 'applicants.influencerId': influencerId }) ? 1 : 0;
     return res.json(campaign);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "CHECK_APPLIED_ERROR");
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -3016,6 +3032,7 @@ exports.getCampaignsByInfluencer = async (req, res) => {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CAMPAIGNS_BY_INFLUENCER_ERROR");
     console.error("getCampaignsByInfluencer error:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -3062,6 +3079,7 @@ exports.getApprovedCampaignsByInfluencer = async (req, res) => {
       campaigns: raw.map((c) => ({ ...c, hasApplied: 1, isContracted: 1, isAccepted: acceptedMap.get(toStr(String(c._id))) || 0, hasMilestone: 1, contractId: contractIdMap.get(toStr(String(c._id))) || null, feeAmount: feeMap.get(toStr(String(c._id))) || 0, contractStatus: statusMap.get(toStr(String(c._id))) || null, milestonesCreatedAt: milestonesCreatedAtMap.get(toStr(String(c._id))) || null }))
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_APPROVED_CAMPAIGNS_BY_INFLUENCER_ERROR");
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -3201,6 +3219,7 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
       }))
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_APPLIED_CAMPAIGNS_BY_INFLUENCER_ERROR");
     console.error("getAppliedCampaignsByInfluencer error:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -3249,6 +3268,7 @@ exports.getAcceptedCampaigns = async (req, res) => {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ACCEPTED_CAMPAIGNS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -3446,6 +3466,7 @@ exports.getAcceptedInfluencers = async (req, res) => {
       influencers,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ACCEPTED_INFLUENCERS_ERROR");
     console.error("getAcceptedInfluencers error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -3502,6 +3523,7 @@ exports.getContractedCampaignsByInfluencer = async (req, res) => {
       }),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CONTRACTED_CAMPAIGNS_BY_INFLUENCER_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -3556,6 +3578,7 @@ exports.getCampaignsByFilter = async (req, res) => {
     const [total, campaigns] = await Promise.all([Campaign.countDocuments(filter), Campaign.find(filter).sort(sortObj).skip(skip).limit(Math.max(1, parseInt(limit, 10))).lean()]);
     return res.json({ data: campaigns, pagination: { total, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(total / Math.max(1, parseInt(limit, 10))) } });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CAMPAIGNS_BY_FILTER_ERROR");
     return res.status(500).json({ message: 'Internal server error while filtering campaigns.' });
   }
 };
@@ -3604,6 +3627,7 @@ exports.getRejectedCampaignsByInfluencer = async (req, res) => {
       })
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_REJECTED_CAMPAIGNS_BY_INFLUENCER_ERROR");
     return res.status(500).json({ message: 'Internal server error while fetching rejected campaigns.' });
   }
 };
@@ -3626,6 +3650,7 @@ exports.getCampaignSummary = async (req, res) => {
       paymentType: campaign.paymentType
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_CAMPAIGN_SUMMARY_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -3638,6 +3663,7 @@ exports.getDraftCampaignByBrand = async (req, res) => {
     if (!draft) return res.status(201).json({ message: "No draft found for this brand." });
     return res.status(200).json(draft);
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_DRAFT_CAMPAIGN_BY_BRAND_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -4062,6 +4088,7 @@ exports.getCampaignHistoryByBrand = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_CAMPAIGN_HISTORY_BY_BRAND_ERROR");
     console.error("getCampaignHistoryByBrand error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -4124,6 +4151,7 @@ exports.listApplicants = async (req, res) => {
     const start = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
     return res.json({ meta: { total: rows.length, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(rows.length / Math.max(1, parseInt(limit, 10))) }, applicantCount: record.applicants?.length || 0, influencers: rows.slice(start, start + Math.max(1, parseInt(limit, 10))) });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "LIST_APPLICANTS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -4160,6 +4188,7 @@ exports.approveCampaignPendingUpdate = async (req, res) => {
 
     return res.json({ message: "Approved and published.", campaign });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "APPROVE_CAMPAIGN_PENDING_UPDATE_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -4193,6 +4222,7 @@ exports.rejectCampaignPendingUpdate = async (req, res) => {
 
     return res.json({ message: "Rejected.", campaign });
   } catch (e) {
+    await saveErrorLog(req, e, e?.statusCode || e?.status || 500, "REJECT_CAMPAIGN_PENDING_UPDATE_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -4231,6 +4261,7 @@ exports.getAdminCampaigns = async (req, res) => {
       data,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ADMIN_CAMPAIGNS_ERROR");
     return res.status(500).json({
       success: false,
       message: err.message || "Server error",
@@ -4261,6 +4292,7 @@ exports.getCategories = async (req, res) => {
 
     return ApiResponse.sendOk(res, HttpStatus.OK, data, requestId);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_CATEGORIES_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4347,6 +4379,7 @@ exports.getSubcategories = async (req, res) => {
     const data = await Category.aggregate(pipeline);
     return ApiResponse.sendOk(res, HttpStatus.OK, data, requestId);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_SUBCATEGORIES_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4437,6 +4470,7 @@ exports.viewCampaignByIdForBrand = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VIEW_CAMPAIGN_BY_ID_FOR_BRAND_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4542,6 +4576,7 @@ exports.getRecommendedInfluencersByCampaignId = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_RECOMMENDED_INFLUENCERS_BY_CAMPAIGN_ID_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4661,6 +4696,7 @@ exports.updateStatus = async (req, res) => {
 
     return ApiResponse.sendOk(res, 200, { message: "Status updated successfully" }, requestId);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_STATUS_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4756,6 +4792,7 @@ exports.updateManualCampaign = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_MANUAL_CAMPAIGN_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4865,6 +4902,7 @@ exports.viewCampaignByIdForInfluencer = async (req, res) => {
 
     return ApiResponse.sendOk(res, 200, { doc }, requestId);
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "VIEW_CAMPAIGN_BY_ID_FOR_INFLUENCER_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -4989,6 +5027,7 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_ACTIVE_CAMPAIGNS_FOR_INFLUENCER_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -5115,6 +5154,7 @@ exports.getCampaignsByBrandId = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_CAMPAIGNS_BY_BRAND_ID_ERROR");
     console.error("getCampaignsByBrandId error:", error);
 
     return res.status(500).json({
@@ -5277,6 +5317,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_CAMPAIGNS_BY_INFLUENCER_ID_ERROR");
     console.error("getCampaignsByInfluencerId error:", error);
 
     return res.status(500).json({
@@ -5941,6 +5982,7 @@ exports.editDraftCampaign = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "EDIT_DRAFT_CAMPAIGN_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -6196,6 +6238,7 @@ exports.getDraftCampaigns = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_DRAFT_CAMPAIGNS_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -6260,6 +6303,7 @@ exports.rejectedCampaign = async (req, res) => {
       data: rejectedCampaigns,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "REJECTED_CAMPAIGN_ERROR");
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -6324,6 +6368,7 @@ exports.enableCampaignShare = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "ENABLE_CAMPAIGN_SHARE_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -6364,6 +6409,7 @@ exports.disableCampaignShare = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DISABLE_CAMPAIGN_SHARE_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -6421,6 +6467,7 @@ exports.getPublicCampaignByToken = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_PUBLIC_CAMPAIGN_BY_TOKEN_ERROR");
     return sendControllerError(res, requestId, err);
   }
 };
@@ -6489,6 +6536,7 @@ exports.getBrandListByCampaignId = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_BRAND_LIST_BY_CAMPAIGN_ID_ERROR");
     console.error("getBrandListByCampaignId error:", error);
 
     return res.status(500).json({
@@ -6640,6 +6688,7 @@ exports.getInfluencerListByCampaignId = async (req, res) => {
       influencers: Array.from(influencerMap.values()),
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "GET_INFLUENCER_LIST_BY_CAMPAIGN_ID_ERROR");
     console.error("getInfluencerListByCampaignId error:", error);
 
     return res.status(500).json({
@@ -6678,6 +6727,7 @@ exports.uploadImagesToS3 = async (req, res) => {
       images: uploadedImages,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.statusCode || error?.status || 500, "UPLOAD_IMAGES_TO_S3_ERROR");
     console.error("uploadImagesToS3 error:", error);
     return res.status(500).json({
       success: false,
@@ -7325,6 +7375,7 @@ exports.getInfluencerMatchScore = async (req, res) => {
       requestId
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_INFLUENCER_MATCH_SCORE_ERROR");
     console.error("[getInfluencerMatchScore] Error:", err);
     return sendControllerError(res, requestId, err);
   }

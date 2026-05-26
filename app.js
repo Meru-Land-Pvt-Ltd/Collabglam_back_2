@@ -60,6 +60,7 @@ const instantlytestRoutes = require("./routes/instantlyTestRoutes");
 const matchedCreatorRoutes = require("./routes/matchedCreatorRoutes");
 const campaignReviewRoutes = require("./routes/campaignReviewRoutes");
 const youtubeInsightRoutes = require("./routes/youtubeInsightRoutes");
+const errorLogRoutes = require("./routes/errorLog.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -85,7 +86,7 @@ const defaultCorsOrigins = [
   "http://localhost:4000",
   "http://192.168.1.26:3000",
 
-  "http://192.168.1.31:3000",
+  "http://192.168.1.25:3000",
   "https://mhd.sharemitra.com",
 ];
 
@@ -414,6 +415,7 @@ app.use("/matched-creators", matchedCreatorRoutes);
 app.use("/campaign-reviews", campaignReviewRoutes);
 app.use("/youtube-insights", youtubeInsightRoutes);
 app.use("/campaign-intelligence", require("./routes/campaignIntelligenceRoutes"));
+app.use("/error-logs", errorLogRoutes);
 
 /* =========================================================
    404 HANDLER

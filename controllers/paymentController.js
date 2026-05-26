@@ -9,6 +9,7 @@ const { InfluencerModel } = require("../models/influencer");
 const subscriptionHelper = require("../utils/subscriptionHelper");
 const MilestonePayment = require("../models/milestonePayment");
 const SubscriptionPlan = require("../models/subscription");
+const saveErrorLog = require("../services/errorLog.service");
 
 const { nextInvoiceNumber } = require("../utils/invoiceNumber");
 const {
@@ -228,6 +229,13 @@ exports.createOrder = async (req, res) => {
     return res.status(201).json({ success: true, sessionId: session.id, url: session.url });
   } catch (error) {
     console.error("Error in createOrder:", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "CREATE_ORDER_ERROR"
+    );
+
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -479,6 +487,12 @@ exports.verifyPayment = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in verifyPayment:", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "VERIFY_PAYMENT_ERROR"
+    );
 
     return res.status(500).json({
       success: false,
@@ -598,6 +612,13 @@ exports.createMilestoneOrder = async (req, res) => {
     return res.status(201).json({ success: true, sessionId: session.id, url: session.url });
   } catch (error) {
     console.error("Error in createMilestoneOrder:", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "CREATE_MILESTONE_ORDER_ERROR"
+    );
+
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -736,6 +757,13 @@ exports.verifyMilestonePayment = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in verifyMilestonePayment:", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "VERIFY_MILESTONE_PAYMENT_ERROR"
+    );
+
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -815,6 +843,13 @@ exports.previewInvoiceByInvoiceNumber = async (req, res) => {
     return res.status(200).send(pdf.buffer);
   } catch (err) {
     console.error("previewInvoiceByInvoiceNumber error:", err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 500,
+      "PREVIEW_INVOICE_BY_INVOICE_NUMBER_ERROR"
+    );
+
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
@@ -882,6 +917,13 @@ exports.getInvoicesByUserId = async (req, res) => {
     });
   } catch (err) {
     console.error("getInvoicesByUserId error:", err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.response?.status || err?.statusCode || err?.status || 500,
+      "GET_INVOICES_BY_USER_ID_ERROR"
+    );
+
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
@@ -1022,6 +1064,13 @@ exports.getPaymentHistoryByUserId = async (req, res) => {
     });
   } catch (error) {
     console.error("getPaymentHistoryByUserId error:", error);
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || error?.status || 500,
+      "GET_PAYMENT_HISTORY_BY_USER_ID_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: "Internal server error",

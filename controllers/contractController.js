@@ -16,6 +16,7 @@ const Contract = require("../models/contract");
 const MASTER_TEMPLATE = require("../template/ContractTemplate");
 const BrandSignature = require('../models/brandSignature');
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 const { CONTRACT_STATUS } = require("../constants/contract");
 function markEdit(contract, byRole, byUserId, editedFields) {
   if (!Array.isArray(editedFields) || editedFields.length === 0) return;
@@ -2554,6 +2555,7 @@ exports.initiate = async (req, res) => {
       201
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INITIATE_ERROR");
     return respondError(
       res,
       err.message || "initiate error",
@@ -2586,6 +2588,7 @@ exports.viewed = async (req, res) => {
 
     return respondOK(res, { message: "Marked viewed", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "VIEWED_ERROR");
     return respondError(res, "viewed error", err.status || 500, err);
   }
 };
@@ -2797,6 +2800,7 @@ exports.influencerConfirm = async (req, res) => {
       contract,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_CONFIRM_ERROR");
     return respondError(
       res,
       err.message || "influencerConfirm error",
@@ -2906,6 +2910,7 @@ exports.brandConfirm = async (req, res) => {
 
     return respondOK(res, { message: "Brand acceptance saved", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_CONFIRM_ERROR");
     return respondError(res, err.message || "brandConfirm error", err.status || 500, err);
   }
 };
@@ -2963,6 +2968,7 @@ exports.adminUpdate = async (req, res) => {
 
     return respondOK(res, { message: "Admin settings updated", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "ADMIN_UPDATE_ERROR");
     return respondError(res, err.message || "adminUpdate error", err.status || 500, err);
   }
 };
@@ -3021,6 +3027,7 @@ exports.finalize = async (req, res) => {
 
     return respondOK(res, { message: "Contract finalized for signatures", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "FINALIZE_ERROR");
     return respondError(res, err.message || "finalize error", err.status || 500, err);
   }
 };
@@ -3058,6 +3065,7 @@ exports.preview = async (req, res) => {
         "Pending",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "PREVIEW_ERROR");
     return respondError(res, err.message || "preview error", err.status || 500, err);
   }
 };
@@ -3340,6 +3348,7 @@ exports.sign = async (req, res) => {
       contract,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "SIGN_ERROR");
     return respondError(res, err.message || "sign error", err.status || 500, err);
   }
 };
@@ -3532,6 +3541,7 @@ exports.brandUpdateFields = async (req, res) => {
 
     return respondOK(res, { message: "Brand fields updated", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "BRAND_UPDATE_FIELDS_ERROR");
     return respondError(
       res,
       err.message || "brandUpdateFields error",
@@ -3622,6 +3632,7 @@ exports.influencerUpdateFields = async (req, res) => {
 
     return respondOK(res, { message: "Influencer fields updated", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INFLUENCER_UPDATE_FIELDS_ERROR");
     return respondError(res, err.message || "influencerUpdateFields error", err.status || 500, err);
   }
 };
@@ -3788,6 +3799,7 @@ exports.getContract = async (req, res) => {
 
     return respondOK(res, { contracts: normalized });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_CONTRACT_ERROR");
     return respondError(res, "Error fetching contracts", 500, err);
   }
 };
@@ -3869,6 +3881,7 @@ exports.reject = async (req, res) => {
 
     return respondOK(res, { message: "Contract rejected", contract });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "REJECT_ERROR");
     return respondError(res, err.message || "reject error", err.status || 500, err);
   }
 };
@@ -3990,6 +4003,7 @@ exports.resend = async (req, res) => {
 
     return respondOK(res, { message: "Resent contract created", contract: child }, 201);
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "RESEND_ERROR");
     return respondError(res, err.message || "resend error", err.status || 500, err);
   }
 };
@@ -4256,6 +4270,7 @@ exports.initiateBulk = async (req, res) => {
       failed.length ? 207 : 201
     );
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "INITIATE_BULK_ERROR");
     return respondError(res, err.message || "initiateBulk error", err.status || 500, err);
   }
 };
@@ -4277,6 +4292,7 @@ exports.getTimezone = async (req, res) => {
     if (!tz) return respondError(res, "Timezone not found", 404);
     return respondOK(res, { timezone: tz });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_TIMEZONE_ERROR");
     return respondError(res, "getTimezone error", 500, err);
   }
 };
@@ -4300,6 +4316,7 @@ exports.getCurrency = async (req, res) => {
     if (!cur) return respondError(res, "Currency not found", 404);
     return respondOK(res, { currency: { code: String(code).toUpperCase(), ...cur } });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_CURRENCY_ERROR");
     return respondError(res, "getCurrency error", 500, err);
   }
 };
@@ -4341,6 +4358,7 @@ exports.uploadBrandSignature = async (req, res) => {
       data: created
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "UPLOAD_BRAND_SIGNATURE_ERROR");
     console.error('Error in uploadBrandSignature:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -4370,6 +4388,7 @@ exports.getBrandSignature = async (req, res) => {
       data: signature
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_BRAND_SIGNATURE_ERROR");
     console.error('Error in getBrandSignature:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -4411,6 +4430,7 @@ exports.uploadInfluencerSignature = async (req, res) => {
       data: created
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "UPLOAD_INFLUENCER_SIGNATURE_ERROR");
     console.error('Error in uploadInfluencerSignature:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -4440,6 +4460,7 @@ exports.getInfluencerSignature = async (req, res) => {
       data: signature
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_INFLUENCER_SIGNATURE_ERROR");
     console.error('Error in getInfluencerSignature:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
@@ -4914,6 +4935,7 @@ exports.viewContractPdf = async (req, res) => {
         "Pending",
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "VIEW_CONTRACT_PDF_ERROR");
     console.error("viewContractPdf error:", err);
 
     try {
@@ -4942,6 +4964,7 @@ exports.viewContractPdf = async (req, res) => {
       doc.end();
       return;
     } catch (e2) {
+    await saveErrorLog(req, e2, e2?.status || e2?.statusCode || 500, "VIEW_CONTRACT_PDF_ERROR");
       return respondError(res, "fallback PDF also failed", 500, e2);
     }
   }
@@ -5062,6 +5085,7 @@ exports.getMilestonesByInfluencerAndCampaign = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.status || error?.statusCode || 500, "GET_MILESTONES_BY_INFLUENCER_AND_CAMPAIGN_ERROR");
     console.error("getMilestonesByInfluencerAndCampaign error:", error);
     return res.status(500).json({
       success: false,
@@ -5127,6 +5151,7 @@ exports.getScheduleADataByInfluencerAndCampaign = async (req, res) => {
       },
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.status || error?.statusCode || 500, "GET_SCHEDULE_ADATA_BY_INFLUENCER_AND_CAMPAIGN_ERROR");
     console.error("getScheduleADataByInfluencerAndCampaign error:", error);
     return res.status(500).json({
       success: false,
@@ -5183,6 +5208,7 @@ exports.influencerManage = async (req, res) => {
       modashData,
     });
   } catch (error) {
+    await saveErrorLog(req, error, error?.status || error?.statusCode || 500, "INFLUENCER_MANAGE_ERROR");
     console.error("influencerManage error:", error);
     return res.status(500).json({
       success: false,
@@ -5222,6 +5248,7 @@ exports.getContractDetails = async (req, res) => {
       contract,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_CONTRACT_DETAILS_ERROR");
     return respondError(res, "Error fetching contract details", 500, err);
   }
 };

@@ -1,4 +1,5 @@
 const instantlyService = require("../services/instantlyService");
+const saveErrorLog = require("../services/errorLog.service");
 
 exports.testInstantlyConnection = async (req, res) => {
   try {
@@ -9,6 +10,13 @@ exports.testInstantlyConnection = async (req, res) => {
       data: result,
     });
   } catch (error) {
+    await saveErrorLog(
+      req,
+      error,
+      error?.response?.status || error?.statusCode || 500,
+      "TEST_INSTANTLY_CONNECTION_ERROR"
+    );
+
     return res.status(500).json({
       success: false,
       message: error?.response?.data?.message || error.message || "Instantly connection failed",

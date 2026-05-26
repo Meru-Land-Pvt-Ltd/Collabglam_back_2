@@ -1,5 +1,6 @@
 const { ApiResponse } = require("../core/http/ApiResponse");
 const { HttpStatus } = require("../core/http/HttpStatus");
+const saveErrorLog = require("../services/errorLog.service");
 
 const CountryModel = require("../models/country");
 const { InfluencerTierModel } = require("../models/influencerTier");
@@ -57,6 +58,7 @@ exports.getAllCountries = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, countries, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_COUNTRIES_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -102,6 +104,7 @@ exports.getAllInfluencerTiers = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, items, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_INFLUENCER_TIERS_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -139,6 +142,7 @@ exports.getAllPreferredHashtags = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, response, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_PREFERRED_HASHTAGS_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -175,6 +179,7 @@ exports.getAllProductServiceGoals = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, response, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_PRODUCT_SERVICE_GOALS_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -218,6 +223,7 @@ exports.getAllAgeRanges = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, items, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_AGE_RANGES_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -252,6 +258,7 @@ exports.getAllContentFormats = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, items, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_CONTENT_FORMATS_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,
@@ -289,6 +296,7 @@ exports.getAllContentLanguages = async (req, res) => {
     return ApiResponse.sendOk(res, HttpStatus.OK, items, requestId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_CONTENT_LANGUAGES_ERROR");
     return ApiResponse.sendFail(
       res,
       HttpStatus.INTERNAL_SERVER_ERROR,

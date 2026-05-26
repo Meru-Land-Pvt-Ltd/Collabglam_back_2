@@ -18,6 +18,7 @@ const { AdminModel, ROLES: MASTER_ROLES } = require("../models/master");
 const BrandAssigned = require("../models/brandAssigned");
 
 const { CONTRACT_STATUS } = require("../constants/contract");
+const saveErrorLog = require("../services/errorLog.service");
 
 /**
  * Generic JWT verifier — populates req.user with the decoded token.
@@ -33,7 +34,11 @@ exports.verifyToken = (req, res, next) => {
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     return next();
-  } catch {
+  } catch (error) {
+    saveErrorLog(req, error, 403, "VERIFY_TOKEN_ERROR").catch((logError) => {
+      console.error("Error log save failed:", logError.message);
+    });
+
     return res.status(403).json({ message: "Invalid or expired token" });
   }
 };
@@ -154,6 +159,7 @@ exports.getDashboardInf = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getDashboardInf:", err);
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_DASHBOARD_INF_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -797,6 +803,7 @@ exports.getBrandDashboardHome = async (req, res) => {
     });
   } catch (err) {
     console.error("getBrandDashboardHome error:", err);
+    await saveErrorLog(req, err, err?.status || err?.statusCode || 500, "GET_BRAND_DASHBOARD_HOME_ERROR");
 
     return res
       .status(err?.status || 500)
@@ -2661,6 +2668,7 @@ exports.getDashboard = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in dashboard getDashboard:", error);
+    await saveErrorLog(req, error, error?.status || error?.statusCode || 500, "GET_DASHBOARD_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -3338,6 +3346,7 @@ exports.getRevenueHeadDetails = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getRevenueHeadDetails:", error);
+    await saveErrorLog(req, error, error?.status || error?.statusCode || 500, "GET_REVENUE_HEAD_DETAILS_ERROR");
 
     return res.status(error.statusCode || 500).json({
       success: false,

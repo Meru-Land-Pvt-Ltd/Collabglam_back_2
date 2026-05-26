@@ -6,6 +6,7 @@ const Campaign = require("../models/campaign");
 const Modash = require("../models/modash");
 const { InfluencerModel: Influencer } = require("../models/influencer");
 const Brand = require("../models/brand");
+const saveErrorLog = require("../services/errorLog.service");
 
 const MasterModule = require("../models/master");
 const AdminModel =
@@ -405,6 +406,7 @@ exports.createInvitationByAdmin = async (req, res) => {
     return exports.createInvitation(req, res);
   } catch (error) {
     console.error("createInvitationByAdmin error:", error);
+    await saveErrorLog(req, error, 500, "CREATE_INVITATION_BY_ADMIN_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error.",
@@ -557,6 +559,7 @@ exports.createInvitation = async (req, res) => {
     });
   } catch (e) {
     console.error("createInvitation error:", e);
+    await saveErrorLog(req, e, 500, "CREATE_INVITATION_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -657,6 +660,7 @@ exports.getInvitationsList = async (req, res) => {
     });
   } catch (e) {
     console.error("getInvitationsList error:", e);
+    await saveErrorLog(req, e, 500, "GET_INVITATIONS_LIST_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -725,6 +729,7 @@ exports.getInvitationsByInfluencerId = async (req, res) => {
     });
   } catch (e) {
     console.error("getInvitationsByInfluencerId error:", e);
+    await saveErrorLog(req, e, 500, "GET_INVITATIONS_BY_INFLUENCER_ID_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -793,6 +798,7 @@ exports.getInvitationsByBrandId = async (req, res) => {
     });
   } catch (e) {
     console.error("getInvitationsByBrandId error:", e);
+    await saveErrorLog(req, e, 500, "GET_INVITATIONS_BY_BRAND_ID_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -843,6 +849,7 @@ exports.getAllInvitationsByInfluencerId = async (req, res) => {
     });
   } catch (e) {
     console.error("getAllInvitationsByInfluencerId error:", e);
+    await saveErrorLog(req, e, 500, "GET_ALL_INVITATIONS_BY_INFLUENCER_ID_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -936,6 +943,7 @@ exports.updateInvitationStatus = async (req, res) => {
     });
   } catch (e) {
     console.error("updateInvitationStatus error:", e);
+    await saveErrorLog(req, e, 500, "UPDATE_INVITATION_STATUS_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -1019,6 +1027,7 @@ exports.getInvitationsByBrandIdAndCampaignId = async (req, res) => {
     });
   } catch (e) {
     console.error("getInvitationsByBrandIdAndCampaignId error:", e);
+    await saveErrorLog(req, e, 500, "GET_INVITATIONS_BY_BRAND_ID_AND_CAMPAIGN_ID_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -1164,6 +1173,7 @@ exports.getInvitationsByCampaignIdPost = async (req, res) => {
     });
   } catch (e) {
     console.error("getInvitationsByCampaignIdPost error:", e);
+    await saveErrorLog(req, e, 500, "GET_INVITATIONS_BY_CAMPAIGN_ID_POST_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -1294,6 +1304,7 @@ exports.getAcceptedAdminCreatedCampaigns = async (req, res) => {
     });
   } catch (e) {
     console.error("getAcceptedAdminCreatedCampaigns error:", e);
+    await saveErrorLog(req, e, 500, "GET_ACCEPTED_ADMIN_CREATED_CAMPAIGNS_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -1399,6 +1410,7 @@ exports.getAcceptedAdminCreatedInfluencersByCampaignId = async (req, res) => {
     });
   } catch (e) {
     console.error("getAcceptedAdminCreatedInfluencersByCampaignId error:", e);
+    await saveErrorLog(req, e, 500, "GET_ACCEPTED_ADMIN_CREATED_INFLUENCERS_BY_CAMPAIGN_ID_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
@@ -1493,6 +1505,7 @@ exports.getInvitationStatusByCampaignIdPost = async (req, res) => {
     });
   } catch (e) {
     console.error("getInvitationStatusByCampaignIdPost error:", e);
+    await saveErrorLog(req, e, 500, "GET_INVITATION_STATUS_BY_CAMPAIGN_ID_POST_ERROR");
     return res.status(500).json({
       status: "error",
       message: "Internal server error",

@@ -9,6 +9,7 @@ const { uploadToGridFS, deleteGridFsFiles } = require("../utils/gridfs");
 const GroupChat = require("../models/groupChat");
 const { AdminModel, ROLES } = require("../models/master");
 const { createAndEmit } = require("../utils/notifier");
+const saveErrorLog = require("../services/errorLog.service");
 
 const GRIDFS_BUCKET = process.env.GRIDFS_BUCKET || "uploads";
 
@@ -692,6 +693,7 @@ exports.createGroup = async (req, res) => {
       group,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "CREATE_GROUP_ERROR");
     console.error("createGroup error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -825,6 +827,7 @@ exports.updateGroup = async (req, res) => {
       group,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "UPDATE_GROUP_ERROR");
     console.error("updateGroup error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -854,6 +857,7 @@ exports.getMyGroups = async (req, res) => {
       groups: groups.map((group) => buildGroupSummary(group, String(adminId))),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_MY_GROUPS_ERROR");
     console.error("getMyGroups error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -903,6 +907,7 @@ exports.getMessages = async (req, res) => {
       messages,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_MESSAGES_ERROR");
     console.error("getMessages error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1002,6 +1007,7 @@ exports.postMessage = async (req, res) => {
       messageData: msg,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "POST_MESSAGE_ERROR");
     console.error("postMessage error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1108,6 +1114,7 @@ exports.postFileMessage = [
         messageData: msg,
       });
     } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "POST_FILE_MESSAGE_ERROR");
       console.error("postFileMessage error:", err);
       return res.status(500).json({
         message: err.message || "Internal server error",
@@ -1179,6 +1186,7 @@ exports.editMessage = async (req, res) => {
       messageData: msg,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "EDIT_MESSAGE_ERROR");
     console.error("editMessage error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1265,6 +1273,7 @@ exports.deleteMessage = async (req, res) => {
       messageId,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "DELETE_MESSAGE_ERROR");
     console.error("deleteMessage error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1386,6 +1395,7 @@ exports.markAsSeen = async (req, res) => {
       updatedMessages,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "MARK_AS_SEEN_ERROR");
     console.error("markAsSeen error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1428,6 +1438,7 @@ exports.getUnseenCount = async (req, res) => {
       unseenCount,
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_UNSEEN_COUNT_ERROR");
     console.error("getUnseenCount error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1510,6 +1521,7 @@ exports.streamAttachment = async (req, res) => {
 
     return res.status(500).json({ message: "Attachment is not streamable" });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "STREAM_ATTACHMENT_ERROR");
     console.error("streamAttachment error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1531,6 +1543,7 @@ exports.streamGridFsFile = async (req, res) => {
 
     return streamGridFsByFilename(req, res, filename, { asAttachment });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "STREAM_GRID_FS_FILE_ERROR");
     console.error("streamGridFsFile error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1613,6 +1626,7 @@ exports.getEligibleMembers = async (req, res) => {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ELIGIBLE_MEMBERS_ERROR");
     console.error("getEligibleMembers error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1686,6 +1700,7 @@ exports.getEligibleRevenueHeads = async (req, res) => {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ELIGIBLE_REVENUE_HEADS_ERROR");
     console.error("getEligibleRevenueHeads error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",
@@ -1783,6 +1798,7 @@ exports.getGroupManageMeta = async (req, res) => {
       })),
     });
   } catch (err) {
+    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_GROUP_MANAGE_META_ERROR");
     console.error("getGroupManageMeta error:", err);
     return res.status(500).json({
       message: err.message || "Internal server error",

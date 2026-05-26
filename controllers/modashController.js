@@ -14,6 +14,7 @@ const Influencer = require('../models/influencer'); // kept for future compatibi
 const BrandProfileView = require('../models/brandProfileView');
 const { ensureBrandQuota } = require('../utils/quota');
 const Campaign = require('../models/campaign');
+const saveErrorLog = require('../services/errorLog.service');
 
 /* -------------------------------------------------------------------------- */
 /*                                   Config                                   */
@@ -2937,6 +2938,7 @@ async function frontendUnifiedSearch(req, res) {
       await ensureSearchQuota(brandId);
     } catch (e) {
       if (e.code === 'QUOTA_EXCEEDED') {
+        await saveErrorLog(req, e, 403, "FRONTEND_UNIFIED_SEARCH_ERROR");
         return res.status(403).json({
           error: 'You have reached your monthly search limit.',
           meta: e.meta,
@@ -3151,6 +3153,7 @@ async function frontendUnifiedSearch(req, res) {
     console.error('Unified search error:', err.message);
     const safe = buildSafeErrorMessage(err, 'Unified search failed');
     const status = (err && err.status) || 400;
+    await saveErrorLog(req, err, status, "FRONTEND_UNIFIED_SEARCH_ERROR");
     return res.status(status).json({ error: safe });
   }
 }
@@ -3448,6 +3451,7 @@ async function frontendUsers(req, res) {
   } catch (err) {
     const safe = buildSafeErrorMessage(err, 'Lookup failed');
     const status = (err && err.status) || 400;
+    await saveErrorLog(req, err, status, "FRONTEND_USERS_ERROR");
     return res.status(status).json({ error: safe });
   }
 }
@@ -3465,6 +3469,7 @@ async function frontendSearch(req, res) {
       await ensureSearchQuota(brandId);
     } catch (e) {
       if (e.code === 'QUOTA_EXCEEDED') {
+        await saveErrorLog(req, e, 403, "FRONTEND_SEARCH_ERROR");
         return res.status(403).json({
           error: 'You have reached your monthly search limit.',
           meta: e.meta,
@@ -3536,6 +3541,7 @@ async function frontendSearch(req, res) {
   } catch (err) {
     const safe = buildSafeErrorMessage(err, 'Search failed');
     const status = (err && err.status) || 400;
+    await saveErrorLog(req, err, status, "FRONTEND_SEARCH_ERROR");
     return res.status(status).json({ error: safe });
   }
 }
@@ -3653,6 +3659,7 @@ async function frontendReportPreview(req, res) {
     });
   } catch (err) {
     console.error("[frontendReportPreview] Error:", err);
+    await saveErrorLog(req, err, 500, "FRONTEND_REPORT_PREVIEW_ERROR");
     return res.status(500).json({
       error: (err && err.message) || "Failed to load cached report",
     });
@@ -3808,6 +3815,7 @@ async function frontendReport(req, res) {
             });
           } catch (e) {
             if (e.status === 403 || e.code === 'QUOTA_EXCEEDED') {
+              await saveErrorLog(req, e, 403, "FRONTEND_REPORT_ERROR");
               return res.status(403).json({
                 error: 'You have reached your monthly profile view limit.',
                 meta: e.meta,
@@ -3884,11 +3892,14 @@ async function frontendReport(req, res) {
         const status = fallbackErr && fallbackErr.status ? fallbackErr.status : 502;
 
         if (status === 401 || status === 403) {
+          await saveErrorLog(req, firstErr, 502, "FRONTEND_REPORT_ERROR");
           return res.status(502).json({
             error:
               "Modash API authentication failed. Please verify MODASH_API_KEY and MODASH_AUTH_HEADER in backend .env.",
           });
         }
+
+        await saveErrorLog(req, firstErr, status, "FRONTEND_REPORT_ERROR");
 
         return res.status(status).json({ error: safeMsg });
       }
@@ -3936,6 +3947,7 @@ async function frontendReport(req, res) {
       });
     } catch (e) {
       if (e.status === 403 || e.code === 'QUOTA_EXCEEDED') {
+        await saveErrorLog(req, e, 403, "FRONTEND_REPORT_ERROR");
         return res.status(403).json({
           error: 'You have reached your monthly profile view limit.',
           meta: e.meta,
@@ -4068,6 +4080,7 @@ async function resolveProfile(req, res) {
         null;
     } catch (e) {
       if (e && e.status === 403) {
+        await saveErrorLog(req, e, 403, "RESOLVE_PROFILE_ERROR");
         return res.status(403).json({
           message: 'Forbidden from Modash. Verify your API key / header type and plan.',
           details: e.response || undefined,
@@ -4088,6 +4101,7 @@ async function resolveProfile(req, res) {
         reportJSON = await getReportLegacy(platform, userIdResolved);
       } catch (e) {
         if (e && e.status === 403) {
+          await saveErrorLog(req, e, 403, "RESOLVE_PROFILE_ERROR");
           return res.status(403).json({
             message: 'Forbidden from Modash when fetching report.',
             details: e.response || undefined,
@@ -4121,6 +4135,7 @@ async function resolveProfile(req, res) {
     });
   } catch (e) {
     if (e && e.status === 409) {
+      await saveErrorLog(req, e, 409, "RESOLVE_PROFILE_ERROR");
       return res.status(409).json({
         message: e.message || 'Profile already exists',
         ...(e.details || {}),
@@ -4128,6 +4143,7 @@ async function resolveProfile(req, res) {
     }
 
     if (e && e.status === 403) {
+      await saveErrorLog(req, e, 403, "RESOLVE_PROFILE_ERROR");
       return res.status(403).json({
         message: 'Forbidden from Modash.',
         details: e.response || undefined,
@@ -4135,10 +4151,12 @@ async function resolveProfile(req, res) {
     }
 
     if (e && e.status === 404) {
+      await saveErrorLog(req, e, 404, "RESOLVE_PROFILE_ERROR");
       return res.status(404).json({ message: 'No profile found' });
     }
 
     console.error('resolveProfile error:', e);
+    await saveErrorLog(req, e, 500, "RESOLVE_PROFILE_ERROR");
     return res.status(500).json({ message: (e && e.message) || 'Modash error' });
   }
 }
@@ -4157,8 +4175,11 @@ async function legacySearch(req, res) {
     return res.json(data);
   } catch (e) {
     if (e && e.status === 403) {
+      await saveErrorLog(req, e, 403, "LEGACY_SEARCH_ERROR");
       return res.status(403).json({ message: 'Forbidden from Modash', details: e.response || undefined });
     }
+
+    await saveErrorLog(req, e, 500, "LEGACY_SEARCH_ERROR");
 
     return res.status(500).json({ message: (e && e.message) || 'Modash error' });
   }
@@ -4316,6 +4337,7 @@ async function getSavedInfluencers(req, res) {
     });
   } catch (err) {
     console.error('[getSavedInfluencers] Error:', err);
+    await saveErrorLog(req, err, 500, "GET_SAVED_INFLUENCERS_ERROR");
     return res.status(500).json({ error: 'Internal error' });
   }
 }
@@ -4426,6 +4448,7 @@ async function getRandomInfluencers(req, res) {
     return res.json({ count: results.length, results });
   } catch (err) {
     console.error('[getRandomInfluencers] Error:', err);
+    await saveErrorLog(req, err, 500, "GET_RANDOM_INFLUENCERS_ERROR");
     return res.status(500).json({ error: 'Internal error' });
   }
 }
@@ -4632,6 +4655,7 @@ async function exportSavedInfluencersCsv(req, res) {
     return res.status(200).send(csv);
   } catch (err) {
     console.error('[exportSavedInfluencersCsv] Error:', err);
+    await saveErrorLog(req, err, 500, "EXPORT_SAVED_INFLUENCERS_CSV_ERROR");
     return res.status(500).json({ error: err?.message || 'Failed to export CSV' });
   }
 }
@@ -4706,6 +4730,7 @@ async function getMediaKitLink(req, res) {
     });
   } catch (err) {
     console.error('[getMediaKitLink] Error:', err);
+    await saveErrorLog(req, err, 500, "GET_MEDIA_KIT_LINK_ERROR");
     return res.status(500).json({ error: err?.message || 'Failed to generate media kit link' });
   }
 }
@@ -4777,6 +4802,7 @@ async function upsertCreator(req, res) {
     });
   } catch (error) {
     console.error("upsertCreator error:", error);
+    await saveErrorLog(req, error, 500, "UPSERT_CREATOR_ERROR");
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,
@@ -4810,6 +4836,7 @@ async function getCreatorByUserId(req, res) {
     });
   } catch (error) {
     console.error("getCreatorByUserId error:", error);
+    await saveErrorLog(req, error, 500, "GET_CREATOR_BY_USER_ID_ERROR");
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,
@@ -5364,6 +5391,7 @@ async function getRecommendedInfluencersForCampaign(req, res) {
     });
   } catch (err) {
     console.error('getRecommendedInfluencersForCampaign error:', err);
+    await saveErrorLog(req, err, err.status || 500, "GET_RECOMMENDED_INFLUENCERS_FOR_CAMPAIGN_ERROR");
     return res.status(err.status || 500).json({
       status: 'error',
       message: err.message || 'Failed to recommend influencers',
@@ -6176,6 +6204,8 @@ async function getSuggestedRateCard(req, res) {
     });
   } catch (err) {
     console.error('[getSuggestedRateCard] Error:', err);
+
+    await saveErrorLog(req, err, err.status || 500, "GET_SUGGESTED_RATE_CARD_ERROR");
 
     return res.status(err.status || 500).json({
       status: 'error',

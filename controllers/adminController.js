@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
+const saveErrorLog = require("../services/errorLog.service");
 
 const { AdminModel, ROLES } = require("../models/master");
 const Brand = require("../models/brand");
@@ -1244,6 +1245,7 @@ exports.adminAssignBrandPlan = async (req, res) => {
     });
   } catch (error) {
     console.error("adminAssignBrandPlan error:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_ASSIGN_BRAND_PLAN_ERROR");
     return res.status(500).json({
       message: "Internal server error",
     });
@@ -1348,6 +1350,7 @@ exports.adminAssignInfluencerPlan = async (req, res) => {
     });
   } catch (error) {
     console.error("adminAssignInfluencerPlan error:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_ASSIGN_INFLUENCER_PLAN_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -1417,6 +1420,7 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     console.error("Login error:", error);
+    await saveErrorLog(req, error, 500, "LOGIN_ERROR");
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -1677,6 +1681,7 @@ exports.getAllBrands = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getAllBrands:", error);
+    await saveErrorLog(req, error, 500, "GET_ALL_BRANDS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -1722,6 +1727,7 @@ exports.getList = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching influencers:", error);
+    await saveErrorLog(req, error, 500, "GET_LIST_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -1773,6 +1779,7 @@ exports.getAllCampaigns = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getAllCampaigns:", error);
+    await saveErrorLog(req, error, 500, "GET_ALL_CAMPAIGNS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -1829,6 +1836,7 @@ exports.getBrandById = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getBrandById:", error);
+    await saveErrorLog(req, error, 500, "GET_BRAND_BY_ID_ERROR");
 
     return res.status(500).json({
       message: "Internal server error while fetching brand.",
@@ -1872,6 +1880,7 @@ exports.getByInfluencerId = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching influencer & Modash by ID:", error);
+    await saveErrorLog(req, error, 500, "GET_BY_INFLUENCER_ID_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2035,6 +2044,7 @@ exports.getCampaignById = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getCampaignById:", error);
+    await saveErrorLog(req, error, 500, "GET_CAMPAIGN_BY_ID_ERROR");
     return res.status(500).json({
       message: "Internal server error while fetching campaign.",
       error: error.message,
@@ -2119,6 +2129,7 @@ exports.getCampaignsByBrandId = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getCampaignsByBrandId:", error);
+    await saveErrorLog(req, error, 500, "GET_CAMPAIGNS_BY_BRAND_ID_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2146,6 +2157,7 @@ exports.adminGetInfluencerById = async (req, res) => {
     return res.status(200).json({ influencer });
   } catch (error) {
     console.error("Error in adminGetInfluencerById:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_GET_INFLUENCER_BY_ID_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2390,6 +2402,7 @@ exports.adminGetInfluencerList = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in adminGetInfluencerList:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_GET_INFLUENCER_LIST_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2501,6 +2514,7 @@ exports.adminAddYouTubeEmail = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in adminAddYouTubeEmail:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_ADD_YOU_TUBE_EMAIL_ERROR");
     return res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
@@ -2572,6 +2586,7 @@ exports.listMissingEmail = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in listMissingEmail:", error);
+    await saveErrorLog(req, error, 500, "LIST_MISSING_EMAIL_ERROR");
     return res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
@@ -2668,6 +2683,7 @@ exports.updateMissingEmail = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in updateMissingEmail:", error);
+    await saveErrorLog(req, error, 500, "UPDATE_MISSING_EMAIL_ERROR");
     return res.status(500).json({ status: "error", message: "Internal server error" });
   }
 };
@@ -2709,6 +2725,7 @@ exports.checkMissingEmailByHandle = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in checkMissingEmailByHandle:", error);
+    await saveErrorLog(req, error, 500, "CHECK_MISSING_EMAIL_BY_HANDLE_ERROR");
     return res.status(500).json({
       status: 0,
       message: "Internal server error while checking missing email.",
@@ -2828,6 +2845,7 @@ exports.getAllPayments = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getAllPayments:", error);
+    await saveErrorLog(req, error, 500, "GET_ALL_PAYMENTS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2887,6 +2905,7 @@ exports.getAllCampaignsLite = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getAllCampaignsLite:", error);
+    await saveErrorLog(req, error, 500, "GET_ALL_CAMPAIGNS_LITE_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2949,6 +2968,7 @@ exports.getFullyManagedCampaignsLite = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getFullyManagedCampaignsLite:", error);
+    await saveErrorLog(req, error, 500, "GET_FULLY_MANAGED_CAMPAIGNS_LITE_ERROR");
     return res.status(500).json({
       success: false,
       message: error?.message || "Internal server error",
@@ -2977,6 +2997,7 @@ exports.fullyManagedBrandList = async (req, res) => {
     });
   } catch (error) {
     console.error("fullyManagedBrandList error:", error);
+    await saveErrorLog(req, error, 500, "FULLY_MANAGED_BRAND_LIST_ERROR");
     return res.status(500).json({
       success: false,
       message: error?.message || "Internal error",
@@ -3135,6 +3156,7 @@ exports.assignBrand = async (req, res) => {
     });
   } catch (error) {
     console.error("assignBrand error:", error);
+    await saveErrorLog(req, error, 500, "ASSIGN_BRAND_ERROR");
     return res.status(500).json({
       success: false,
       message: error?.message || "Internal error",
@@ -3570,6 +3592,7 @@ exports.getCampaignsByInfluencerId = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getCampaignsByInfluencerId:", error);
+    await saveErrorLog(req, error, 500, "GET_CAMPAIGNS_BY_INFLUENCER_ID_ERROR");
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,
@@ -3636,6 +3659,7 @@ exports.enableCampaignShare = async (req, res) => {
     });
   } catch (err) {
     console.error("enableCampaignShare error:", err);
+    await saveErrorLog(req, err, 500, "ENABLE_CAMPAIGN_SHARE_ERROR");
     return res.status(500).json({
       message: "Internal server error",
       error: err.message,
@@ -3682,6 +3706,7 @@ exports.disableCampaignShare = async (req, res) => {
     });
   } catch (err) {
     console.error("disableCampaignShare error:", err);
+    await saveErrorLog(req, err, 500, "DISABLE_CAMPAIGN_SHARE_ERROR");
     return res.status(500).json({
       message: "Internal server error",
       error: err.message,
@@ -3737,6 +3762,7 @@ exports.getPublicCampaignByToken = async (req, res) => {
     });
   } catch (err) {
     console.error("getPublicCampaignByToken error:", err);
+    await saveErrorLog(req, err, 500, "GET_PUBLIC_CAMPAIGN_BY_TOKEN_ERROR");
     return res.status(500).json({
       message: "Internal server error",
       error: err.message,
@@ -3872,6 +3898,7 @@ exports.adminAddCampaignFunds = async (req, res) => {
     });
   } catch (error) {
     console.error("adminAddCampaignFunds error:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_ADD_CAMPAIGN_FUNDS_ERROR");
     return res.status(500).json({
       success: false,
       message: error?.message || "Internal server error",
@@ -4241,6 +4268,7 @@ exports.adminCreateBrand = async (req, res) => {
     });
   } catch (error) {
     console.error("adminCreateBrand error:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_CREATE_BRAND_ERROR");
 
     if (error?.code === 11000) {
       return res.status(409).json({
@@ -4523,6 +4551,7 @@ exports.adminCreateInfluencer = async (req, res) => {
     });
   } catch (error) {
     console.error("adminCreateInfluencer error:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_CREATE_INFLUENCER_ERROR");
 
     if (error?.code === 11000) {
       return res.status(409).json({
@@ -4634,6 +4663,7 @@ exports.getBrandAssignedPlanHistoryList = async (req, res) => {
     });
   } catch (error) {
     console.error("getBrandAssignedPlanHistoryList error:", error);
+    await saveErrorLog(req, error, 500, "GET_BRAND_ASSIGNED_PLAN_HISTORY_LIST_ERROR");
 
     return res.status(500).json({
       success: false,
@@ -4848,6 +4878,7 @@ exports.adminEditCampaign = async (req, res) => {
     });
   } catch (error) {
     console.error("adminEditCampaign error:", error);
+    await saveErrorLog(req, error, 500, "ADMIN_EDIT_CAMPAIGN_ERROR");
 
     return res.status(500).json({
       success: false,
