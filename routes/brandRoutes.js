@@ -40,6 +40,7 @@ const {
   updateBrandSettingProfile,
   updateBrandSettingProfilePhoto,
   updateBrandSettingPassword,
+  googleAuthBrand,
 } = require("../controllers/brandController");
 
 const { brandAuth } = require("../auth/brandAuth");
@@ -57,6 +58,7 @@ router.post("/send-otp-signup", sendSignupOtp);
 router.post("/verify-otp-signup", verifyOtpSignUp);
 router.post("/save-brand-onboarding", brandAuth, saveBrandOnboarding);
 router.post("/signin", signInBrand);
+router.post("/google-auth", googleAuthBrand);
 router.post("/send-otp-forgot", sendOtpForgotBrand);
 router.post("/verify-otp-forgot", verifyOtpForgotBrand);
 router.post("/update-password", updatePasswordBrand);
