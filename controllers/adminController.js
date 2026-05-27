@@ -1527,13 +1527,21 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
 }
 
 exports.getAllBrands = async (req, res) => {
+  const totalStart = Date.now();
+
   try {
+    const t1 = Date.now();
+
     const page = parsePositiveInt(req.body?.page, 1);
-    const limit = parsePositiveInt(req.body?.limit, 10);
+    const limit = Math.min(parsePositiveInt(req.body?.limit, 10), 100);
+    const skip = (page - 1) * limit;
+
     const search = String(req.body?.search || "").trim();
     const sortBy = String(req.body?.sortBy || "createdAt").trim();
     const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
     const dir = sortOrder === "asc" ? 1 : -1;
+
+    console.log("1 parse:", Date.now() - t1, "ms");
 
     const actor = req.admin || {};
     const actorRole = String(actor?.role || "").trim().toLowerCase();
@@ -1541,23 +1549,9 @@ exports.getAllBrands = async (req, res) => {
 
     const brandQuery = {};
 
-    // Brands page rule:
-    // Super Admin -> all brands
-    // Revenue Head -> all brands
-    // BME -> only brands assigned to this BME
-    if (actorRole === ROLES.BME) {
-      if (!actorId) {
-        return res.status(200).json({
-          page,
-          limit,
-          total: 0,
-          totalPages: 1,
-          sortBy,
-          sortOrder,
-          brands: [],
-        });
-      }
+    const t2 = Date.now();
 
+    if (actorRole === ROLES.BME) {
       const bmeFilters = [{ bdmId: actorId }];
 
       if (isObjectId(actorId)) {
@@ -1591,84 +1585,97 @@ exports.getAllBrands = async (req, res) => {
       brandQuery._id = { $in: assignedBrandIds };
     }
 
-    const rawBrands = await Brand.find(brandQuery)
-      .select("-password -__v -profilePic")
-      .lean();
+    console.log("2 BME assignment filter:", Date.now() - t2, "ms");
 
-    const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
-    const adminMap = await getAdminMapByIds(
-      enrichedBrands
-        .filter((brand) => brand?.isAdminCreated === true)
-        .map((brand) => brand?.createdByAdmin)
-    );
+    const t3 = Date.now();
 
-    const displayBrands = enrichedBrands.map((brand) => ({
-      ...brand,
-      ...buildCreatorPayload(brand, adminMap, "Brand"),
-      ...buildSignupCurrentStatus(brand),
-    }));
+    if (search) {
+      const re = safeRegex(search);
 
-    const re = safeRegex(search);
+      if (re) {
+        brandQuery.$or = [
+          { name: re },
+          { brandName: re },
+          { email: re },
+          { phone: re },
+          { callingcode: re },
+          { companySize: re },
+          { industry: re },
+          { planName: re },
+          { status: re },
+          { region: re },
+          { preferredLanguage: re },
+          { currencyFormat: re },
+        ];
+      }
+    }
 
-    const filtered = re
-      ? displayBrands.filter((brand) =>
-        [
-          brand.name,
-          brand.brandName,
-          brand.email,
-          brand.phone,
-          brand.callingcode,
-          brand.companySize,
-          brand.industry,
-          brand.planName,
-          brand.status,
-          brand.assignedRh,
-          brand.assignedRm,
-          brand.assignedBme,
-          brand.assignedBm,
-          brand.assignedIme,
-          brand.assignedIm,
-          brand.createdByLabel,
-          brand.createdByAdminName,
-          brand.createdByAdminEmail,
-          brand.adminCreatedRole,
-          brand.createdByRoleLabel,
-          brand.currentStatus,
-          brand.currentStatusLabel,
-          brand.currentStatusSubLabel,
-        ].some((value) => re.test(String(value || "")))
-      )
-      : displayBrands;
+    console.log("3 search build:", Date.now() - t3, "ms");
 
-    const allowedSortFields = new Set([
+    const allowedDbSortFields = new Set([
       "name",
+      "brandName",
       "email",
       "phone",
       "planName",
       "createdAt",
       "expiresAt",
       "status",
-      "createdBy",
-      "currentStatus",
-      "assignedRh",
-      "assignedRm",
-      "assignedBme",
-      "assignedBm",
-      "assignedIme",
-      "assignedIm",
+      "companySize",
+      "industry",
     ]);
 
-    const field = allowedSortFields.has(sortBy) ? sortBy : "createdAt";
+    const field = allowedDbSortFields.has(sortBy) ? sortBy : "createdAt";
 
-    const sorted = [...filtered].sort((a, b) => {
-      const primary = compareBrandRows(a, b, field, dir);
-      if (primary !== 0) return primary;
-      return compareBrandRows(a, b, "createdAt", -1);
-    });
+    const sortQuery =
+      field === "createdAt"
+        ? { createdAt: dir, _id: -1 }
+        : { [field]: dir, createdAt: -1, _id: -1 };
 
-    const total = sorted.length;
+    const t4 = Date.now();
+
+    const [rawBrands, total] = await Promise.all([
+      Brand.find(brandQuery)
+        .select("-password -__v -profilePic")
+        .sort(sortQuery)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Brand.countDocuments(brandQuery),
+    ]);
+
+    console.log("4 Brand find + count:", Date.now() - t4, "ms");
+
+    const t5 = Date.now();
+
+    const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
+
+    console.log("5 enrichBrandsWithAssignments:", Date.now() - t5, "ms");
+
+    const t6 = Date.now();
+
+    const adminMap = await getAdminMapByIds(
+      enrichedBrands
+        .filter((brand) => brand?.isAdminCreated === true)
+        .map((brand) => brand?.createdByAdmin)
+    );
+
+    console.log("6 getAdminMapByIds:", Date.now() - t6, "ms");
+
+    const t7 = Date.now();
+
+    const brands = enrichedBrands.map((brand) => ({
+      ...brand,
+      ...buildCreatorPayload(brand, adminMap, "Brand"),
+      ...buildSignupCurrentStatus(brand),
+    }));
+
+    console.log("7 final map:", Date.now() - t7, "ms");
+
     const totalPages = Math.max(1, Math.ceil(total / limit));
-    const brands = sorted.slice((page - 1) * limit, page * limit);
+
+    console.log("TOTAL getAllBrands:", Date.now() - totalStart, "ms");
 
     return res.status(200).json({
       page,
