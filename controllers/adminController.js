@@ -800,40 +800,61 @@ async function getScopedCampaignAccessForAdmin(actor = {}) {
   };
 }
 
-async function enrichBrandsWithAssignments(brandDocs = []) {
-  if (!Array.isArray(brandDocs) || brandDocs.length === 0) return [];
+async function enrichBrandsWithAssignments(brandDocs = [], logId = "getAllBrands") {
+  const enrichStart = Date.now();
+
+  if (!Array.isArray(brandDocs) || brandDocs.length === 0) {
+    console.log(`[${logId}] 5 enrichBrandsWithAssignments: 0ms | no brands`);
+    return [];
+  }
 
   const brandIds = brandDocs
     .map((brand) => brand?._id)
     .filter((id) => isObjectId(id))
     .map((id) => toObjectId(id));
 
-  if (!brandIds.length) return brandDocs;
+  if (!brandIds.length) {
+    console.log(`[${logId}] 5 enrichBrandsWithAssignments: ${Date.now() - enrichStart}ms | no valid brandIds`);
+    return brandDocs;
+  }
 
-  const activeAssignments = await BrandAssigned.find({
+  const assignmentStart = Date.now();
+
+  const assignments = await BrandAssigned.find({
     brandId: { $in: brandIds },
-    status: "active",
   })
+    .select("_id brandId status RHId bdmId idmId sdrId updatedAt createdAt")
     .sort({ updatedAt: -1, createdAt: -1 })
     .lean();
 
-  const assignmentMap = new Map();
-  for (const assignment of activeAssignments) {
+  console.log(
+    `[${logId}] 5.1 BrandAssigned query: ${Date.now() - assignmentStart}ms | assignments=${assignments.length}`
+  );
+
+  const latestActiveMap = new Map();
+  const latestAnyMap = new Map();
+
+  for (const assignment of assignments) {
     const key = String(assignment.brandId);
-    if (!assignmentMap.has(key)) assignmentMap.set(key, assignment);
+    const status = String(assignment.status || "").toLowerCase();
+
+    if (!latestAnyMap.has(key)) {
+      latestAnyMap.set(key, assignment);
+    }
+
+    if (status === "active" && !latestActiveMap.has(key)) {
+      latestActiveMap.set(key, assignment);
+    }
   }
 
-  const missingIds = brandIds.filter((id) => !assignmentMap.has(String(id)));
-  if (missingIds.length) {
-    const fallbacks = await BrandAssigned.find({
-      brandId: { $in: missingIds },
-    })
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .lean();
+  const assignmentMap = new Map();
 
-    for (const assignment of fallbacks) {
-      const key = String(assignment.brandId);
-      if (!assignmentMap.has(key)) assignmentMap.set(key, assignment);
+  for (const brandId of brandIds) {
+    const key = String(brandId);
+    const assignment = latestActiveMap.get(key) || latestAnyMap.get(key);
+
+    if (assignment) {
+      assignmentMap.set(key, assignment);
     }
   }
 
@@ -851,28 +872,50 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
     .filter((id) => isObjectId(id))
     .map((id) => toObjectId(id));
 
+  const assigneeStart = Date.now();
+
   const assignees = uniqueAssigneeIds.length
     ? await ASSIGNEE_MODEL.find({ _id: { $in: uniqueAssigneeIds } })
-      .select("_id name email")
-      .lean()
+        .select("_id name email")
+        .lean()
     : [];
 
+  console.log(
+    `[${logId}] 5.2 ASSIGNEE_MODEL query: ${Date.now() - assigneeStart}ms | assignees=${assignees.length}`
+  );
+
   const assigneeMap = {};
+
   assignees.forEach((assignee) => {
     assigneeMap[String(assignee._id)] = assignee.name || assignee.email || "";
   });
 
-  return brandDocs.map((brand) => {
+  const result = brandDocs.map((brand) => {
     const assignment = assignmentMap.get(String(brand._id));
     const subscription = brand.subscription || {};
-    const expiresAt = subscription.expiresAt || null;
-    const subscriptionExpired = Boolean(brand.subscriptionExpired) || isExpiredDate(expiresAt);
-    const status = subscription.status || (subscriptionExpired ? "expired" : "active");
 
-    const assignedRh = assignment?.RHId ? assigneeMap[String(assignment.RHId)] || "" : "";
-    const assignedBme = assignment?.bdmId ? assigneeMap[String(assignment.bdmId)] || "" : "";
-    const assignedIme = assignment?.idmId ? assigneeMap[String(assignment.idmId)] || "" : "";
-    const assignedSdr = assignment?.sdrId ? assigneeMap[String(assignment.sdrId)] || "" : "";
+    const expiresAt = subscription.expiresAt || null;
+    const subscriptionExpired =
+      Boolean(brand.subscriptionExpired) || isExpiredDate(expiresAt);
+
+    const status =
+      subscription.status || (subscriptionExpired ? "expired" : "active");
+
+    const assignedRh = assignment?.RHId
+      ? assigneeMap[String(assignment.RHId)] || ""
+      : "";
+
+    const assignedBme = assignment?.bdmId
+      ? assigneeMap[String(assignment.bdmId)] || ""
+      : "";
+
+    const assignedIme = assignment?.idmId
+      ? assigneeMap[String(assignment.idmId)] || ""
+      : "";
+
+    const assignedSdr = assignment?.sdrId
+      ? assigneeMap[String(assignment.sdrId)] || ""
+      : "";
 
     return {
       ...brand,
@@ -880,22 +923,33 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
       expiresAt,
       status,
       subscriptionExpired,
+
       assignedRh,
       assignedBme,
       assignedIme,
       assignedSdr,
+
       assignedRm: assignedRh,
       assignedBm: assignedBme,
       assignedIm: assignedIme,
+
       fullyManagedSubscription: isFullyManagedBrandDoc(brand),
+
       assignmentId: assignment?._id || null,
       assignmentStatus: assignment?.status || null,
+
       RHId: assignment?.RHId || null,
       bdmId: assignment?.bdmId || null,
       idmId: assignment?.idmId || null,
       sdrId: assignment?.sdrId || null,
     };
   });
+
+  console.log(
+    `[${logId}] 5 enrichBrandsWithAssignments total: ${Date.now() - enrichStart}ms | brands=${brandDocs.length}`
+  );
+
+  return result;
 }
 
 async function getScopedCampaignBrandKeysForAdmin(actor = {}) {
@@ -1527,10 +1581,16 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
 }
 
 exports.getAllBrands = async (req, res) => {
+  const logId = `getAllBrands-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+
   const totalStart = Date.now();
 
   try {
-    const t1 = Date.now();
+    console.log(`[${logId}] START`);
+
+    const parseStart = Date.now();
 
     const page = parsePositiveInt(req.body?.page, 1);
     const limit = Math.min(parsePositiveInt(req.body?.limit, 10), 100);
@@ -1541,7 +1601,7 @@ exports.getAllBrands = async (req, res) => {
     const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
     const dir = sortOrder === "asc" ? 1 : -1;
 
-    console.log("1 parse:", Date.now() - t1, "ms");
+    console.log(`[${logId}] 1 parse: ${Date.now() - parseStart}ms`);
 
     const actor = req.admin || {};
     const actorRole = String(actor?.role || "").trim().toLowerCase();
@@ -1549,14 +1609,31 @@ exports.getAllBrands = async (req, res) => {
 
     const brandQuery = {};
 
-    const t2 = Date.now();
+    const bmeStart = Date.now();
 
     if (actorRole === ROLES.BME) {
+      if (!actorId) {
+        console.log(`[${logId}] 2 BME assignment filter: ${Date.now() - bmeStart}ms | no actorId`);
+        console.log(`[${logId}] TOTAL getAllBrands: ${Date.now() - totalStart}ms`);
+
+        return res.status(200).json({
+          page,
+          limit,
+          total: 0,
+          totalPages: 1,
+          sortBy,
+          sortOrder,
+          brands: [],
+        });
+      }
+
       const bmeFilters = [{ bdmId: actorId }];
 
       if (isObjectId(actorId)) {
         bmeFilters.push({ bdmId: toObjectId(actorId) });
       }
+
+      const bmeQueryStart = Date.now();
 
       const assignments = await BrandAssigned.find({
         status: "active",
@@ -1565,12 +1642,19 @@ exports.getAllBrands = async (req, res) => {
         .select("brandId")
         .lean();
 
+      console.log(
+        `[${logId}] 2.1 BME BrandAssigned query: ${Date.now() - bmeQueryStart}ms | assignments=${assignments.length}`
+      );
+
       const assignedBrandIds = assignments
         .map((item) => String(item.brandId || ""))
         .filter((id) => isObjectId(id))
         .map((id) => toObjectId(id));
 
       if (!assignedBrandIds.length) {
+        console.log(`[${logId}] 2 BME assignment filter: ${Date.now() - bmeStart}ms | no assigned brands`);
+        console.log(`[${logId}] TOTAL getAllBrands: ${Date.now() - totalStart}ms`);
+
         return res.status(200).json({
           page,
           limit,
@@ -1585,9 +1669,9 @@ exports.getAllBrands = async (req, res) => {
       brandQuery._id = { $in: assignedBrandIds };
     }
 
-    console.log("2 BME assignment filter:", Date.now() - t2, "ms");
+    console.log(`[${logId}] 2 BME assignment filter: ${Date.now() - bmeStart}ms`);
 
-    const t3 = Date.now();
+    const searchStart = Date.now();
 
     if (search) {
       const re = safeRegex(search);
@@ -1610,7 +1694,7 @@ exports.getAllBrands = async (req, res) => {
       }
     }
 
-    console.log("3 search build:", Date.now() - t3, "ms");
+    console.log(`[${logId}] 3 search build: ${Date.now() - searchStart}ms | search="${search}"`);
 
     const allowedDbSortFields = new Set([
       "name",
@@ -1632,38 +1716,69 @@ exports.getAllBrands = async (req, res) => {
         ? { createdAt: dir, _id: -1 }
         : { [field]: dir, createdAt: -1, _id: -1 };
 
-    const t4 = Date.now();
+    const aggregateStart = Date.now();
 
-    const [rawBrands, total] = await Promise.all([
-      Brand.find(brandQuery)
-        .select("-password -__v -profilePic")
-        .sort(sortQuery)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-
-      Brand.countDocuments(brandQuery),
+    const aggregateResult = await Brand.aggregate([
+      {
+        $match: brandQuery,
+      },
+      {
+        $facet: {
+          brands: [
+            {
+              $sort: sortQuery,
+            },
+            {
+              $skip: skip,
+            },
+            {
+              $limit: limit,
+            },
+            {
+              $project: {
+                password: 0,
+                __v: 0,
+                profilePic: 0,
+              },
+            },
+          ],
+          total: [
+            {
+              $count: "count",
+            },
+          ],
+        },
+      },
     ]);
 
-    console.log("4 Brand find + count:", Date.now() - t4, "ms");
+    const rawBrands = aggregateResult?.[0]?.brands || [];
+    const total = aggregateResult?.[0]?.total?.[0]?.count || 0;
 
-    const t5 = Date.now();
-
-    const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
-
-    console.log("5 enrichBrandsWithAssignments:", Date.now() - t5, "ms");
-
-    const t6 = Date.now();
-
-    const adminMap = await getAdminMapByIds(
-      enrichedBrands
-        .filter((brand) => brand?.isAdminCreated === true)
-        .map((brand) => brand?.createdByAdmin)
+    console.log(
+      `[${logId}] 4 Brand aggregate: ${Date.now() - aggregateStart}ms | rawBrands=${rawBrands.length} | total=${total}`
     );
 
-    console.log("6 getAdminMapByIds:", Date.now() - t6, "ms");
+    const creatorAdminIds = rawBrands
+      .filter((brand) => brand?.isAdminCreated === true)
+      .map((brand) => brand?.createdByAdmin);
 
-    const t7 = Date.now();
+    const enrichStart = Date.now();
+
+    const enrichedBrandsPromise = enrichBrandsWithAssignments(rawBrands, logId);
+
+    const adminStart = Date.now();
+
+    const adminMapPromise = getAdminMapByIds(creatorAdminIds);
+
+    const [enrichedBrands, adminMap] = await Promise.all([
+      enrichedBrandsPromise,
+      adminMapPromise,
+    ]);
+
+    console.log(`[${logId}] 5 + 6 enrich/admin parallel wait: ${Date.now() - enrichStart}ms`);
+    console.log(`[${logId}] 6 getAdminMapByIds approx: ${Date.now() - adminStart}ms | ids=${creatorAdminIds.length}`);
+
+    const mapStart = Date.now();
 
     const brands = enrichedBrands.map((brand) => ({
       ...brand,
@@ -1671,11 +1786,11 @@ exports.getAllBrands = async (req, res) => {
       ...buildSignupCurrentStatus(brand),
     }));
 
-    console.log("7 final map:", Date.now() - t7, "ms");
+    console.log(`[${logId}] 7 final map: ${Date.now() - mapStart}ms`);
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
-    console.log("TOTAL getAllBrands:", Date.now() - totalStart, "ms");
+    console.log(`[${logId}] TOTAL getAllBrands: ${Date.now() - totalStart}ms`);
 
     return res.status(200).json({
       page,
@@ -1687,7 +1802,7 @@ exports.getAllBrands = async (req, res) => {
       brands,
     });
   } catch (error) {
-    console.error("Error in getAllBrands:", error);
+    console.error(`[${logId}] Error in getAllBrands:`, error);
     await saveErrorLog(req, error, 500, "GET_ALL_BRANDS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }
