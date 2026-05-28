@@ -1993,46 +1993,46 @@ exports.prefillCampaignWithAI = async (req, res) => {
 
     const imgs = toUnknownArray(req.body.productImages);
 
-if (!imgs.length) {
-  return failField(
-    res,
-    HttpStatus.BAD_REQUEST,
-    "VALIDATION_ERROR",
-    "productImages",
-    requestId
-  );
-}
-
-const uploadedProductImages = imgs
-  .map((img) => {
-    if (typeof img === "string") return clean(img);
-
-    if (img && typeof img === "object") {
-      return clean(
-        img.url ||
-        img.imageUrl ||
-        img.s3Url ||
-        img.s3Link ||
-        img.location ||
-        img.Location ||
-        img.secure_url ||
-        img.src ||
-        img.path ||
-        ""
+    if (!imgs.length) {
+      return failField(
+        res,
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "productImages",
+        requestId
       );
     }
 
-    return "";
-  })
-  .filter(Boolean);
+    const uploadedProductImages = imgs
+      .map((img) => {
+        if (typeof img === "string") return clean(img);
+
+        if (img && typeof img === "object") {
+          return clean(
+            img.url ||
+            img.imageUrl ||
+            img.s3Url ||
+            img.s3Link ||
+            img.location ||
+            img.Location ||
+            img.secure_url ||
+            img.src ||
+            img.path ||
+            ""
+          );
+        }
+
+        return "";
+      })
+      .filter(Boolean);
 
 
 
 
-  
+
 
     const productLink = clean(req.body.productLink);
-    
+
 
     const videoLink = clean(req.body.videoLink);
     if (videoLink && !isValidHttpUrl(videoLink)) {
@@ -3093,47 +3093,241 @@ exports.getCampaignsByInfluencer = async (req, res) => {
 
 exports.getApprovedCampaignsByInfluencer = async (req, res) => {
   const { influencerId, search, page = 1, limit = 10 } = req.body;
-  if (!influencerId) return res.status(400).json({ message: 'influencerId required' });
+
+  if (!influencerId) {
+    return res.status(400).json({ message: "influencerId required" });
+  }
+
   try {
-    const contracts = await Contract.find({ influencerId, isAssigned: 1 }, 'campaignId contractId isAccepted feeAmount status milestonesCreatedAt').lean();
-    let campaignIds = contracts.map((c) => toStr(c.campaignId));
-    if (!campaignIds.length) return res.json({ meta: { total: 0, page: +page, limit: +limit, totalPages: 0 }, campaigns: [] });
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.max(1, parseInt(limit, 10) || 10);
+    const skip = (safePage - 1) * safeLimit;
 
-    const applyRecs = await ApplyCampaign.find({ campaignId: { $in: campaignIds }, 'applicants.influencerId': influencerId }, 'campaignId').lean();
-    const appliedIds = new Set(applyRecs.map((r) => toStr(r.campaignId)));
-    campaignIds = campaignIds.filter((id) => appliedIds.has(id));
-    if (!campaignIds.length) return res.json({ meta: { total: 0, page: +page, limit: +limit, totalPages: 0 }, campaigns: [] });
+    const influencerIdString = String(influencerId || "").trim();
 
-    const milestoneIds = await milestoneSetForInfluencer(influencerId, campaignIds);
-    campaignIds = campaignIds.filter((id) => milestoneIds.has(id));
-    if (!campaignIds.length) return res.json({ meta: { total: 0, page: +page, limit: +limit, totalPages: 0 }, campaigns: [] });
+    const influencerLookup = mongoose.Types.ObjectId.isValid(influencerIdString)
+      ? {
+          $or: [
+            { _id: new mongoose.Types.ObjectId(influencerIdString) },
+            { influencerId: influencerIdString },
+          ],
+        }
+      : { influencerId: influencerIdString };
 
-    const contractIdMap = new Map(); const feeMap = new Map(); const acceptedMap = new Map(); const statusMap = new Map(); const milestonesCreatedAtMap = new Map();
-    contracts.forEach((c) => {
-      const cid = toStr(c.campaignId);
-      if (new Set(campaignIds).has(cid)) {
-        contractIdMap.set(cid, c.contractId); feeMap.set(cid, Number(c.feeAmount || 0));
-        acceptedMap.set(cid, c.isAccepted === 1 ? 1 : 0); statusMap.set(cid, c.status || null);
-        milestonesCreatedAtMap.set(cid, c.milestonesCreatedAt || null);
+    const influencer = await Influencer.findOne(
+      influencerLookup,
+      "_id influencerId name email"
+    ).lean();
+
+    if (!influencer) {
+      return res.status(404).json({ message: "Influencer not found" });
+    }
+
+    const internalInfluencerId = String(influencer._id);
+    const publicInfluencerId = String(influencer.influencerId || influencer._id);
+
+    const possibleInfluencerIds = [
+      influencerIdString,
+      internalInfluencerId,
+      publicInfluencerId,
+    ].filter(Boolean);
+
+    const possibleInfluencerObjectIds = possibleInfluencerIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const contracts = await Contract.find(
+      {
+        $and: [
+          {
+            $or: [
+              { influencerId: { $in: possibleInfluencerIds } },
+              { influencerId: { $in: possibleInfluencerObjectIds } },
+              { "influencer._id": { $in: possibleInfluencerObjectIds } },
+              { "influencer.influencerId": { $in: possibleInfluencerIds } },
+            ],
+          },
+          {
+            isRejected: { $ne: 1 },
+          },
+          {
+            status: {
+              $nin: [CONTRACT_STATUS.REJECTED, CONTRACT_STATUS.SUPERSEDED],
+            },
+          },
+          {
+            $or: [
+              { isAssigned: 1 },
+              { isAccepted: 1 },
+              {
+                status: {
+                  $in: [
+                    CONTRACT_STATUS.BRAND_ACCEPTED,
+                    CONTRACT_STATUS.INFLUENCER_ACCEPTED,
+                    CONTRACT_STATUS.READY_TO_SIGN,
+                    CONTRACT_STATUS.CONTRACT_SIGNED,
+                    CONTRACT_STATUS.MILESTONES_CREATED,
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            $or: [
+              { supersededBy: { $exists: false } },
+              { supersededBy: null },
+              { supersededBy: "" },
+            ],
+          },
+        ],
+      },
+      "campaignId contractId isAccepted isAssigned feeAmount status milestonesCreatedAt lastActionAt createdAt"
+    )
+      .sort({ lastActionAt: -1, createdAt: -1 })
+      .lean();
+
+    if (!contracts.length) {
+      return res.status(200).json({
+        meta: {
+          total: 0,
+          page: safePage,
+          limit: safeLimit,
+          totalPages: 0,
+        },
+        campaigns: [],
+      });
+    }
+
+    const contractByCampaignId = new Map();
+
+    for (const contract of contracts) {
+      const campaignId = String(contract.campaignId || "").trim();
+
+      if (!campaignId) continue;
+
+      if (!contractByCampaignId.has(campaignId)) {
+        contractByCampaignId.set(campaignId, {
+          contractId: contract.contractId || String(contract._id || ""),
+          feeAmount: Number(contract.feeAmount || 0),
+          isAccepted: contract.isAccepted === 1 ? 1 : 0,
+          isAssigned: contract.isAssigned === 1 ? 1 : 0,
+          status: contract.status || null,
+          milestonesCreatedAt: contract.milestonesCreatedAt || null,
+        });
       }
-    });
+    }
 
-    const filter = { _id: { $in: toCampaignObjectIds(campaignIds) }, isActive: 1 };
-    if (search?.trim()) filter.$or = buildSearchOr(search.trim());
+    const campaignIds = Array.from(contractByCampaignId.keys());
 
-    const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
-    const [total, raw] = await Promise.all([
+    const campaignObjectIds = campaignIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const campaignIdFilter = {
+      $or: [
+        ...(campaignObjectIds.length
+          ? [{ _id: { $in: campaignObjectIds } }]
+          : []),
+        { campaignId: { $in: campaignIds } },
+      ],
+    };
+
+    const filter =
+      search && String(search).trim()
+        ? {
+            $and: [
+              campaignIdFilter,
+              { $or: buildSearchOr(String(search).trim()) },
+            ],
+          }
+        : campaignIdFilter;
+
+    const [total, rawCampaigns] = await Promise.all([
       Campaign.countDocuments(filter),
-      Campaign.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Math.max(1, parseInt(limit, 10))).lean()
+      Campaign.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
     ]);
 
-    return res.json({
-      meta: { total, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(total / Math.max(1, parseInt(limit, 10))) },
-      campaigns: raw.map((c) => ({ ...c, hasApplied: 1, isContracted: 1, isAccepted: acceptedMap.get(toStr(String(c._id))) || 0, hasMilestone: 1, contractId: contractIdMap.get(toStr(String(c._id))) || null, feeAmount: feeMap.get(toStr(String(c._id))) || 0, contractStatus: statusMap.get(toStr(String(c._id))) || null, milestonesCreatedAt: milestonesCreatedAtMap.get(toStr(String(c._id))) || null }))
+    let enrichedCampaigns = rawCampaigns;
+
+    try {
+      enrichedCampaigns = await enrichCampaigns(rawCampaigns);
+    } catch (enrichErr) {
+      console.warn(
+        "[getApprovedCampaignsByInfluencer] enrichCampaigns failed:",
+        enrichErr?.message || enrichErr
+      );
+    }
+
+    const milestoneIds = await milestoneSetForInfluencer(
+      publicInfluencerId,
+      campaignIds
+    );
+
+    const campaigns = enrichedCampaigns.map((campaign) => {
+      const campaignObjectId = String(campaign._id || "");
+      const campaignLegacyId = String(campaign.campaignId || "");
+
+      const details =
+        contractByCampaignId.get(campaignObjectId) ||
+        contractByCampaignId.get(campaignLegacyId) ||
+        {};
+
+      return {
+        ...campaign,
+
+        id: campaignObjectId || campaignLegacyId,
+        campaignId: campaignObjectId || campaignLegacyId,
+
+        hasApplied: 1,
+        hasApproved: details.isAssigned || 0,
+        isApproved: details.isAssigned || 0,
+        isContracted: 1,
+        isAccepted: details.isAccepted || 0,
+
+        hasMilestone:
+          milestoneIds.has(campaignObjectId) ||
+          milestoneIds.has(campaignLegacyId) ||
+          details.status === CONTRACT_STATUS.MILESTONES_CREATED
+            ? 1
+            : 0,
+
+        contractId: details.contractId || null,
+        feeAmount: details.feeAmount || 0,
+        contractStatus: details.status || null,
+        milestonesCreatedAt: details.milestonesCreatedAt || null,
+      };
+    });
+
+    return res.status(200).json({
+      meta: {
+        total,
+        page: safePage,
+        limit: safeLimit,
+        totalPages: Math.ceil(total / safeLimit),
+      },
+      influencer: {
+        _id: internalInfluencerId,
+        influencerId: publicInfluencerId,
+        name: influencer.name || "",
+        email: influencer.email || "",
+      },
+      campaigns,
     });
   } catch (err) {
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_APPROVED_CAMPAIGNS_BY_INFLUENCER_ERROR");
-    return res.status(500).json({ message: 'Internal server error' });
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GET_APPROVED_CAMPAIGNS_BY_INFLUENCER_ERROR"
+    );
+
+    console.error("getApprovedCampaignsByInfluencer error:", err);
+
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -3149,17 +3343,21 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
     const safeLimit = Math.max(1, parseInt(limit, 10) || 10);
     const skip = (safePage - 1) * safeLimit;
 
-    // ✅ support both Mongo _id and custom influencerId
-    const influencerLookup = mongoose.Types.ObjectId.isValid(String(influencerId))
-      ? {
-        $or: [
-          { _id: influencerId },
-          { influencerId: String(influencerId) }
-        ]
-      }
-      : { influencerId: String(influencerId) };
+    const influencerIdString = String(influencerId || "").trim();
 
-    const inf = await Influencer.findOne(influencerLookup, "_id influencerId").lean();
+    const influencerLookup = mongoose.Types.ObjectId.isValid(influencerIdString)
+      ? {
+          $or: [
+            { _id: new mongoose.Types.ObjectId(influencerIdString) },
+            { influencerId: influencerIdString },
+          ],
+        }
+      : { influencerId: influencerIdString };
+
+    const inf = await Influencer.findOne(
+      influencerLookup,
+      "_id influencerId name email"
+    ).lean();
 
     if (!inf) {
       return res.status(404).json({ message: "Influencer not found" });
@@ -3168,15 +3366,16 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
     const internalInfluencerId = String(inf._id);
     const publicInfluencerId = String(inf.influencerId || inf._id);
 
-    // ✅ fetch applied campaigns using either internal _id or public influencerId
     const applyRecs = await ApplyCampaign.find(
       {
         $or: [
           { "applicants.influencerId": internalInfluencerId },
-          { "applicants.influencerId": publicInfluencerId }
-        ]
+          { "applicants.influencerId": publicInfluencerId },
+          { "approved.influencerId": internalInfluencerId },
+          { "approved.influencerId": publicInfluencerId },
+        ],
       },
-      "campaignId"
+      "campaignId applicants approved createdAt updatedAt"
     ).lean();
 
     let campaignIds = [
@@ -3184,7 +3383,7 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
         applyRecs
           .map((r) => String(r.campaignId || "").trim())
           .filter(Boolean)
-      )
+      ),
     ];
 
     if (!campaignIds.length) {
@@ -3193,18 +3392,38 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
           total: 0,
           page: safePage,
           limit: safeLimit,
-          totalPages: 0
+          totalPages: 0,
         },
-        campaigns: []
+        influencer: {
+          _id: internalInfluencerId,
+          influencerId: publicInfluencerId,
+          name: inf.name || "",
+          email: inf.email || "",
+        },
+        campaigns: [],
       });
     }
 
-    // ✅ exclude contracted/accepted campaigns using either influencer id style
+    const campaignObjectIds = campaignIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
     const contracted = await Contract.find(
       {
         influencerId: { $in: [internalInfluencerId, publicInfluencerId] },
-        campaignId: { $in: campaignIds },
-        $or: [{ isAssigned: 1 }, { isAccepted: 1 }]
+        $and: [
+          {
+            $or: [
+              { campaignId: { $in: campaignIds } },
+              ...(campaignObjectIds.length
+                ? [{ campaignId: { $in: campaignObjectIds } }]
+                : []),
+            ],
+          },
+          {
+            $or: [{ isAssigned: 1 }, { isAccepted: 1 }],
+          },
+        ],
       },
       "campaignId"
     ).lean();
@@ -3213,7 +3432,7 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
       contracted.map((c) => String(c.campaignId || "").trim()).filter(Boolean)
     );
 
-    campaignIds = campaignIds.filter((id) => !excludedIds.has(id));
+    campaignIds = campaignIds.filter((id) => !excludedIds.has(String(id)));
 
     if (!campaignIds.length) {
       return res.status(200).json({
@@ -3221,59 +3440,222 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
           total: 0,
           page: safePage,
           limit: safeLimit,
-          totalPages: 0
+          totalPages: 0,
         },
-        campaigns: []
+        influencer: {
+          _id: internalInfluencerId,
+          influencerId: publicInfluencerId,
+          name: inf.name || "",
+          email: inf.email || "",
+        },
+        campaigns: [],
       });
     }
 
-    const campaignObjectIds = campaignIds.filter((id) =>
-      mongoose.Types.ObjectId.isValid(id)
-    );
+    const finalCampaignObjectIds = campaignIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
 
     const campaignIdFilter = {
       $or: [
         { campaignId: { $in: campaignIds } },
-        ...(campaignObjectIds.length ? [{ _id: { $in: campaignObjectIds } }] : [])
-      ]
+        ...(finalCampaignObjectIds.length
+          ? [{ _id: { $in: finalCampaignObjectIds } }]
+          : []),
+      ],
     };
 
     const filter =
       search && String(search).trim()
         ? {
-          $and: [campaignIdFilter, { $or: buildSearchOr(String(search).trim()) }]
-        }
+            $and: [
+              campaignIdFilter,
+              { $or: buildSearchOr(String(search).trim()) },
+            ],
+          }
         : campaignIdFilter;
 
     const [total, rawCampaigns] = await Promise.all([
       Campaign.countDocuments(filter),
-      Campaign.find(filter, "-description")
+      Campaign.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(safeLimit)
-        .lean()
+        .lean(),
     ]);
+
+    let enrichedCampaigns = rawCampaigns;
+
+    try {
+      enrichedCampaigns = await enrichCampaigns(rawCampaigns);
+    } catch (enrichErr) {
+      console.warn(
+        "[getAppliedCampaignsByInfluencer] enrichCampaigns failed:",
+        enrichErr?.message || enrichErr
+      );
+    }
+
+    const applyByCampaignId = new Map();
+
+    for (const doc of applyRecs) {
+      const key = String(doc.campaignId || "").trim();
+      if (key && !applyByCampaignId.has(key)) {
+        applyByCampaignId.set(key, doc);
+      }
+    }
+
+    const getCountryName = (country = {}) =>
+      String(
+        country.countryNameEn ||
+          country.countryName ||
+          country.name ||
+          country.countryNameLocal ||
+          country.countryCode ||
+          ""
+      ).trim();
+
+    const getGoalName = (goal = {}) =>
+      String(goal.goal || goal.name || goal.label || "").trim();
+
+    const getAgeRangeName = (age = {}) =>
+      String(age.range || age.name || age.label || "").trim();
+
+    const campaigns = enrichedCampaigns.map((campaign) => {
+      const campaignId = String(campaign._id || campaign.campaignId || "");
+
+      const related =
+        applyByCampaignId.get(String(campaign._id || "")) ||
+        applyByCampaignId.get(String(campaign.campaignId || "")) ||
+        null;
+
+      const approvedList = Array.isArray(related?.approved)
+        ? related.approved
+        : [];
+
+      const applicantsList = Array.isArray(related?.applicants)
+        ? related.applicants
+        : [];
+
+      const isApproved = approvedList.some((item) =>
+        [internalInfluencerId, publicInfluencerId].includes(
+          String(item.influencerId || "")
+        )
+      );
+
+      const isApplied = applicantsList.some((item) =>
+        [internalInfluencerId, publicInfluencerId].includes(
+          String(item.influencerId || "")
+        )
+      );
+
+      const applicationStatus = isApproved
+        ? "approved"
+        : isApplied
+          ? "applied"
+          : "applied";
+
+      const targetCountries = Array.isArray(campaign.details?.targetCountries)
+        ? campaign.details.targetCountries
+        : [];
+
+      const targetCountryValues = targetCountries
+        .map(getCountryName)
+        .filter(Boolean);
+
+      const targetCountry =
+        targetCountryValues.length > 0
+          ? targetCountryValues.join(", ")
+          : String(campaign.targetCountry || "").trim();
+
+      const targetAgeGroupValues = Array.isArray(
+        campaign.details?.targetAgeRanges
+      )
+        ? campaign.details.targetAgeRanges.map(getAgeRangeName).filter(Boolean)
+        : [];
+
+      const campaignGoalValues = Array.isArray(
+        campaign.details?.campaignGoals
+      )
+        ? campaign.details.campaignGoals.map(getGoalName).filter(Boolean)
+        : [];
+
+      return {
+        ...campaign,
+
+        id: campaignId,
+        campaignId,
+        campaignName: campaign.campaignTitle || "",
+        name: campaign.campaignTitle || "",
+        campaignTitle: campaign.campaignTitle || "",
+
+        influencer: {
+          _id: internalInfluencerId,
+          influencerId: publicInfluencerId,
+          name: inf.name || "",
+        },
+
+        images: campaign.productImages || campaign.images || [],
+
+        campaignGoalValues,
+        targetCountryValues,
+        targetCountries,
+        targetCountry,
+        targetAgeGroupValues,
+
+        applicationStatus,
+        appliedDate: related?.createdAt || campaign.createdAt,
+
+        hasApplied: 1,
+        hasApproved: isApproved ? 1 : 0,
+        isApproved: isApproved ? 1 : 0,
+        isContracted: 0,
+        contractId: null,
+        contractMongoId: null,
+        isAccepted: 0,
+        hasMilestone: 0,
+        feeAmount: 0,
+        contractStatus: null,
+
+        budget: campaign.budget || campaign.campaignBudget || 0,
+        campaignBudget: campaign.campaignBudget || campaign.budget || 0,
+        influencerBudget: campaign.influencerBudget || 0,
+
+        timeline: {
+          startDate: campaign.startAt || campaign.timeline?.startDate || null,
+          endDate: campaign.endAt || campaign.timeline?.endDate || null,
+          ...(campaign.timeline || {}),
+        },
+      };
+    });
 
     return res.status(200).json({
       meta: {
         total,
         page: safePage,
         limit: safeLimit,
-        totalPages: Math.ceil(total / safeLimit)
+        totalPages: Math.ceil(total / safeLimit),
       },
-      campaigns: rawCampaigns.map(({ description, ...c }) => ({
-        ...c,
-        hasApplied: 1,
-        hasApproved: 0,
-        isContracted: 0,
-        contractId: null,
-        isAccepted: 0
-      }))
+      influencer: {
+        _id: internalInfluencerId,
+        influencerId: publicInfluencerId,
+        name: inf.name || "",
+        email: inf.email || "",
+      },
+      campaigns,
     });
   } catch (err) {
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_APPLIED_CAMPAIGNS_BY_INFLUENCER_ERROR");
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GET_APPLIED_CAMPAIGNS_BY_INFLUENCER_ERROR"
+    );
+
     console.error("getAppliedCampaignsByInfluencer error:", err);
-    return res.status(500).json({ message: "Internal server error" });
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
   }
 };
 
@@ -3558,19 +3940,114 @@ exports.getContractedCampaignsByInfluencer = async (req, res) => {
     candidateCampaignIds = Array.from(contractByCampaignId.keys());
     if (!candidateCampaignIds.length) return res.json({ meta: { total: 0, page: +page, limit: +limit, totalPages: 0 }, campaigns: [] });
 
-    const uuidIds = []; const oIds = [];
-    for (const id of candidateCampaignIds) { if (mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id) { oIds.push(new mongoose.Types.ObjectId(id)); } else { uuidIds.push(String(id)); } }
+    const uuidIds = [];
+    const oIds = [];
 
-    let filter = search?.trim() ? { $and: [baseFilter, { $or: buildSearchOr(search.trim()) }] } : baseFilter;
+    for (const id of candidateCampaignIds) {
+      const idStr = String(id || "").trim();
 
-    const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
-    const [total, rawCampaigns] = await Promise.all([Campaign.countDocuments(filter), Campaign.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Math.max(1, parseInt(limit, 10))).lean()]);
+      if (!idStr) continue;
+
+      uuidIds.push(idStr);
+
+      if (
+        mongoose.Types.ObjectId.isValid(idStr) &&
+        String(new mongoose.Types.ObjectId(idStr)) === idStr
+      ) {
+        oIds.push(new mongoose.Types.ObjectId(idStr));
+      }
+    }
+
+    const baseFilter = {
+      $or: [
+        ...(oIds.length ? [{ _id: { $in: oIds } }] : []),
+        ...(uuidIds.length ? [{ campaignId: { $in: uuidIds } }] : []),
+      ],
+    };
+
+    const filter =
+      search && String(search).trim()
+        ? {
+          $and: [
+            baseFilter,
+            { $or: buildSearchOr(String(search).trim()) },
+          ],
+        }
+        : baseFilter;
+
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.max(1, parseInt(limit, 10) || 10);
+    const skip = (safePage - 1) * safeLimit;
+
+    const [total, rawCampaigns] = await Promise.all([
+      Campaign.countDocuments(filter),
+      Campaign.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+    ]);
+
+    let enrichedCampaigns = rawCampaigns;
+
+    try {
+      enrichedCampaigns = await enrichCampaigns(rawCampaigns);
+    } catch (enrichErr) {
+      console.warn(
+        "[getContractedCampaignsByInfluencer] enrichCampaigns failed:",
+        enrichErr?.message || enrichErr
+      );
+    }
 
     return res.json({
-      meta: { total, page: Math.max(1, parseInt(page, 10)), limit: Math.max(1, parseInt(limit, 10)), totalPages: Math.ceil(total / Math.max(1, parseInt(limit, 10))) },
-      campaigns: rawCampaigns.map((c) => {
-        const details = contractByCampaignId.get(String(String(c._id) || "")) || contractByCampaignId.get(String(c._id || "")) || {};
-        return { ...c, hasApplied: 1, isContracted: 1, isAccepted: details.isAccepted || 0, hasMilestone: (milestoneCampaignSet.has(String(String(c._id) || "")) || milestoneCampaignSet.has(String(c._id || ""))) ? 1 : 0, contractId: details.contractId ?? null, feeAmount: details.feeAmount ?? 0, contractStatus: details.status ?? null };
+      meta: {
+        total,
+        page: safePage,
+        limit: safeLimit,
+        totalPages: Math.ceil(total / safeLimit),
+      },
+      campaigns: enrichedCampaigns.map((c) => {
+        const details =
+          contractByCampaignId.get(String(c._id || "")) ||
+          contractByCampaignId.get(String(c.campaignId || "")) ||
+          {};
+
+        const targetCountries = Array.isArray(c.details?.targetCountries)
+          ? c.details.targetCountries
+          : [];
+
+        const targetCountry = targetCountries
+          .map((country) =>
+            String(
+              country.countryNameEn ||
+              country.countryName ||
+              country.name ||
+              country.countryNameLocal ||
+              ""
+            ).trim()
+          )
+          .filter(Boolean)
+          .join(", ");
+
+        return {
+          ...c,
+
+          // useful for frontend
+          targetCountry,
+          targetCountries,
+
+          hasApplied: 1,
+          isContracted: 1,
+          isAccepted: details.isAccepted || 0,
+          hasMilestone:
+            milestoneCampaignSet.has(String(c._id || "")) ||
+              milestoneCampaignSet.has(String(c.campaignId || ""))
+              ? 1
+              : 0,
+          contractId: details.contractId ?? null,
+          feeAmount: details.feeAmount ?? 0,
+          contractStatus: details.status ?? null,
+        };
       }),
     });
   } catch (err) {
@@ -4902,6 +5379,9 @@ exports.viewCampaignByIdForInfluencer = async (req, res) => {
     }
 
     const campaignObjectId = String(campaign._id);
+    const campaignLegacyId = campaign.campaignId
+      ? String(campaign.campaignId).trim()
+      : "";
 
     const hasApplied = await ApplyCampaign.exists({
       $and: [

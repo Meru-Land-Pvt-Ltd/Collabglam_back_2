@@ -2674,7 +2674,7 @@ exports.getCampaignsByInfluencer = async (req, res) => {
       allCountryIds.length
         ? Country.find(
           { _id: { $in: allCountryIds } },
-          "_id countryName"
+          "_id countryNameEn countryNameLocal countryName name countryCode"
         ).lean()
         : Promise.resolve([]),
       allAgeRangeIds.length
@@ -2691,8 +2691,18 @@ exports.getCampaignsByInfluencer = async (req, res) => {
         : Promise.resolve([]),
     ]);
 
+    const getCountryName = (item = {}) =>
+      String(
+        item.countryNameEn ||
+        item.countryName ||
+        item.name ||
+        item.countryNameLocal ||
+        item.countryCode ||
+        ""
+      ).trim();
+
     const countryMap = new Map(
-      countries.map((item) => [String(item._id), item.countryName || ""])
+      countries.map((item) => [String(item._id), getCountryName(item)])
     );
 
     const ageRangeMap = new Map(
@@ -2738,10 +2748,14 @@ exports.getCampaignsByInfluencer = async (req, res) => {
         ? campaign.campaignGoals.map((goalId) => String(goalId))
         : [];
 
-      const targetCountryValues = targetCountryIds.map(
-        (countryId) => countryMap.get(countryId) || countryId
-      );
+      const targetCountryValues = targetCountryIds
+        .map((countryId) => countryMap.get(countryId))
+        .filter(Boolean);
 
+      const targetCountry =
+        targetCountryValues.length > 0
+          ? targetCountryValues.join(", ")
+          : campaign.targetCountry || "";
       const targetAgeGroupValues = targetAgeRanges.map(
         (ageRangeId) => ageRangeMap.get(ageRangeId) || ageRangeId
       );
@@ -2781,6 +2795,8 @@ exports.getCampaignsByInfluencer = async (req, res) => {
         preferredHashtags: campaign.preferredHashtags || [],
         targetCountryIds: campaign.targetCountryIds || [],
         targetCountryValues,
+        targetCountries: targetCountryValues,
+        targetCountry,
         targetAgeRanges: campaign.targetAgeRanges || [],
         targetAgeGroupValues,
         numberOfInfluencers: campaign.numberOfInfluencers || 0,
