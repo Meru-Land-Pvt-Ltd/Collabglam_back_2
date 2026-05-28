@@ -8,6 +8,26 @@ const DEFAULT_FREE_PLAN_ID = "4c6e497d-a6f9-4c3b-8d64-65bf843be685";
 
 const AUTH_PROVIDERS = ["password", "google"];
 
+
+const workspaceUserSchema = new Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      match: [emailRegex, "Invalid email"],
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
+  },
+  { _id: false }
+);
+
+
 const subscriptionFeatureSchema = new Schema(
   {
     key: { type: String, required: true, trim: true },
@@ -269,6 +289,11 @@ const brandSchema = new Schema(
     ispage3Skip: { type: Boolean, default: false },
     isProfilePicSkip: { type: Boolean, default: false },
 
+    workspaceUsers: {
+      type: [workspaceUserSchema],
+      default: [],
+    },
+
     subscription: { type: subscriptionSchema, default: () => ({}) },
     subscriptionExpired: { type: Boolean, default: false },
 
@@ -302,6 +327,7 @@ brandSchema.index({ authProvider: 1, createdAt: -1 });
 brandSchema.index({ provider: 1, createdAt: -1 });
 brandSchema.index({ isAdminCreated: 1, signupCompleted: 1, createdAt: -1 });
 brandSchema.index({ createdByAdmin: 1, adminCreatedAt: -1 });
+brandSchema.index({ "workspaceUsers.email": 1, "workspaceUsers.status": 1 });
 
 brandSchema.pre("save", async function preSave(next) {
   try {
@@ -329,4 +355,7 @@ brandSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(String(candidate || ""), String(this.password));
 };
 
-module.exports = mongoose.models.Brand || mongoose.model("Brand", brandSchema);
+const BrandModel = mongoose.models.Brand || mongoose.model("Brand", brandSchema);
+
+module.exports = BrandModel;
+module.exports.BrandModel = BrandModel;
