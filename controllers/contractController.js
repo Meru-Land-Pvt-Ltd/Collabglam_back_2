@@ -96,8 +96,11 @@ const ALLOWED_BRAND_PATHS = Object.freeze([
   "content.scheduleA.preShootScriptDue",
   "content.scheduleA.preShootScriptReviewBusinessDays",
   "content.scheduleA.mandatoryTagsMentionsLinksCodes",
+  "content.scheduleA.review.needRevisionRounds",
   "content.scheduleA.review.includedRevisionRounds",
   "content.scheduleA.review.additionalRevisionFee",
+  "content.scheduleA.review.reshootObligationRequired",
+  "content.scheduleA.review.draftDate",
   "content.scheduleA.review.reshootObligation",
   "content.scheduleA.review.reshootFee",
   "content.scheduleA.review.minimumLivePeriod",
@@ -108,6 +111,9 @@ const ALLOWED_BRAND_PATHS = Object.freeze([
   "content.scheduleA.commercial.platformMilestonePaymentStructure",
   "content.scheduleA.commercial.customSplit",
   "content.scheduleA.commercial.advancePaymentTrigger",
+  "content.scheduleA.commercial.wantAdvancePayment",
+  "content.scheduleA.commercial.advancePaymentAmount",
+  "content.scheduleA.commercial.advancePaymentType",
   "content.scheduleA.commercial.remainingPaymentTrigger",
   "content.scheduleA.commercial.paymentProcessorFeesBorneBy",
   "content.scheduleA.commercial.paymentProcessorFeesNotes",
@@ -168,6 +174,32 @@ const ALLOWED_INFLUENCER_PATHS = Object.freeze([
   "content.influencer.zipPostalCode",
   "content.influencer.country",
   "content.influencer.notes",
+  "content.campaign.territoryTargetCountry",
+  "content.campaign.effectiveDate",
+  "content.campaign.timezone",
+  "content.scheduleA.preShootScriptRequired",
+  "content.scheduleA.preShootScriptDue",
+  "content.scheduleA.preShootScriptReviewBusinessDays",
+  "content.scheduleA.review.includedRevisionRounds",
+  "content.scheduleA.review.additionalRevisionFee",
+  "content.scheduleA.review.reshootObligationRequired",
+  "content.scheduleA.review.draftDate",
+  "content.scheduleA.review.reshootObligation",
+  "content.scheduleA.review.reshootObligationRequired",
+  "content.scheduleA.review.draftDate",
+  "content.scheduleA.review.reshootFee",
+  "content.scheduleA.commercial.totalCampaignFee",
+  "content.scheduleA.commercial.influencerBudget",
+  "content.scheduleA.commercial.currency",
+  "content.scheduleA.commercial.wantAdvancePayment",
+  "content.scheduleA.commercial.advancePaymentAmount",
+  "content.scheduleA.commercial.advancePaymentType",
+  "content.scheduleA.commercial.laneAMarketplaceFeeNote",
+  "content.scheduleA.shipping.productShippingApplicable",
+  "content.scheduleA.shipping.shipToName",
+  "content.scheduleA.shipping.shipToAddress",
+  "content.scheduleA.shipping.productReceiptConfirmationDeadline",
+  "content.scheduleA.shipping.productReturnable",
 ]);
 
 function respondOK(res, payload = {}, status = 200) {
@@ -395,6 +427,13 @@ function renderCommercialTermsTableHTML(content = {}) {
     ["Total Budget", compactJoin([commercial?.totalCampaignFee, commercial?.currency], " ")],
     ["Payment Structure", commercial?.paymentStructure || commercial?.platformMilestonePaymentStructure || ""],
     ["Custom Split", commercial?.customSplit || ""],
+    ["I Want Advance Payment", commercial?.wantAdvancePayment ? "Yes" : "No"],
+    ...(commercial?.wantAdvancePayment
+      ? [
+          ["Advance Payment Amount", commercial?.advancePaymentAmount ?? ""],
+          ["Advance Payment Type", commercial?.advancePaymentType || ""],
+        ]
+      : []),
     ["Advance Payment Trigger", commercial?.advancePaymentTrigger || ""],
     ["Remaining Payment Trigger", commercial?.remainingPaymentTrigger || ""],
     ["Payment Processor Fees Borne By", commercial?.paymentProcessorFeesBorneBy || ""],
@@ -458,8 +497,16 @@ function buildTokenMap(contract) {
     "SOW.RestrictedStatements": compliance?.restrictedStatements || "",
     "SOW.DeliverablesTableHTML": renderDeliverablesScheduleTable(c?.scheduleA?.deliverables || []),
     "SOW.ReviewTermsTableHTML": renderKeyValueTable([
-      ["Included Revision Rounds", review?.includedRevisionRounds ?? "-"],
-      ["Additional Revision Fee", review?.additionalRevisionFee || ""],
+      [
+        "Need Revision Rounds",
+        review?.needRevisionRounds === "yes" ? "Yes" : "No",
+      ],
+      ...(review?.needRevisionRounds === "yes"
+        ? [
+            ["Revision Count", review?.includedRevisionRounds ?? "-"],
+            ["Revision Fees", review?.additionalRevisionFee || "0"],
+          ]
+        : []),
       ["Reshoot Obligation", review?.reshootObligation || ""],
       ["Reshoot Fee", review?.reshootFee || ""],
       ["Minimum Live Period", review?.minimumLivePeriod || ""],
@@ -981,15 +1028,33 @@ function createDefaultContent({ campaign, brandDoc, influencerDoc, admin, reques
       preShootScriptReviewBusinessDays: contentInput?.scheduleA?.preShootScriptReviewBusinessDays || 2,
       mandatoryTagsMentionsLinksCodes: contentInput?.scheduleA?.mandatoryTagsMentionsLinksCodes || getMandatoryTags(campaign),
       review: {
-        includedRevisionRounds: contentInput?.scheduleA?.review?.includedRevisionRounds ?? 1,
-        additionalRevisionFee: contentInput?.scheduleA?.review?.additionalRevisionFee || "",
-        reshootObligation: contentInput?.scheduleA?.review?.reshootObligation || "No reshoot required except for material failure to follow approved brief",
+        needRevisionRounds:
+          contentInput?.scheduleA?.review?.needRevisionRounds === "yes" ||
+          contentInput?.scheduleA?.review?.needRevisionRounds === true
+            ? "yes"
+            : "no",
+        includedRevisionRounds:
+          contentInput?.scheduleA?.review?.needRevisionRounds === "yes" ||
+          contentInput?.scheduleA?.review?.needRevisionRounds === true
+            ? Number(contentInput?.scheduleA?.review?.includedRevisionRounds || 1)
+            : 0,
+        additionalRevisionFee:
+          contentInput?.scheduleA?.review?.needRevisionRounds === "yes" ||
+          contentInput?.scheduleA?.review?.needRevisionRounds === true
+            ? String(contentInput?.scheduleA?.review?.additionalRevisionFee || "0")
+            : "",
+        reshootObligation:
+          contentInput?.scheduleA?.review?.reshootObligation ||
+          "No reshoot required except for material failure to follow approved brief",
         reshootFee: contentInput?.scheduleA?.review?.reshootFee || "",
         minimumLivePeriod: contentInput?.scheduleA?.review?.minimumLivePeriod || "",
       },
       commercial: {
         totalCampaignFee: paymentType === PAYMENT_TYPE.GIFTING ? 0 : Number(totalCampaignFee || 0),
         currency: contentInput?.scheduleA?.commercial?.currency || "USD",
+        wantAdvancePayment: Boolean(contentInput?.scheduleA?.commercial?.wantAdvancePayment),
+        advancePaymentAmount: Number(contentInput?.scheduleA?.commercial?.advancePaymentAmount || 0),
+        advancePaymentType: contentInput?.scheduleA?.commercial?.advancePaymentType || "",
         paymentStructure: contentInput?.scheduleA?.commercial?.paymentStructure || contentInput?.scheduleA?.commercial?.platformMilestonePaymentStructure || defaultPaymentStructure,
         customSplit: contentInput?.scheduleA?.commercial?.customSplit || "",
         advancePaymentTrigger: contentInput?.scheduleA?.commercial?.advancePaymentTrigger || "",
@@ -1287,7 +1352,7 @@ exports.viewed = async (req, res) => {
 
 exports.influencerConfirm = async (req, res) => {
   try {
-    const { contractId, influencer: influencerData = {}, signatureInfluencer = "", preview = false } = req.body;
+    const { contractId, influencer: influencerData = {}, creatorUpdates = {}, signatureInfluencer = "", preview = false } = req.body;
     assertRequired(req.body, ["contractId"]);
     const contract = await findContract(contractId);
     if (!contract) return respondError(res, "Contract not found", 404);
@@ -1295,7 +1360,13 @@ exports.influencerConfirm = async (req, res) => {
     if (contract.editsLockedAt) return respondError(res, "Contract is locked for signing; edits/accept changes are disabled", 400);
 
     const hydrated = await hydrateContract(contract);
-    const content = mergeDeep(hydrated.content || {}, { influencer: { ...(hydrated.content?.influencer || {}), ...influencerData } });
+    const creatorContentUpdates = creatorUpdates?.content || {};
+    const content = mergeDeep(
+      hydrated.content || {},
+      mergeDeep(creatorContentUpdates, {
+        influencer: { ...(hydrated.content?.influencer || {}), ...influencerData },
+      })
+    );
 
     if (preview) {
       const tmp = { ...hydrated, content, signatures: { ...(hydrated.signatures || {}) } };
@@ -1315,8 +1386,10 @@ exports.influencerConfirm = async (req, res) => {
 
     contract.influencerName = content.influencer?.legalName || contract.influencerName || "";
     contract.influencerAddress = content.influencer?.address || compactJoin([content.influencer?.addressLine1, content.influencer?.addressLine2, content.influencer?.city, content.influencer?.state, content.influencer?.zipPostalCode, content.influencer?.country]);
+    contract.feeAmount = Number(content?.scheduleA?.commercial?.totalCampaignFee || contract.feeAmount || 0);
+    contract.currency = content?.scheduleA?.commercial?.currency || contract.currency || "USD";
 
-    const after = { influencer: content.influencer, signatureInfluencer };
+    const after = { influencer: content.influencer, scheduleA: content.scheduleA, campaign: content.campaign, signatureInfluencer };
     const editedFields = computeEditedFields(before, after, ["influencer", "signatureInfluencer"]);
     if (editedFields.length) {
       contract.version += 1;

@@ -33,35 +33,28 @@ function parseSignatureDataUrl(value) {
     throw error;
   }
 
-  return {
-    signature,
-    mimeType: match[1].toLowerCase(),
-    sizeBytes,
-  };
+  return { signature, mimeType: match[1].toLowerCase(), sizeBytes };
 }
 
 function createSignatureAssetModel({ modelName, ownerField, collection }) {
+  const fallbackName = modelName === "InfluencerSignature" ? "Influencer Signature" : "Brand Signature";
+
   const schema = new Schema(
     {
       [ownerField]: { type: String, required: true, index: true, trim: true },
-
-name: { type: String, default: "Brand Signature", trim: true },
+      name: { type: String, default: fallbackName, trim: true },
       remarks: { type: String, default: "", trim: true },
-
       signature: { type: String, required: true },
       mimeType: { type: String, default: "", trim: true },
       originalName: { type: String, default: "", trim: true },
       sizeBytes: { type: Number, default: 0 },
-
       isPrimary: { type: Boolean, default: false, index: true },
-
       status: {
         type: String,
         enum: Object.values(SIGNATURE_STATUS),
         default: SIGNATURE_STATUS.ACTIVE,
         index: true,
       },
-
       createdBy: { type: String, default: "", trim: true },
       updatedBy: { type: String, default: "", trim: true },
     },
@@ -79,6 +72,7 @@ name: { type: String, default: "Brand Signature", trim: true },
         this.sizeBytes = parsed.sizeBytes;
       }
 
+      this.name = this.name || fallbackName;
       next();
     } catch (error) {
       next(error);
@@ -102,65 +96,53 @@ name: { type: String, default: "Brand Signature", trim: true },
     }).sort({ updatedAt: -1 });
   };
 
-schema.statics.setPrimary = async function setPrimary(
-  ownerId,
-  signatureId,
-  updatedBy = ""
-) {
-  const ownerValue = String(ownerId);
+  schema.statics.setPrimary = async function setPrimary(ownerId, signatureId, updatedBy = "") {
+    const ownerValue = String(ownerId);
 
-  const signature = await this.findOne({
-    _id: signatureId,
-    [ownerField]: ownerValue,
-    status: SIGNATURE_STATUS.ACTIVE,
-  });
-
-  if (!signature) {
-    const error = new Error("Brand signature not found.");
-    error.status = 404;
-    throw error;
-  }
-
-  await this.updateMany(
-    {
-      [ownerField]: ownerValue,
-      status: SIGNATURE_STATUS.ACTIVE,
-    },
-    {
-      $set: {
-        isPrimary: false,
-        updatedBy,
-      },
-    },
-    {
-      runValidators: false,
-    }
-  );
-
-  await this.updateOne(
-    {
+    const signature = await this.findOne({
       _id: signatureId,
       [ownerField]: ownerValue,
       status: SIGNATURE_STATUS.ACTIVE,
-    },
-    {
-      $set: {
-        isPrimary: true,
-        updatedBy,
-        name: signature.name || "Brand Signature",
-      },
-    },
-    {
-      runValidators: false,
-    }
-  );
+    });
 
-  return this.findOne({
-    _id: signatureId,
-    [ownerField]: ownerValue,
-    status: SIGNATURE_STATUS.ACTIVE,
-  });
-};
+    if (!signature) {
+      const error = new Error(`${fallbackName} not found.`);
+      error.status = 404;
+      throw error;
+    }
+
+    await this.updateMany(
+      { [ownerField]: ownerValue, status: SIGNATURE_STATUS.ACTIVE },
+      { $set: { isPrimary: false, updatedBy } },
+      { runValidators: false }
+    );
+
+    await this.updateOne(
+      { _id: signatureId, [ownerField]: ownerValue, status: SIGNATURE_STATUS.ACTIVE },
+      {
+        $set: {
+          isPrimary: true,
+          updatedBy,
+          name: signature.name || fallbackName,
+        },
+      },
+      { runValidators: false }
+    );
+
+    return this.findOne({
+      _id: signatureId,
+      [ownerField]: ownerValue,
+      status: SIGNATURE_STATUS.ACTIVE,
+    });
+  };
+
+  schema.statics.deactivateForOwner = function deactivateForOwner(ownerId) {
+    return this.updateMany(
+      { [ownerField]: String(ownerId), status: SIGNATURE_STATUS.ACTIVE },
+      { $set: { status: SIGNATURE_STATUS.INACTIVE } },
+      { runValidators: false }
+    );
+  };
 
   return mongoose.models[modelName] || mongoose.model(modelName, schema);
 }

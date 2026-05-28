@@ -14,11 +14,15 @@ const DeliverableSchema = new Schema(
     platformHandle: { type: String, default: "", trim: true },
     deliverableFormat: { type: String, default: "", trim: true },
     deliverableName: { type: String, default: "", trim: true },
+    contentSpecification: { type: String, default: "", trim: true },
     qty: { type: Number, default: 1 },
     aspectRatio: { type: String, default: "", trim: true },
     draftRequired: { type: Boolean, default: false },
     draftDue: { type: String, default: "", trim: true },
     liveDate: { type: String, default: "", trim: true },
+    preShootScriptRequired: { type: Boolean, default: false },
+    preShootScriptDue: { type: String, default: "", trim: true },
+    preShootScriptReviewBusinessDays: { type: Number, default: 2 },
   },
   { _id: false }
 );
@@ -105,15 +109,21 @@ const ContractContentSchema = new Schema(
     preShootScriptReviewBusinessDays: { type: Number, default: 2 },
     mandatoryTagsMentionsLinksCodes: { type: String, default: "", trim: true },
 
-    includedRevisionRounds: { type: Number, default: 1 },
+    needRevisionRounds: { type: String, enum: ["yes", "no", ""], default: "no", trim: true },
+    includedRevisionRounds: { type: Number, default: 0 },
     additionalRevisionFee: { type: String, default: "", trim: true },
     reshootObligation: { type: String, default: "", trim: true },
+    reshootObligationRequired: { type: String, enum: ["yes", "no", ""], default: "yes", trim: true },
+    draftDate: { type: String, default: "", trim: true },
     reshootFee: { type: String, default: "", trim: true },
     minimumLivePeriod: { type: String, default: "", trim: true },
 
     totalCampaignFee: { type: Number, default: 0 },
     influencerBudget: { type: Number, default: 0 },
     currency: { type: String, default: "USD", trim: true },
+    wantAdvancePayment: { type: Boolean, default: false },
+    advancePaymentAmount: { type: Number, default: 0 },
+    advancePaymentType: { type: String, default: "", trim: true },
     paymentStructure: { type: String, default: "", trim: true },
     platformMilestonePaymentStructure: { type: String, default: "", trim: true },
     customSplit: { type: String, default: "", trim: true },
@@ -258,15 +268,33 @@ ContractContentSchema.statics.fromLegacyContent = function fromLegacyContent({
     preShootScriptReviewBusinessDays: Number(scheduleA.preShootScriptReviewBusinessDays || 2),
     mandatoryTagsMentionsLinksCodes: scheduleA.mandatoryTagsMentionsLinksCodes || "",
 
-    includedRevisionRounds: Number(review.includedRevisionRounds || 1),
-    additionalRevisionFee: review.additionalRevisionFee || "",
+    needRevisionRounds:
+      review.needRevisionRounds === "yes" || review.needRevisionRounds === true
+        ? "yes"
+        : "no",
+    includedRevisionRounds:
+      review.needRevisionRounds === "yes" || review.needRevisionRounds === true
+        ? Number(review.includedRevisionRounds || 1)
+        : 0,
+    additionalRevisionFee:
+      review.needRevisionRounds === "yes" || review.needRevisionRounds === true
+        ? String(review.additionalRevisionFee || "0")
+        : "",
     reshootObligation: review.reshootObligation || "",
+    reshootObligationRequired:
+      review.reshootObligationRequired === "no" || review.reshootObligationRequired === false
+        ? "no"
+        : "yes",
+    draftDate: review.draftDate || "",
     reshootFee: review.reshootFee || "",
     minimumLivePeriod: review.minimumLivePeriod || "",
 
     totalCampaignFee: Number(commercial.totalCampaignFee || 0),
     influencerBudget: Number(commercial.influencerBudget || 0),
     currency: commercial.currency || "USD",
+    wantAdvancePayment: Boolean(commercial.wantAdvancePayment),
+    advancePaymentAmount: Number(commercial.advancePaymentAmount || 0),
+    advancePaymentType: commercial.advancePaymentType || "",
     paymentStructure: commercial.paymentStructure || commercial.platformMilestonePaymentStructure || "",
     platformMilestonePaymentStructure: commercial.platformMilestonePaymentStructure || "",
     customSplit: commercial.customSplit || "",
@@ -377,9 +405,14 @@ ContractContentSchema.methods.toLegacyContent = function toLegacyContent() {
       preShootScriptReviewBusinessDays: this.preShootScriptReviewBusinessDays,
       mandatoryTagsMentionsLinksCodes: this.mandatoryTagsMentionsLinksCodes,
       review: {
-        includedRevisionRounds: this.includedRevisionRounds,
-        additionalRevisionFee: this.additionalRevisionFee,
+        needRevisionRounds: this.needRevisionRounds || "no",
+        includedRevisionRounds:
+          this.needRevisionRounds === "yes" ? this.includedRevisionRounds : 0,
+        additionalRevisionFee:
+          this.needRevisionRounds === "yes" ? this.additionalRevisionFee : "",
         reshootObligation: this.reshootObligation,
+        reshootObligationRequired: this.reshootObligationRequired || "yes",
+        draftDate: this.draftDate,
         reshootFee: this.reshootFee,
         minimumLivePeriod: this.minimumLivePeriod,
       },
@@ -387,6 +420,9 @@ ContractContentSchema.methods.toLegacyContent = function toLegacyContent() {
         totalCampaignFee: this.totalCampaignFee,
         influencerBudget: this.influencerBudget,
         currency: this.currency,
+        wantAdvancePayment: this.wantAdvancePayment,
+        advancePaymentAmount: this.advancePaymentAmount,
+        advancePaymentType: this.advancePaymentType,
         paymentStructure: this.paymentStructure,
         platformMilestonePaymentStructure: this.platformMilestonePaymentStructure,
         customSplit: this.customSplit,
