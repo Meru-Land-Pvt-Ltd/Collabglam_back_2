@@ -800,79 +800,182 @@ async function getScopedCampaignAccessForAdmin(actor = {}) {
   };
 }
 
-async function enrichBrandsWithAssignments(brandDocs = []) {
-  if (!Array.isArray(brandDocs) || brandDocs.length === 0) return [];
+async function enrichBrandsWithAssignments(brandDocs = [], logId = "getAllBrands") {
+  const enrichStart = Date.now();
+
+  if (!Array.isArray(brandDocs) || brandDocs.length === 0) {
+    console.log(`[${logId}] 5 enrichBrandsWithAssignments: 0ms | no brands`);
+    return [];
+  }
 
   const brandIds = brandDocs
     .map((brand) => brand?._id)
     .filter((id) => isObjectId(id))
     .map((id) => toObjectId(id));
 
-  if (!brandIds.length) return brandDocs;
+  if (!brandIds.length) {
+    console.log(
+      `[${logId}] 5 enrichBrandsWithAssignments: ${Date.now() - enrichStart}ms | no valid brandIds`
+    );
+    return brandDocs;
+  }
 
-  const activeAssignments = await BrandAssigned.find({
-    brandId: { $in: brandIds },
-    status: "active",
-  })
-    .sort({ updatedAt: -1, createdAt: -1 })
-    .lean();
+  const assignmentStart = Date.now();
+
+  const assigneeCollectionName = ASSIGNEE_MODEL.collection.name;
+
+  const assignments = await BrandAssigned.aggregate([
+    {
+      $match: {
+        brandId: { $in: brandIds },
+      },
+    },
+    {
+      $addFields: {
+        __isActive: {
+          $eq: [
+            {
+              $toLower: {
+                $ifNull: ["$status", ""],
+              },
+            },
+            "active",
+          ],
+        },
+      },
+    },
+    {
+      $sort: {
+        brandId: 1,
+        __isActive: -1,
+        updatedAt: -1,
+        createdAt: -1,
+      },
+    },
+    {
+      $group: {
+        _id: "$brandId",
+        assignment: {
+          $first: "$$ROOT",
+        },
+      },
+    },
+    {
+      $replaceRoot: {
+        newRoot: "$assignment",
+      },
+    },
+    {
+      $addFields: {
+        assigneeIds: {
+          $filter: {
+            input: [
+              {
+                $convert: {
+                  input: "$RHId",
+                  to: "objectId",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+              {
+                $convert: {
+                  input: "$bdmId",
+                  to: "objectId",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+              {
+                $convert: {
+                  input: "$idmId",
+                  to: "objectId",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+              {
+                $convert: {
+                  input: "$sdrId",
+                  to: "objectId",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+            ],
+            as: "id",
+            cond: {
+              $ne: ["$$id", null],
+            },
+          },
+        },
+      },
+    },
+    {
+      $lookup: {
+        from: assigneeCollectionName,
+        localField: "assigneeIds",
+        foreignField: "_id",
+        as: "assignees",
+      },
+    },
+    {
+      $project: {
+        __isActive: 0,
+        assigneeIds: 0,
+        password: 0,
+        __v: 0,
+      },
+    },
+  ]);
+
+  console.log(
+    `[${logId}] 5.1 BrandAssigned + ASSIGNEE lookup: ${
+      Date.now() - assignmentStart
+    }ms | assignments=${assignments.length}`
+  );
 
   const assignmentMap = new Map();
-  for (const assignment of activeAssignments) {
-    const key = String(assignment.brandId);
-    if (!assignmentMap.has(key)) assignmentMap.set(key, assignment);
+
+  for (const assignment of assignments) {
+    assignmentMap.set(String(assignment.brandId), assignment);
   }
 
-  const missingIds = brandIds.filter((id) => !assignmentMap.has(String(id)));
-  if (missingIds.length) {
-    const fallbacks = await BrandAssigned.find({
-      brandId: { $in: missingIds },
-    })
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .lean();
-
-    for (const assignment of fallbacks) {
-      const key = String(assignment.brandId);
-      if (!assignmentMap.has(key)) assignmentMap.set(key, assignment);
-    }
-  }
-
-  const assigneeIds = [...assignmentMap.values()]
-    .flatMap((assignment) => [
-      assignment?.RHId,
-      assignment?.bdmId,
-      assignment?.idmId,
-      assignment?.sdrId,
-    ])
-    .filter(Boolean)
-    .map((id) => String(id));
-
-  const uniqueAssigneeIds = [...new Set(assigneeIds)]
-    .filter((id) => isObjectId(id))
-    .map((id) => toObjectId(id));
-
-  const assignees = uniqueAssigneeIds.length
-    ? await ASSIGNEE_MODEL.find({ _id: { $in: uniqueAssigneeIds } })
-      .select("_id name email")
-      .lean()
-    : [];
-
-  const assigneeMap = {};
-  assignees.forEach((assignee) => {
-    assigneeMap[String(assignee._id)] = assignee.name || assignee.email || "";
-  });
-
-  return brandDocs.map((brand) => {
+  const result = brandDocs.map((brand) => {
     const assignment = assignmentMap.get(String(brand._id));
     const subscription = brand.subscription || {};
-    const expiresAt = subscription.expiresAt || null;
-    const subscriptionExpired = Boolean(brand.subscriptionExpired) || isExpiredDate(expiresAt);
-    const status = subscription.status || (subscriptionExpired ? "expired" : "active");
 
-    const assignedRh = assignment?.RHId ? assigneeMap[String(assignment.RHId)] || "" : "";
-    const assignedBme = assignment?.bdmId ? assigneeMap[String(assignment.bdmId)] || "" : "";
-    const assignedIme = assignment?.idmId ? assigneeMap[String(assignment.idmId)] || "" : "";
-    const assignedSdr = assignment?.sdrId ? assigneeMap[String(assignment.sdrId)] || "" : "";
+    const expiresAt = subscription.expiresAt || null;
+    const subscriptionExpired =
+      Boolean(brand.subscriptionExpired) || isExpiredDate(expiresAt);
+
+    const status =
+      subscription.status || (subscriptionExpired ? "expired" : "active");
+
+    const assigneeMap = {};
+
+    if (Array.isArray(assignment?.assignees)) {
+      assignment.assignees.forEach((assignee) => {
+        assigneeMap[String(assignee._id)] =
+          assignee.name || assignee.email || "";
+      });
+    }
+
+    const assignedRh = assignment?.RHId
+      ? assigneeMap[String(assignment.RHId)] || ""
+      : "";
+
+    const assignedBme = assignment?.bdmId
+      ? assigneeMap[String(assignment.bdmId)] || ""
+      : "";
+
+    const assignedIme = assignment?.idmId
+      ? assigneeMap[String(assignment.idmId)] || ""
+      : "";
+
+    const assignedSdr = assignment?.sdrId
+      ? assigneeMap[String(assignment.sdrId)] || ""
+      : "";
 
     return {
       ...brand,
@@ -880,22 +983,35 @@ async function enrichBrandsWithAssignments(brandDocs = []) {
       expiresAt,
       status,
       subscriptionExpired,
+
       assignedRh,
       assignedBme,
       assignedIme,
       assignedSdr,
+
       assignedRm: assignedRh,
       assignedBm: assignedBme,
       assignedIm: assignedIme,
+
       fullyManagedSubscription: isFullyManagedBrandDoc(brand),
+
       assignmentId: assignment?._id || null,
       assignmentStatus: assignment?.status || null,
+
       RHId: assignment?.RHId || null,
       bdmId: assignment?.bdmId || null,
       idmId: assignment?.idmId || null,
       sdrId: assignment?.sdrId || null,
     };
   });
+
+  console.log(
+    `[${logId}] 5 enrichBrandsWithAssignments total: ${
+      Date.now() - enrichStart
+    }ms | brands=${brandDocs.length}`
+  );
+
+  return result;
 }
 
 async function getScopedCampaignBrandKeysForAdmin(actor = {}) {
@@ -1527,13 +1643,27 @@ async function getScopedBrandIdsForAdmin(actor = {}) {
 }
 
 exports.getAllBrands = async (req, res) => {
+  const logId = `getAllBrands-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+
+  const totalStart = Date.now();
+
   try {
+    console.log(`[${logId}] START`);
+
+    const parseStart = Date.now();
+
     const page = parsePositiveInt(req.body?.page, 1);
-    const limit = parsePositiveInt(req.body?.limit, 10);
+    const limit = Math.min(parsePositiveInt(req.body?.limit, 10), 100);
+    const skip = (page - 1) * limit;
+
     const search = String(req.body?.search || "").trim();
     const sortBy = String(req.body?.sortBy || "createdAt").trim();
     const sortOrder = normalizeSortOrder(req.body?.sortOrder, "desc");
     const dir = sortOrder === "asc" ? 1 : -1;
+
+    console.log(`[${logId}] 1 parse: ${Date.now() - parseStart}ms`);
 
     const actor = req.admin || {};
     const actorRole = String(actor?.role || "").trim().toLowerCase();
@@ -1541,12 +1671,17 @@ exports.getAllBrands = async (req, res) => {
 
     const brandQuery = {};
 
-    // Brands page rule:
-    // Super Admin -> all brands
-    // Revenue Head -> all brands
-    // BME -> only brands assigned to this BME
+    const bmeStart = Date.now();
+
     if (actorRole === ROLES.BME) {
       if (!actorId) {
+        console.log(
+          `[${logId}] 2 BME assignment filter: ${Date.now() - bmeStart}ms | no actorId`
+        );
+        console.log(
+          `[${logId}] TOTAL getAllBrands: ${Date.now() - totalStart}ms`
+        );
+
         return res.status(200).json({
           page,
           limit,
@@ -1564,6 +1699,8 @@ exports.getAllBrands = async (req, res) => {
         bmeFilters.push({ bdmId: toObjectId(actorId) });
       }
 
+      const bmeQueryStart = Date.now();
+
       const assignments = await BrandAssigned.find({
         status: "active",
         $or: bmeFilters,
@@ -1571,12 +1708,25 @@ exports.getAllBrands = async (req, res) => {
         .select("brandId")
         .lean();
 
+      console.log(
+        `[${logId}] 2.1 BME BrandAssigned query: ${
+          Date.now() - bmeQueryStart
+        }ms | assignments=${assignments.length}`
+      );
+
       const assignedBrandIds = assignments
         .map((item) => String(item.brandId || ""))
         .filter((id) => isObjectId(id))
         .map((id) => toObjectId(id));
 
       if (!assignedBrandIds.length) {
+        console.log(
+          `[${logId}] 2 BME assignment filter: ${Date.now() - bmeStart}ms | no assigned brands`
+        );
+        console.log(
+          `[${logId}] TOTAL getAllBrands: ${Date.now() - totalStart}ms`
+        );
+
         return res.status(200).json({
           page,
           limit,
@@ -1591,84 +1741,131 @@ exports.getAllBrands = async (req, res) => {
       brandQuery._id = { $in: assignedBrandIds };
     }
 
-    const rawBrands = await Brand.find(brandQuery)
-      .select("-password -__v -profilePic")
-      .lean();
-
-    const enrichedBrands = await enrichBrandsWithAssignments(rawBrands);
-    const adminMap = await getAdminMapByIds(
-      enrichedBrands
-        .filter((brand) => brand?.isAdminCreated === true)
-        .map((brand) => brand?.createdByAdmin)
+    console.log(
+      `[${logId}] 2 BME assignment filter: ${Date.now() - bmeStart}ms`
     );
 
-    const displayBrands = enrichedBrands.map((brand) => ({
-      ...brand,
-      ...buildCreatorPayload(brand, adminMap, "Brand"),
-      ...buildSignupCurrentStatus(brand),
-    }));
+    const searchStart = Date.now();
 
-    const re = safeRegex(search);
+    if (search) {
+      const re = safeRegex(search);
 
-    const filtered = re
-      ? displayBrands.filter((brand) =>
-        [
-          brand.name,
-          brand.brandName,
-          brand.email,
-          brand.phone,
-          brand.callingcode,
-          brand.companySize,
-          brand.industry,
-          brand.planName,
-          brand.status,
-          brand.assignedRh,
-          brand.assignedRm,
-          brand.assignedBme,
-          brand.assignedBm,
-          brand.assignedIme,
-          brand.assignedIm,
-          brand.createdByLabel,
-          brand.createdByAdminName,
-          brand.createdByAdminEmail,
-          brand.adminCreatedRole,
-          brand.createdByRoleLabel,
-          brand.currentStatus,
-          brand.currentStatusLabel,
-          brand.currentStatusSubLabel,
-        ].some((value) => re.test(String(value || "")))
-      )
-      : displayBrands;
+      if (re) {
+        brandQuery.$or = [
+          { name: re },
+          { brandName: re },
+          { email: re },
+          { phone: re },
+          { callingcode: re },
+          { companySize: re },
+          { industry: re },
+          { planName: re },
+          { status: re },
+          { region: re },
+          { preferredLanguage: re },
+          { currencyFormat: re },
+        ];
+      }
+    }
 
-    const allowedSortFields = new Set([
+    console.log(
+      `[${logId}] 3 search build: ${Date.now() - searchStart}ms | search="${search}"`
+    );
+
+    const allowedDbSortFields = new Set([
       "name",
+      "brandName",
       "email",
       "phone",
       "planName",
       "createdAt",
       "expiresAt",
       "status",
-      "createdBy",
-      "currentStatus",
-      "assignedRh",
-      "assignedRm",
-      "assignedBme",
-      "assignedBm",
-      "assignedIme",
-      "assignedIm",
+      "companySize",
+      "industry",
     ]);
 
-    const field = allowedSortFields.has(sortBy) ? sortBy : "createdAt";
+    const field = allowedDbSortFields.has(sortBy) ? sortBy : "createdAt";
 
-    const sorted = [...filtered].sort((a, b) => {
-      const primary = compareBrandRows(a, b, field, dir);
-      if (primary !== 0) return primary;
-      return compareBrandRows(a, b, "createdAt", -1);
-    });
+    const sortQuery =
+      field === "createdAt"
+        ? { createdAt: dir, _id: -1 }
+        : { [field]: dir, createdAt: -1, _id: -1 };
 
-    const total = sorted.length;
+    const brandStart = Date.now();
+
+    const canUseFastTotal =
+      !search && actorRole !== ROLES.BME && Object.keys(brandQuery).length === 0;
+
+    const brandFindPromise = Brand.find(brandQuery)
+      .select("-password -__v -profilePic")
+      .sort(sortQuery)
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPromise = canUseFastTotal
+      ? Brand.estimatedDocumentCount()
+      : Brand.countDocuments(brandQuery);
+
+    const [rawBrands, total] = await Promise.all([
+      brandFindPromise,
+      totalPromise,
+    ]);
+
+    console.log(
+      `[${logId}] 4 Brand find + total: ${
+        Date.now() - brandStart
+      }ms | rawBrands=${rawBrands.length} | total=${total} | fastTotal=${canUseFastTotal}`
+    );
+
+    const creatorAdminIds = rawBrands
+      .filter((brand) => brand?.isAdminCreated === true)
+      .map((brand) => brand?.createdByAdmin)
+      .filter(Boolean);
+
+    const enrichAdminStart = Date.now();
+
+    const enrichedBrandsPromise = enrichBrandsWithAssignments(rawBrands, logId);
+
+    const adminStart = Date.now();
+
+    const adminMapPromise = creatorAdminIds.length
+      ? getAdminMapByIds(creatorAdminIds)
+      : Promise.resolve(new Map());
+
+    const [enrichedBrands, adminMap] = await Promise.all([
+      enrichedBrandsPromise,
+      adminMapPromise,
+    ]);
+
+    console.log(
+      `[${logId}] 5 + 6 enrich/admin parallel wait: ${
+        Date.now() - enrichAdminStart
+      }ms`
+    );
+
+    console.log(
+      `[${logId}] 6 getAdminMapByIds approx: ${
+        Date.now() - adminStart
+      }ms | ids=${creatorAdminIds.length}`
+    );
+
+    const mapStart = Date.now();
+
+    const brands = enrichedBrands.map((brand) => ({
+      ...brand,
+      ...buildCreatorPayload(brand, adminMap, "Brand"),
+      ...buildSignupCurrentStatus(brand),
+    }));
+
+    console.log(`[${logId}] 7 final map: ${Date.now() - mapStart}ms`);
+
     const totalPages = Math.max(1, Math.ceil(total / limit));
-    const brands = sorted.slice((page - 1) * limit, page * limit);
+
+    console.log(
+      `[${logId}] TOTAL getAllBrands: ${Date.now() - totalStart}ms`
+    );
 
     return res.status(200).json({
       page,
@@ -1680,7 +1877,7 @@ exports.getAllBrands = async (req, res) => {
       brands,
     });
   } catch (error) {
-    console.error("Error in getAllBrands:", error);
+    console.error(`[${logId}] Error in getAllBrands:`, error);
     await saveErrorLog(req, error, 500, "GET_ALL_BRANDS_ERROR");
     return res.status(500).json({ message: "Internal server error" });
   }

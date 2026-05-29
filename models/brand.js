@@ -6,6 +6,28 @@ const { Schema } = mongoose;
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DEFAULT_FREE_PLAN_ID = "4c6e497d-a6f9-4c3b-8d64-65bf843be685";
 
+const AUTH_PROVIDERS = ["password", "google"];
+
+
+const workspaceUserSchema = new Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      match: [emailRegex, "Invalid email"],
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
+  },
+  { _id: false }
+);
+
+
 const subscriptionFeatureSchema = new Schema(
   {
     key: { type: String, required: true, trim: true },
@@ -59,6 +81,17 @@ const subscriptionSchema = new Schema(
   },
   { _id: false }
 );
+
+function isPendingAdminCreatedBrand(doc) {
+  return doc?.isAdminCreated === true && doc?.signupCompleted === false;
+}
+
+function isGoogleProvider(doc) {
+  const authProvider = String(doc?.authProvider || "").toLowerCase();
+  const provider = String(doc?.provider || "").toLowerCase();
+
+  return authProvider === "google" || provider === "google";
+}
 
 const brandSchema = new Schema(
   {
@@ -134,7 +167,7 @@ const brandSchema = new Schema(
       type: String,
       required: [
         function requiredIndustry() {
-          return !(this.isAdminCreated === true && this.signupCompleted === false);
+          return !isPendingAdminCreatedBrand(this);
         },
         "Industry is required",
       ],
@@ -142,11 +175,49 @@ const brandSchema = new Schema(
       trim: true,
     },
 
+    authProvider: {
+      type: String,
+      enum: AUTH_PROVIDERS,
+      default: "password",
+      trim: true,
+      lowercase: true,
+    },
+
+    provider: {
+      type: String,
+      enum: AUTH_PROVIDERS,
+      default: "password",
+      trim: true,
+      lowercase: true,
+    },
+
+    googleId: {
+      type: String,
+      default: undefined,
+      trim: true,
+    },
+
+    googleSub: {
+      type: String,
+      default: undefined,
+      trim: true,
+    },
+
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
+
     password: {
       type: String,
       required: [
         function requiredPassword() {
-          return !(this.isAdminCreated === true && this.signupCompleted === false);
+          return !(isGoogleProvider(this) || isPendingAdminCreatedBrand(this));
         },
         "Password is required",
       ],
@@ -203,7 +274,11 @@ const brandSchema = new Schema(
       default: null,
     },
 
-    profilePic: { type: String, default: "", trim: true },
+    profilePic: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
     page1: { type: [Schema.Types.Mixed], default: [] },
     page2: { type: [Schema.Types.Mixed], default: [] },
@@ -213,6 +288,11 @@ const brandSchema = new Schema(
     ispage2Skip: { type: Boolean, default: false },
     ispage3Skip: { type: Boolean, default: false },
     isProfilePicSkip: { type: Boolean, default: false },
+
+    workspaceUsers: {
+      type: [workspaceUserSchema],
+      default: [],
+    },
 
     subscription: { type: subscriptionSchema, default: () => ({}) },
     subscriptionExpired: { type: Boolean, default: false },
@@ -241,20 +321,29 @@ const brandSchema = new Schema(
 );
 
 brandSchema.index({ email: 1 }, { unique: true });
+brandSchema.index({ googleId: 1 }, { unique: true, sparse: true });
+brandSchema.index({ googleSub: 1 }, { unique: true, sparse: true });
+brandSchema.index({ authProvider: 1, createdAt: -1 });
+brandSchema.index({ provider: 1, createdAt: -1 });
 brandSchema.index({ isAdminCreated: 1, signupCompleted: 1, createdAt: -1 });
 brandSchema.index({ createdByAdmin: 1, adminCreatedAt: -1 });
+brandSchema.index({ "workspaceUsers.email": 1, "workspaceUsers.status": 1 });
 
 brandSchema.pre("save", async function preSave(next) {
   try {
     if (!this.isModified("password")) return next();
 
     const pwd = String(this.password || "");
+
+    if (!pwd) return next();
+
     const alreadyHashed = /^\$2[aby]\$\d{2}\$/.test(pwd) && pwd.length === 60;
 
     if (alreadyHashed) return next();
 
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(pwd, salt);
+
     return next();
   } catch (error) {
     return next(error);
@@ -266,4 +355,7 @@ brandSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(String(candidate || ""), String(this.password));
 };
 
-module.exports = mongoose.models.Brand || mongoose.model("Brand", brandSchema);
+const BrandModel = mongoose.models.Brand || mongoose.model("Brand", brandSchema);
+
+module.exports = BrandModel;
+module.exports.BrandModel = BrandModel;

@@ -39,6 +39,14 @@ const saveErrorLog = require("../services/errorLog.service");
 void OpenAI;
 void BrandInfo;
 
+let firebaseAdmin = null;
+
+try {
+  firebaseAdmin = require("firebase-admin");
+} catch {
+  firebaseAdmin = null;
+}
+
 const BrandModel =
   BrandModelImport.BrandModel || BrandModelImport.default || BrandModelImport;
 
@@ -656,6 +664,64 @@ async function resetSigninLimit(email) {
   ).exec();
 }
 
+function getFirebaseAdminAuth() {
+  if (!firebaseAdmin) {
+    throw new InternalError("firebase-admin package is missing.");
+  }
+
+  if (!firebaseAdmin.apps.length) {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+
+    if (projectId && clientEmail && privateKey) {
+      firebaseAdmin.initializeApp({
+        credential: firebaseAdmin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        }),
+      });
+    } else {
+      firebaseAdmin.initializeApp({
+        credential: firebaseAdmin.credential.applicationDefault(),
+        projectId,
+      });
+    }
+  }
+
+  return firebaseAdmin.auth();
+}
+
+function makeBrandNameFromGoogleUser(decoded = {}) {
+  const email = normalizeEmail(decoded.email);
+  const localPart = email.split("@")[0] || "Brand";
+
+  return (
+    safeTrim(decoded.name) ||
+    safeTrim(decoded.displayName) ||
+    localPart
+      .replace(/[._-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim() ||
+    "Brand"
+  );
+}
+
+async function getActiveFreeBrandPlan() {
+  const freePlan = await SubscriptionPlan.findOne({
+    role: "Brand",
+    name: "free",
+    status: "active",
+  });
+
+  if (!freePlan) {
+    throw new InternalError("Free brand plan not found");
+  }
+
+  return freePlan;
+}
+
 async function sendSignupOtp(req, res, next) {
   const requestId = req.requestId || "";
   let otpDoc = null;
@@ -1025,6 +1091,8 @@ function hasCompletedOnboardingStep(step) {
 }
 
 function computeBrandNextRoute(brand) {
+  const aliasDone = Boolean(String(brand?.proxyEmail || "").trim());
+
   const page1Done =
     hasCompletedOnboardingStep(brand?.page1) || brand?.ispage1Skip === true;
 
@@ -1036,11 +1104,18 @@ function computeBrandNextRoute(brand) {
 
   let route = "campaign";
 
-  if (!page1Done) route = "page1";
+  if (!aliasDone) route = "brandAlias";
+  else if (!page1Done) route = "page1";
   else if (!page2Done) route = "page2";
   else if (!page3Done) route = "page3";
 
-  return { route, page1Done, page2Done, page3Done };
+  return {
+    route,
+    aliasDone,
+    page1Done,
+    page2Done,
+    page3Done,
+  };
 }
 
 async function signInBrand(req, res, next) {
@@ -1115,6 +1190,136 @@ async function signInBrand(req, res, next) {
   } catch (err) {
     await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "SIGN_IN_BRAND_ERROR");
     return handleControllerError(next, err, "signInBrand");
+  }
+}
+
+async function googleAuthBrand(req, res, next) {
+  const requestId = req.requestId || "";
+
+  try {
+    const idToken = String(req.body?.idToken || "").trim();
+
+    if (!idToken) {
+      throw new ValidationError("Firebase idToken is required.");
+    }
+
+    const decoded = await getFirebaseAdminAuth().verifyIdToken(idToken);
+    const googleProfilePic = safeTrim(decoded.picture);
+
+    const email = normalizeEmail(decoded.email);
+
+    if (!email || !isValidEmail(email)) {
+      throw new ValidationError("Google account email is invalid.");
+    }
+
+    if (decoded.email_verified !== true) {
+      throw new UnauthorizedError("Google email is not verified.");
+    }
+
+    let brand = await findBrandByEmail(email);
+    const isNewBrand = !brand;
+
+    const googleUpdate = {
+      googleId: safeTrim(decoded.uid),
+      googleSub: safeTrim(decoded.uid),
+      isEmailVerified: true,
+      lastLoginAt: new Date(),
+    };
+
+    if (!brand) {
+      const freePlan = await getActiveFreeBrandPlan();
+      const brandName = makeBrandNameFromGoogleUser(decoded);
+
+      brand = await BrandModel.create({
+        email,
+        brandName,
+        name: brandName,
+        companySize: "",
+        industry: "Other",
+        authProvider: "google",
+        provider: "google",
+        googleId: safeTrim(decoded.uid),
+        googleSub: safeTrim(decoded.uid),
+        isEmailVerified: true,
+        profilePic: googleProfilePic,
+        isProfilePicSkip: !googleProfilePic,
+        isAdminCreated: false,
+        signupCompleted: true,
+        signupCompletedAt: new Date(),
+        lastLoginAt: new Date(),
+        subscription: buildSubscriptionFromPlan(freePlan),
+      });
+    } else {
+      assertNotPendingAdminCreatedBrand(brand);
+
+      brand.googleId = safeTrim(decoded.uid);
+      brand.googleSub = safeTrim(decoded.uid);
+      brand.isEmailVerified = true;
+      brand.lastLoginAt = new Date();
+
+      // ✅ Add it here
+      if (googleProfilePic && !brand.profilePic) {
+        brand.profilePic = googleProfilePic;
+        brand.isProfilePicSkip = false;
+      }
+
+      if (!brand.authProvider) {
+        brand.authProvider = brand.password ? "password" : "google";
+      }
+
+      if (!brand.provider) {
+        brand.provider = brand.password ? "password" : "google";
+      }
+
+      if (!brand.subscription?.planId) {
+        const freePlan = await getActiveFreeBrandPlan();
+        brand.subscription = buildSubscriptionFromPlan(freePlan);
+      }
+
+      await brand.save();
+    }
+
+    const token = signJwt({
+      brandId: String(brand._id),
+      role: "brand",
+      email: brand.email,
+    });
+
+    const routeInfo = computeBrandNextRoute(brand);
+
+    return ApiResponse.sendOk(
+      res,
+      isNewBrand ? HttpStatus.CREATED : HttpStatus.OK,
+      {
+        message: isNewBrand
+          ? "Google brand signup started"
+          : "Google brand sign in successful",
+        brandId: String(brand._id),
+        token,
+        email: brand.email,
+        brandName: brand.brandName || brand.name || "",
+        name: brand.name || brand.brandName || "",
+        profilePic: brand.profilePic || googleProfilePic || "",
+        isNewBrand,
+        route: routeInfo.route,
+        onboarding: {
+          aliasDone: routeInfo.aliasDone,
+          page1Done: routeInfo.page1Done,
+          page2Done: routeInfo.page2Done,
+          page3Done: routeInfo.page3Done,
+        },
+      },
+      requestId
+    );
+  } catch (err) {
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GOOGLE_AUTH_BRAND_ERROR"
+    );
+
+    return handleControllerError(next, err, "googleAuthBrand");
   }
 }
 
@@ -3670,25 +3875,25 @@ function serializeSettingProfile(brand = {}) {
 
     companyDetails: safeTrim(brand.companyDetails),
 
-onboarding: {
-  brandType: getQAAnswer(brand.page1, [
-    "brand type",
-    "type of brand",
-  ]),
-  organizationRole: getQAAnswer(brand.page2, [
-    "role in organisation",
-    "role in organization",
-    "your role",
-  ]),
-  preferredPlatform: getQAAnswer(brand.page3, [
-    "preferred platform",
-    "platform",
-  ]),
-  preferredPlatforms: getQAAnswers(brand.page3, [
-    "preferred platform",
-    "platform",
-  ]),
-},
+    onboarding: {
+      brandType: getQAAnswer(brand.page1, [
+        "brand type",
+        "type of brand",
+      ]),
+      organizationRole: getQAAnswer(brand.page2, [
+        "role in organisation",
+        "role in organization",
+        "your role",
+      ]),
+      preferredPlatform: getQAAnswer(brand.page3, [
+        "preferred platform",
+        "platform",
+      ]),
+      preferredPlatforms: getQAAnswers(brand.page3, [
+        "preferred platform",
+        "platform",
+      ]),
+    },
 
     demographic: {
       timeZone:
@@ -4008,17 +4213,17 @@ async function updateBrandSettingProfile(req, res, next) {
       update.ispage2Skip = false;
     }
 
-if (
-  body.preferredPlatform !== undefined ||
-  body.preferredPlatforms !== undefined
-) {
-  update.page3 = upsertQAAnswer(
-    brand.page3,
-    "Preferred platforms",
-    body.preferredPlatforms ?? body.preferredPlatform
-  );
-  update.ispage3Skip = false;
-}
+    if (
+      body.preferredPlatform !== undefined ||
+      body.preferredPlatforms !== undefined
+    ) {
+      update.page3 = upsertQAAnswer(
+        brand.page3,
+        "Preferred platforms",
+        body.preferredPlatforms ?? body.preferredPlatform
+      );
+      update.ispage3Skip = false;
+    }
 
     if (body.timeZone !== undefined) {
       update.timeZone = safeTrim(body.timeZone);
@@ -4214,6 +4419,7 @@ module.exports = {
   verifyOtpSignUp,
   saveBrandOnboarding,
   signInBrand,
+  googleAuthBrand,
   uploadBrandProfilePic,
   sendOtpForgotBrand,
   verifyOtpForgotBrand,
