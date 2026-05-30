@@ -1,9 +1,5 @@
 "use strict";
 
-/**
- * Canonical contract statuses (spec-first).
- * NOTE: Legacy statuses are supported for READ during migration only.
- */
 const CONTRACT_STATUS = Object.freeze({
   DRAFT: "DRAFT",
   BRAND_SENT_DRAFT: "BRAND_SENT_DRAFT",
@@ -11,49 +7,64 @@ const CONTRACT_STATUS = Object.freeze({
   INFLUENCER_EDITED: "INFLUENCER_EDITED",
   BRAND_ACCEPTED: "BRAND_ACCEPTED",
   INFLUENCER_ACCEPTED: "INFLUENCER_ACCEPTED",
-  BRAND_FINAL_UPADTE:"BRAND_FINAL_UPDATE",
+  BRAND_FINAL_UPDATE: "BRAND_FINAL_UPDATE",
   READY_TO_SIGN: "READY_TO_SIGN",
   CONTRACT_SIGNED: "CONTRACT_SIGNED",
   MILESTONES_CREATED: "MILESTONES_CREATED",
   REJECTED: "REJECTED",
   SUPERSEDED: "SUPERSEDED",
 });
-// "Influencer.LegalName": c?.influencer?.legalName || contract.influencerName || "",
-//     "Influencer.ContactName": c?.influencer?.contactName || c?.influencer?.legalName || "",
-//     "Influencer.PostingHandleUrl": c?.influencer?.postingHandleUrl || "",
-//     "Influencer.ContactEmail": c?.influencer?.email || "",
-//     "Influencer.ContactPhone": c?.influencer?.phone || "",
-//     "Influencer.Address1": c?.influencer?.addressLine1 || contract.influencerAddress || "",
-//     "Influencer.Address2": c?.influencer?.addressLine2 || contract.influencerAddress || "",
-//     "Influencer.city": c?.influencer?.city || contract.influencerAddress || "",
-//     "Influencer.state": c?.influencer?.state || contract.influencerAddress || "",
-//     "Influencer.country": c?.influencer?.country || contract.influencerAddress || "",
-//     "Influencer.state": c?.influencer?.state || contract.influencerAddress || "",
-/**
- * Legacy statuses (readable during migration).
- * On WRITE, always store canonical.
- */
+
 const LEGACY_STATUS_MAP = Object.freeze({
-  draft: CONTRACT_STATUS.DRAFT,
-  sent: CONTRACT_STATUS.BRAND_SENT_DRAFT,
-  viewed: CONTRACT_STATUS.BRAND_SENT_DRAFT,
-  negotiation: CONTRACT_STATUS.BRAND_SENT_DRAFT,
-  finalize: CONTRACT_STATUS.READY_TO_SIGN,
-  signing: CONTRACT_STATUS.READY_TO_SIGN,
-  locked: CONTRACT_STATUS.CONTRACT_SIGNED,
-  rejected: CONTRACT_STATUS.REJECTED,
+  BRAND_FINAL_UPADTE: CONTRACT_STATUS.BRAND_FINAL_UPDATE,
+  BRAND_FINAL_UPDATE: CONTRACT_STATUS.BRAND_FINAL_UPDATE,
 });
 
-const NEGOTIATION_STATUSES = Object.freeze([
-  CONTRACT_STATUS.BRAND_SENT_DRAFT,
-  CONTRACT_STATUS.BRAND_EDITED,
-  CONTRACT_STATUS.INFLUENCER_EDITED,
-  CONTRACT_STATUS.BRAND_ACCEPTED,
-  CONTRACT_STATUS.INFLUENCER_ACCEPTED,
-]);
+const PAYMENT_TYPE = Object.freeze({
+  FIXED: "fixed_payment",
+  MILESTONE: "milestone_based",
+  GIFTING: "product_gifting",
+});
+
+const CONTRACT_ROLE = Object.freeze({
+  BRAND: "brand",
+  INFLUENCER: "influencer",
+  COLLABGLAM: "collabglam",
+  SYSTEM: "system",
+  ADMIN: "admin",
+});
+
+const SIGNER_ROLES = Object.freeze(["brand", "influencer", "collabglam"]);
+const CONTRACT_STATUS_VALUES = Object.freeze(Object.values(CONTRACT_STATUS));
+const LEGACY_STATUS_VALUES = Object.freeze(Object.keys(LEGACY_STATUS_MAP));
+const CONTRACT_STATUS_ENUM = Object.freeze([...new Set([...CONTRACT_STATUS_VALUES, ...LEGACY_STATUS_VALUES])]);
+const PAYMENT_TYPE_VALUES = Object.freeze(Object.values(PAYMENT_TYPE));
+
+function normalizeContractStatus(status) {
+  if (!status) return CONTRACT_STATUS.DRAFT;
+  const value = String(status).trim().toUpperCase();
+  if (CONTRACT_STATUS_VALUES.includes(value)) return value;
+  if (LEGACY_STATUS_MAP[value]) return LEGACY_STATUS_MAP[value];
+  return CONTRACT_STATUS.BRAND_SENT_DRAFT;
+}
+
+function normalizePaymentType(value) {
+  if (!value) return PAYMENT_TYPE.FIXED;
+  const raw = String(value).trim().toLowerCase();
+  if (["fixed", "fixed_payment", "fixed-payment"].includes(raw)) return PAYMENT_TYPE.FIXED;
+  if (["milestone", "milestone_based", "milestone-based"].includes(raw)) return PAYMENT_TYPE.MILESTONE;
+  if (["gifting", "product_gifting", "product-gifting"].includes(raw)) return PAYMENT_TYPE.GIFTING;
+  return PAYMENT_TYPE.FIXED;
+}
 
 module.exports = {
   CONTRACT_STATUS,
   LEGACY_STATUS_MAP,
-  NEGOTIATION_STATUSES,
+  PAYMENT_TYPE,
+  CONTRACT_ROLE,
+  SIGNER_ROLES,
+  CONTRACT_STATUS_ENUM,
+  PAYMENT_TYPE_VALUES,
+  normalizeContractStatus,
+  normalizePaymentType,
 };

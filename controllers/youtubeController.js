@@ -603,6 +603,94 @@ async function searchChannelsByKeyword(query, limit = 5) {
   return Array.isArray(data?.items) ? data.items : [];
 }
 
+function isMongoObjectIdLike(value) {
+  return /^[a-f\d]{24}$/i.test(String(value || "").trim());
+}
+
+function cleanSearchValue(value) {
+  const text = cleanStr(value);
+  if (!text) return "";
+  if (isMongoObjectIdLike(text)) return "";
+  return text;
+}
+
+function uniqCleanSearch(values = []) {
+  const seen = new Set();
+
+  return values
+    .flat()
+    .map((x) => cleanSearchValue(x))
+    .filter(Boolean)
+    .filter((x) => {
+      const key = x.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function getCampaignSubcategoryTags(campaign = {}) {
+  return uniqCleanSearch(
+    Array.isArray(campaign.details?.subcategories)
+      ? campaign.details.subcategories.flatMap((x) =>
+        Array.isArray(x?.tags) ? x.tags : []
+      )
+      : []
+  );
+}
+
+function getCampaignGoals(campaign = {}) {
+  return uniqCleanSearch([
+    campaign.campaignGoal,
+    campaign.campaignObjective,
+    ...(Array.isArray(campaign.details?.campaignGoals)
+      ? campaign.details.campaignGoals.map((x) => x?.goal)
+      : []),
+  ]);
+}
+
+function getCampaignContentFormats(campaign = {}) {
+  return uniqCleanSearch([
+    // Do not use raw campaign.contentFormats here because it can contain ObjectIds.
+    ...(Array.isArray(campaign.details?.contentFormats)
+      ? campaign.details.contentFormats.map((x) => x?.format)
+      : []),
+    campaign.contentFormat,
+    campaign.deliverable,
+  ]);
+}
+
+function buildYouTubeCampaignCategories(campaign = {}) {
+  return uniqCleanSearch([
+    campaign.campaignCategory,
+    campaign.campaignSubcategory,
+    ...(Array.isArray(campaign.categories)
+      ? campaign.categories.flatMap((x) => [
+        x?.categoryName,
+        x?.subcategoryName,
+      ])
+      : []),
+    campaign.details?.category?.name,
+    ...(Array.isArray(campaign.details?.subcategories)
+      ? campaign.details.subcategories.map((x) => x?.name)
+      : []),
+    ...getCampaignSubcategoryTags(campaign).slice(0, 12),
+  ]);
+}
+
+function buildYouTubeCampaignCountries(campaign = {}) {
+  return uniqCleanSearch([
+    campaign.targetCountry,
+    campaign.targetCountryCode,
+    ...(Array.isArray(campaign.details?.targetCountries)
+      ? campaign.details.targetCountries.flatMap((x) => [
+        x?.countryCode,
+        x?.countryName,
+      ])
+      : []),
+  ]);
+}
+
 /**
  * Global keyword search for videos
  */
@@ -1007,6 +1095,136 @@ function mapChannelLite(ch) {
 
 
 
+function mapChannelToGlobalRecommendation(ch, videosByChannelId, directChannelSet = new Set()) {
+  const sn = ch?.snippet || {};
+  const st = ch?.statistics || {};
+  const td = ch?.topicDetails || {};
+  const branding = ch?.brandingSettings || {};
+
+  const handle = normalizeHandle(sn?.customUrl || '') || null;
+  const topicCategories = Array.isArray(td?.topicCategories) ? td.topicCategories : [];
+  const topicLabels = topicCategories.map(labelFromWikiUrl);
+  const matchedVideos = (videosByChannelId.get(ch.id) || []).slice(0, 6);
+  const matchedByDirectChannelSearch = directChannelSet.has(ch.id);
+
+  return {
+    channelId: ch.id,
+    title: sn?.title || '',
+    description: sn?.description || '',
+    handle,
+    customUrl: sn?.customUrl || null,
+    country: sn?.country || null,
+    defaultLanguage: sn?.defaultLanguage || null,
+    thumbnails: sn?.thumbnails || null,
+    subscriberCount: toNum(st?.subscriberCount),
+    totalViewCount: toNum(st?.viewCount),
+    totalVideoCount: toNum(st?.videoCount),
+    topicLabels,
+    keywords: branding?.channel?.keywords || '',
+    bannerUrl: branding?.image?.bannerExternalUrl || null,
+    channelCreatedAt: sn?.publishedAt || null,
+    channelUrl: handle
+      ? `https://www.youtube.com/${handle}`
+      : ch.id
+        ? `https://www.youtube.com/channel/${ch.id}`
+        : null,
+    matchedByDirectChannelSearch,
+    matchedVideos,
+
+    avgViewsLast15: null,
+    engagementRateLast15: null,
+    uploadFrequencyPerWeek: null,
+    avgDaysBetweenUploads: null,
+    lastUploadAt: null,
+    lastVideoId: null,
+    lastVideoTitle: null,
+    instagramHandle: null,
+
+    score:
+      (matchedByDirectChannelSearch ? 1000 : 0) +
+      (matchedVideos.length * 75) +
+      ((toNum(st?.subscriberCount) || 0) / 100000),
+  };
+}
+
+async function enrichYouTubeRecommendationMetrics(recommendations, channelsById, filters) {
+  if (!liveSearchNeedsMetrics(filters) || !recommendations.length) return recommendations;
+
+  return Promise.all(
+    recommendations.map(async (rec) => {
+      const ch = channelsById.get(rec.channelId);
+      if (!ch) return rec;
+
+      try {
+        const { profileData } = await buildYouTubeProfileData(ch, {
+          inputHandle: rec.handle,
+          videosLimit: 15,
+        });
+
+        return {
+          ...rec,
+          avgViewsLast15: profileData.avgViewsLast15 ?? null,
+          engagementRateLast15: profileData.engagementRateLast15 ?? null,
+          uploadFrequencyPerWeek: profileData.uploadFrequencyPerWeek ?? null,
+          avgDaysBetweenUploads: profileData.avgDaysBetweenUploads ?? null,
+          lastUploadAt: profileData.lastUploadAt ?? null,
+          lastVideoId: profileData.lastVideoId ?? null,
+          lastVideoTitle: profileData.lastVideoTitle ?? null,
+          instagramHandle: profileData.instagramHandle ?? null,
+        };
+      } catch {
+        return rec;
+      }
+    })
+  );
+}
+
+async function collectYouTubeRecommendationsFromChannelIds({
+  channelIds,
+  videosByChannelId,
+  directChannelSet,
+  filters,
+}) {
+  const uniqueChannelIds = Array.from(
+    new Set((channelIds || []).map((x) => String(x || '').trim()).filter(Boolean))
+  );
+
+  if (!uniqueChannelIds.length) return [];
+
+  const channels = await fetchChannelsByIds(uniqueChannelIds);
+  const channelsById = new Map(channels.map((ch) => [ch.id, ch]));
+
+  let recommendations = channels.map((ch) =>
+    mapChannelToGlobalRecommendation(ch, videosByChannelId, directChannelSet)
+  );
+
+  recommendations = recommendations.filter((rec) =>
+    passesBasicLiveSearchFilters(rec, filters)
+  );
+
+  recommendations = await enrichYouTubeRecommendationMetrics(
+    recommendations,
+    channelsById,
+    filters
+  );
+
+  return recommendations.filter((rec) =>
+    passesMetricLiveSearchFilters(rec, filters)
+  );
+}
+
+function addUniqueYouTubeRecommendations(collected, recommendations = []) {
+  for (const rec of recommendations) {
+    const key = rec.channelId || rec.handle || rec.title;
+    if (!key) continue;
+
+    const prev = collected.get(key);
+    if (!prev || Number(rec.score || 0) > Number(prev.score || 0)) {
+      collected.set(key, rec);
+    }
+  }
+}
+
 // ======================================================
 // Global YouTube search (READ ONLY, no DB storage)
 // query: "powerstation reviews"
@@ -1053,11 +1271,27 @@ async function globalYouTubeSearch(query, opts = {}) {
     videosByChannelId.get(cid).push(row);
   }
 
+  const videoChannelIds = Array.from(videosByChannelId.keys());
+
   let currentPageToken = incomingPageToken || '';
   let nextPageToken = null;
   let scannedPages = 0;
 
   const collected = new Map();
+
+  // Use channels discovered from matching videos first. The previous logic only
+  // used the YouTube channel-search endpoint, so a query could have 50 video hits
+  // but still return only 0-1 channels. This fills recommendations from the
+  // actual channels behind those matched videos.
+  addUniqueYouTubeRecommendations(
+    collected,
+    await collectYouTubeRecommendationsFromChannelIds({
+      channelIds: videoChannelIds,
+      videosByChannelId,
+      directChannelSet: new Set(),
+      filters,
+    })
+  );
 
   while (scannedPages < MAX_SEARCH_SCAN_PAGES && collected.size < targetFilteredCount) {
     const channelPage = await searchYouTubeChannels(normalizedQuery, currentPageToken, 50);
@@ -1067,114 +1301,17 @@ async function globalYouTubeSearch(query, opts = {}) {
       .map((it) => it?.id?.channelId || it?.snippet?.channelId)
       .filter(Boolean);
 
-    const uniquePageChannelIds = Array.from(new Set(pageChannelIds));
+    const directChannelSet = new Set(pageChannelIds);
 
-    if (!uniquePageChannelIds.length) {
-      nextPageToken = channelPage.nextPageToken || null;
-      if (!nextPageToken) break;
-      currentPageToken = nextPageToken;
-      continue;
-    }
-
-    const channels = await fetchChannelsByIds(uniquePageChannelIds);
-    const directChannelSet = new Set(uniquePageChannelIds);
-
-    let pageRecommendations = channels.map((ch) => {
-      const sn = ch?.snippet || {};
-      const st = ch?.statistics || {};
-      const td = ch?.topicDetails || {};
-      const branding = ch?.brandingSettings || {};
-
-      const handle = normalizeHandle(sn?.customUrl || '') || null;
-      const topicCategories = Array.isArray(td?.topicCategories) ? td.topicCategories : [];
-      const topicLabels = topicCategories.map(labelFromWikiUrl);
-      const matchedVideos = (videosByChannelId.get(ch.id) || []).slice(0, 6);
-
-      return {
-        channelId: ch.id,
-        title: sn?.title || '',
-        description: sn?.description || '',
-        handle,
-        customUrl: sn?.customUrl || null,
-        country: sn?.country || null,
-        defaultLanguage: sn?.defaultLanguage || null,
-        thumbnails: sn?.thumbnails || null,
-        subscriberCount: toNum(st?.subscriberCount),
-        totalViewCount: toNum(st?.viewCount),
-        totalVideoCount: toNum(st?.videoCount),
-        topicLabels,
-        keywords: branding?.channel?.keywords || '',
-        bannerUrl: branding?.image?.bannerExternalUrl || null,
-        channelCreatedAt: sn?.publishedAt || null,
-        channelUrl: handle
-          ? `https://www.youtube.com/${handle}`
-          : ch.id
-            ? `https://www.youtube.com/channel/${ch.id}`
-            : null,
-        matchedByDirectChannelSearch: directChannelSet.has(ch.id),
-        matchedVideos,
-
-        avgViewsLast15: null,
-        engagementRateLast15: null,
-        uploadFrequencyPerWeek: null,
-        avgDaysBetweenUploads: null,
-        lastUploadAt: null,
-        lastVideoId: null,
-        lastVideoTitle: null,
-        instagramHandle: null,
-
-        score:
-          (directChannelSet.has(ch.id) ? 1000 : 0) +
-          (matchedVideos.length * 25) +
-          ((toNum(st?.subscriberCount) || 0) / 100000),
-      };
-    });
-
-    pageRecommendations = pageRecommendations.filter((rec) =>
-      passesBasicLiveSearchFilters(rec, filters)
+    addUniqueYouTubeRecommendations(
+      collected,
+      await collectYouTubeRecommendationsFromChannelIds({
+        channelIds: pageChannelIds,
+        videosByChannelId,
+        directChannelSet,
+        filters,
+      })
     );
-
-    if (liveSearchNeedsMetrics(filters) && pageRecommendations.length) {
-      pageRecommendations = await Promise.all(
-        pageRecommendations.map(async (rec) => {
-          const ch = channels.find((x) => x.id === rec.channelId);
-          if (!ch) return rec;
-
-          try {
-            const { profileData } = await buildYouTubeProfileData(ch, {
-              inputHandle: rec.handle,
-              videosLimit: 15,
-            });
-
-            return {
-              ...rec,
-              avgViewsLast15: profileData.avgViewsLast15 ?? null,
-              engagementRateLast15: profileData.engagementRateLast15 ?? null,
-              uploadFrequencyPerWeek: profileData.uploadFrequencyPerWeek ?? null,
-              avgDaysBetweenUploads: profileData.avgDaysBetweenUploads ?? null,
-              lastUploadAt: profileData.lastUploadAt ?? null,
-              lastVideoId: profileData.lastVideoId ?? null,
-              lastVideoTitle: profileData.lastVideoTitle ?? null,
-              instagramHandle: profileData.instagramHandle ?? null,
-            };
-          } catch {
-            return rec;
-          }
-        })
-      );
-    }
-
-    pageRecommendations = pageRecommendations.filter((rec) =>
-      passesMetricLiveSearchFilters(rec, filters)
-    );
-
-    for (const rec of pageRecommendations) {
-      const key = rec.channelId || rec.handle || rec.title;
-      if (!key) continue;
-      if (!collected.has(key)) {
-        collected.set(key, rec);
-      }
-    }
 
     nextPageToken = channelPage.nextPageToken || null;
     if (!nextPageToken) break;
@@ -1335,7 +1472,7 @@ function buildYouTubeCampaignQuery(campaign = {}) {
       : []),
   ].filter(looksUsefulSearchText);
 
-  const values = uniqClean([
+  const values = uniqCleanSearch([
     ...categoryTerms,
     ...goalTerms,
     ...formatTerms,
@@ -1378,48 +1515,31 @@ function buildCampaignFit(rec = {}, campaign = {}) {
   const goals = getCampaignGoals(campaign);
   const contentFormats = getCampaignContentFormats(campaign);
 
+  const haystackValues = [
+    rec.title,
+    rec.description,
+    rec.keywords,
+    ...(Array.isArray(rec.topicLabels) ? rec.topicLabels : []),
+    ...(Array.isArray(rec.matchedVideos)
+      ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
+      : []),
+  ];
+
   const countryUpper = cleanStr(rec.country).toUpperCase();
   const countryMatched = countries.length
     ? countries.some((x) => cleanStr(x).toUpperCase() === countryUpper)
     : null;
 
   const categoryMatched = categories.length
-    ? matchAnyText(
-      [
-        rec.title,
-        rec.description,
-        rec.keywords,
-        ...(Array.isArray(rec.topicLabels) ? rec.topicLabels : []),
-      ],
-      categories
-    )
+    ? matchAnyText(haystackValues, categories)
     : null;
 
   const goalMatched = goals.length
-    ? matchAnyText(
-      [
-        rec.title,
-        rec.description,
-        rec.keywords,
-        ...(Array.isArray(rec.matchedVideos)
-          ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
-          : []),
-      ],
-      goals
-    )
+    ? matchAnyText(haystackValues, goals)
     : null;
 
   const contentFormatMatched = contentFormats.length
-    ? matchAnyText(
-      [
-        rec.title,
-        rec.description,
-        ...(Array.isArray(rec.matchedVideos)
-          ? rec.matchedVideos.flatMap((v) => [v?.title, v?.description])
-          : []),
-      ],
-      contentFormats
-    )
+    ? matchAnyText(haystackValues, contentFormats)
     : null;
 
   const followerFit = getFollowerFitLabel(
@@ -1430,11 +1550,11 @@ function buildCampaignFit(rec = {}, campaign = {}) {
 
   let score = 0;
 
-  if (followerFit === "matched") score += 35;
+  if (followerFit === "matched") score += 45;
   if (categoryMatched === true) score += 30;
-  if (countryMatched === true) score += 15;
+  if (countryMatched === true) score += 10;
   if (goalMatched === true) score += 10;
-  if (contentFormatMatched === true) score += 10;
+  if (contentFormatMatched === true) score += 5;
 
   return {
     score,
@@ -1466,18 +1586,6 @@ function passesCampaignHardFilters(rec = {}, campaign = {}) {
 
   if (minFollowers && subscriberCount < minFollowers) return false;
   if (maxFollowers && subscriberCount > maxFollowers) return false;
-
-  const countries = buildYouTubeCampaignCountries(campaign)
-    .map((x) => cleanStr(x).toUpperCase())
-    .filter(Boolean);
-
-  // Only apply country as a hard filter when campaign has a real country code/name.
-  if (countries.length) {
-    const recCountry = cleanStr(rec.country).toUpperCase();
-    if (recCountry && !countries.includes(recCountry)) {
-      return false;
-    }
-  }
 
   return true;
 }
@@ -1592,21 +1700,20 @@ function mapYouTubeRecommendedInfluencer(rec, maxScore, campaign = {}) {
   };
 }
 
-async function runCampaignYouTubeSearch(query, campaign, limit) {
+async function runCampaignYouTubeSearch(query, campaign, limit, opts = {}) {
+  const relaxFilters = Boolean(opts.relaxFilters);
+
   return globalYouTubeSearch(query, {
-    channelLimit: Math.max(limit * 3, 30),
+    channelLimit: Math.max(limit * 5, 50),
     videoLimit: 50,
 
-    // Hard campaign follower range.
-    followersMin: campaign.minFollowers,
-    followersMax: campaign.maxFollowers,
+    followersMin: relaxFilters ? null : campaign.minFollowers,
+    followersMax: relaxFilters ? null : campaign.maxFollowers,
 
-    // Country code/name support.
+    categories: [],
+
     country: undefined,
-    countries: buildYouTubeCampaignCountries(campaign),
-
-    // Category, subcategory, and tags.
-    categories: buildYouTubeCampaignCategories(campaign),
+    countries: [],
 
     sortBy: "relevance",
   });
@@ -1620,8 +1727,12 @@ async function getYouTubeRecommendationsForCampaign(campaign = {}, opts = {}) {
   }
 
   const limit = Math.min(
-    30,
-    Math.max(1, parseInt(String(opts.limit || 15), 10) || 15)
+    15,
+    Math.max(10, parseInt(String(opts.limit || 15), 10) || 15)
+  );
+  const minimumResults = Math.min(
+    limit,
+    Math.max(1, parseInt(String(opts.minResults || 10), 10) || 10)
   );
 
   const primaryQuery = buildYouTubeCampaignQuery(campaign);
@@ -1659,6 +1770,7 @@ async function getYouTubeRecommendationsForCampaign(campaign = {}, opts = {}) {
       videoHits: data.videoHits,
       scannedPages: data.scannedPages,
       hasMore: data.hasMore,
+      relaxed: false,
     });
 
     const rows = Array.isArray(data.recommendations)
@@ -1682,6 +1794,45 @@ async function getYouTubeRecommendationsForCampaign(campaign = {}, opts = {}) {
     });
 
     if (merged.size >= limit) break;
+  }
+
+  // If strict follower filters produce no rows, relax once so the UI still
+  // shows same-source YouTube recommendations instead of an empty list.
+  if (merged.size < minimumResults) {
+    for (const query of queryVariants) {
+      const data = await runCampaignYouTubeSearch(query, campaign, limit, {
+        relaxFilters: true,
+      });
+
+      metaRuns.push({
+        query,
+        channelsFound: data.channelsFound,
+        videoHits: data.videoHits,
+        scannedPages: data.scannedPages,
+        hasMore: data.hasMore,
+        relaxed: true,
+      });
+
+      const rows = Array.isArray(data.recommendations)
+        ? data.recommendations
+        : [];
+
+      rows.forEach((rec) => {
+        const key = rec.channelId || rec.handle || rec.title;
+        if (!key) return;
+
+        const fit = buildCampaignFit(rec, campaign);
+        const score = Number(rec.score || 0) + Number(fit.score || 0);
+        const next = { ...rec, score, campaignFit: fit };
+
+        const prev = merged.get(key);
+        if (!prev || Number(next.score || 0) > Number(prev.score || 0)) {
+          merged.set(key, next);
+        }
+      });
+
+      if (merged.size >= limit) break;
+    }
   }
 
   const sorted = Array.from(merged.values())
@@ -1711,6 +1862,7 @@ async function getYouTubeRecommendationsForCampaign(campaign = {}, opts = {}) {
         goals: getCampaignGoals(campaign),
         contentFormats: getCampaignContentFormats(campaign),
       },
+      minimumResults,
     },
   };
 }

@@ -4207,8 +4207,8 @@ function buildCreditUsage(subscription = {}) {
     },
     {
       label: "Influencer Profile Views",
-      keys: ["influencerProfileViews", "profileViews", "profile_views"],
-      fallbackTotal: 3,
+      keys: ["influencer_profile_views_per_month"],
+      fallbackTotal: 0,
       color: "green",
     },
     {
@@ -4229,7 +4229,7 @@ function buildCreditUsage(subscription = {}) {
     const feature = findFeature(subscription, item.keys);
 
     const used = Number(feature?.used ?? 0);
-    const total = Number(feature?.limit ?? feature?.value ?? item.fallbackTotal);
+    const total = Number(feature?.limit ?? item.fallbackTotal);
 
     return {
       label: item.label,
