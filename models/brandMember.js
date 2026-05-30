@@ -15,6 +15,7 @@ const PERMISSION_RESOURCES = [
 
 const ACCESS_TYPES = ["full", "limited", "custom"];
 const ACCESS_LEVELS = ["none", "view", "edit"];
+const MEMBER_STATUSES = ["active", "inactive", "invited", "removed"];
 
 const permissionSchema = new Schema(
   {
@@ -34,7 +35,6 @@ const permissionSchema = new Schema(
 
 const brandMemberSchema = new Schema(
   {
-    // Owner brand workspace id.
     brandId: {
       type: Schema.Types.ObjectId,
       ref: "Brand",
@@ -42,7 +42,6 @@ const brandMemberSchema = new Schema(
       index: true,
     },
 
-    // Shared member's own Brand account id, filled when that email logs in.
     memberBrandId: {
       type: Schema.Types.ObjectId,
       ref: "Brand",
@@ -83,7 +82,7 @@ const brandMemberSchema = new Schema(
 
     status: {
       type: String,
-      enum: ["active", "inactive"],
+      enum: MEMBER_STATUSES,
       default: "active",
     },
 
@@ -98,6 +97,11 @@ const brandMemberSchema = new Schema(
       default: null,
     },
 
+    inviteSentAt: {
+      type: Date,
+      default: null,
+    },
+
     joinedAt: {
       type: Date,
       default: null,
@@ -105,6 +109,23 @@ const brandMemberSchema = new Schema(
 
     removedAt: {
       type: Date,
+      default: null,
+    },
+
+    removedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Brand",
+      default: null,
+    },
+
+    ownershipTransferredAt: {
+      type: Date,
+      default: null,
+    },
+
+    ownershipTransferredBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Brand",
       default: null,
     },
   },
@@ -120,7 +141,8 @@ brandMemberSchema.index({ memberBrandId: 1, status: 1 });
 brandMemberSchema.index({ email: 1, status: 1 });
 
 const BrandMember =
-  mongoose.models.BrandMember || mongoose.model("BrandMember", brandMemberSchema);
+  mongoose.models.BrandMember ||
+  mongoose.model("BrandMember", brandMemberSchema);
 
 module.exports = BrandMember;
 module.exports.BrandMember = BrandMember;

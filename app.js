@@ -63,6 +63,7 @@ const youtubeInsightRoutes = require("./routes/youtubeInsightRoutes");
 const errorLogRoutes = require("./routes/errorLog.routes");
 const brandSignatureRoutes = require("./routes/brandSignatureRoutes");
 const influencerSignatureRoutes = require("./routes/influencerSignatureRoutes");
+const brandMemberRoutes = require("./routes/brandMemberRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -420,6 +421,7 @@ app.use("/campaign-intelligence", require("./routes/campaignIntelligenceRoutes")
 app.use("/error-logs", errorLogRoutes);
 app.use("/", brandSignatureRoutes);
 app.use("/", influencerSignatureRoutes);
+app.use("/brand-members", brandMemberRoutes);
 
 /* =========================================================
    404 HANDLER
