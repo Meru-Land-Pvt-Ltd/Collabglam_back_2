@@ -1,40 +1,39 @@
-'use strict';
-
-const mongoose = require('mongoose');
-const Invitation = require('../models/NewInvitations');
-const MissingEmail = require('../models/MissingEmail');
-const Campaign = require('../models/campaign');
-const { InfluencerModel } = require('../models/influencer');
-const { EmailThread, EmailMessage } = require('../models/email');
-const Brand = require('../models/brand');
+const mongoose = require("mongoose");
+const Invitation = require("../models/NewInvitations");
+const MissingEmail = require("../models/MissingEmail");
+const Campaign = require("../models/campaign");
+const { InfluencerModel } = require("../models/influencer");
+const { EmailThread, EmailMessage } = require("../models/email");
+const Brand = require("../models/brand");
 const {
   sendEmail,
   cleanEmail,
   cleanStr,
-} = require('../services/email/invitationEmailService');
+} = require("../services/email/invitationEmailService");
 
-const saveErrorLog = require('../services/errorLog.service');
+const saveErrorLog = require("../services/errorLog.service");
 
 const HANDLE_RX = /^@[A-Za-z0-9._\-]+$/;
 const EMAIL_RX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 
 const PLATFORM_MAP = new Map([
-  ['youtube', 'youtube'],
-  ['yt', 'youtube'],
-  ['instagram', 'instagram'],
-  ['ig', 'instagram'],
-  ['tiktok', 'tiktok'],
-  ['tt', 'tiktok'],
+  ["youtube", "youtube"],
+  ["yt", "youtube"],
+  ["instagram", "instagram"],
+  ["ig", "instagram"],
+  ["tiktok", "tiktok"],
+  ["tt", "tiktok"],
 ]);
 
-const PLATFORM_ENUM = new Set(['youtube', 'instagram', 'tiktok']);
-const STATUS_ENUM = new Set(['invited', 'available']);
+const PLATFORM_ENUM = new Set(["youtube", "instagram", "tiktok"]);
+const STATUS_ENUM = new Set(["invited", "available"]);
 
-const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
+const isObjectId = (value) =>
+  mongoose.Types.ObjectId.isValid(String(value || ""));
 
 function normalizeObjectId(value) {
-  const id = String(value || '').trim();
-  return isObjectId(id) ? id : '';
+  const id = String(value || "").trim();
+  return isObjectId(id) ? id : "";
 }
 
 function toObjectId(value) {
@@ -43,31 +42,61 @@ function toObjectId(value) {
 
 function toPlainId(value) {
   if (!value) return null;
-  if (typeof value === 'object' && value._id) return String(value._id);
+  if (typeof value === "object" && value._id) return String(value._id);
   return String(value);
 }
 
 function normalizeHandle(h) {
-  if (!h) return '';
+  if (!h) return "";
   const t = String(h).trim().toLowerCase();
-  return t.startsWith('@') ? t : `@${t}`;
+  return t.startsWith("@") ? t : `@${t}`;
 }
 
 function normalizePlatform(value) {
-  return PLATFORM_MAP.get(String(value || '').trim().toLowerCase()) || '';
+  return PLATFORM_MAP.get(String(value || "").trim().toLowerCase()) || "";
 }
 
-function escapeRegExp(value = '') {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function normalizeEmailText(value = '') {
-  return String(value || '')
-    .replace(/\s*(\[|\()?at(\]|\))?\s*/gi, '@')
-    .replace(/\s*(\[|\()?dot(\]|\))?\s*/gi, '.');
+function normalizeInfluencerUserId(body = {}) {
+  return (
+    String(
+      body.userId ||
+        body.influencerUserId ||
+        body.creatorId ||
+        body.influencerId ||
+        body.modashUserId ||
+        body.channelId ||
+        ""
+    ).trim() || null
+  );
 }
 
-function extractEmailFromText(value = '') {
+function normalizeCampaignIds(body = {}) {
+  const rawCampaignIds = Array.isArray(body.campaignIds)
+    ? body.campaignIds
+    : Array.isArray(body.campaignId)
+      ? body.campaignId
+      : [body.campaignId];
+
+  return [
+    ...new Set(
+      rawCampaignIds
+        .map((id) => normalizeObjectId(id))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function normalizeEmailText(value = "") {
+  return String(value || "")
+    .replace(/\s*(\[|\()?at(\]|\))?\s*/gi, "@")
+    .replace(/\s*(\[|\()?dot(\]|\))?\s*/gi, ".");
+}
+
+function extractEmailFromText(value = "") {
   const normalized = normalizeEmailText(value);
   const match = normalized.match(EMAIL_RX);
   return match ? cleanEmail(match[0]) : null;
@@ -86,9 +115,9 @@ function getEmailFromContactsTypeEmail(contacts) {
   if (!Array.isArray(contacts)) return null;
 
   const emailContact = contacts.find((item) => {
-    if (!item || typeof item !== 'object') return false;
+    if (!item || typeof item !== "object") return false;
 
-    const type = String(item.type || '').trim().toLowerCase();
+    const type = String(item.type || "").trim().toLowerCase();
     const email = getFirstDirectEmail(
       item.value,
       item.email,
@@ -97,7 +126,7 @@ function getEmailFromContactsTypeEmail(contacts) {
       item.emailAddress
     );
 
-    return type === 'email' && email;
+    return type === "email" && email;
   });
 
   if (!emailContact) return null;
@@ -112,10 +141,15 @@ function getEmailFromContactsTypeEmail(contacts) {
 }
 
 function buildMissingYouTubePayload(source, handle) {
-  if (!source || typeof source !== 'object') return undefined;
+  if (!source || typeof source !== "object") return undefined;
 
   return {
-    channelId: source.channelId || source.userId || source.id || source.modashId || undefined,
+    channelId:
+      source.channelId ||
+      source.userId ||
+      source.id ||
+      source.modashId ||
+      undefined,
     title:
       source.title ||
       source.fullname ||
@@ -138,21 +172,21 @@ function buildMissingYouTubePayload(source, handle) {
     description: source.description || source.bio || source.about || undefined,
     country: source.country || source.location?.country || undefined,
     subscriberCount:
-      typeof source.subscriberCount === 'number'
+      typeof source.subscriberCount === "number"
         ? source.subscriberCount
-        : typeof source.followers === 'number'
+        : typeof source.followers === "number"
           ? source.followers
           : undefined,
     videoCount:
-      typeof source.videoCount === 'number'
+      typeof source.videoCount === "number"
         ? source.videoCount
-        : typeof source.postsCount === 'number'
+        : typeof source.postsCount === "number"
           ? source.postsCount
           : undefined,
     viewCount:
-      typeof source.viewCount === 'number'
+      typeof source.viewCount === "number"
         ? source.viewCount
-        : typeof source.averageViews === 'number'
+        : typeof source.averageViews === "number"
           ? source.averageViews
           : undefined,
     topicCategories: Array.isArray(source.topicCategories)
@@ -169,13 +203,13 @@ async function ensurePendingMissingEmailRecord({ handle, platform, sourceDoc }) 
   const normalizedHandle = normalizeHandle(handle);
 
   if (!HANDLE_RX.test(normalizedHandle)) return null;
-  if (platform !== 'youtube') return null;
+  if (platform !== "youtube") return null;
 
   const update = {
     email: null,
     handle: normalizedHandle,
     platform,
-    status: 'pending',
+    status: "pending",
     youtube: buildMissingYouTubePayload(sourceDoc, normalizedHandle),
   };
 
@@ -198,32 +232,19 @@ async function ensurePendingMissingEmailRecord({ handle, platform, sourceDoc }) 
 
 async function getBrandByMongoId(brandId) {
   if (!isObjectId(brandId)) return null;
-
   return Brand.findById(brandId).lean();
 }
 
-async function getCampaignByMongoId({ campaignId, brandId }) {
-  if (!isObjectId(campaignId) || !isObjectId(brandId)) return null;
-
-  return Campaign.findOne({
-    _id: toObjectId(campaignId),
-    $or: [
-      { brandId: toObjectId(brandId) },
-      { brandId: String(brandId) },
-    ],
-  }).lean();
-}
-
 async function findEmailInModash({ handle, platform, modashUserId }) {
-  const handleWithAt = String(handle || '').trim();
-  const handleWithoutAt = handleWithAt.replace(/^@/, '');
+  const handleWithAt = String(handle || "").trim();
+  const handleWithoutAt = handleWithAt.replace(/^@/, "");
 
-  const platformRegex = new RegExp(`^${escapeRegExp(platform)}$`, 'i');
+  const platformRegex = new RegExp(`^${escapeRegExp(platform)}$`, "i");
 
   const identityOr = [];
 
   if (handleWithoutAt) {
-    const handleRegex = new RegExp(`^@?${escapeRegExp(handleWithoutAt)}$`, 'i');
+    const handleRegex = new RegExp(`^@?${escapeRegExp(handleWithoutAt)}$`, "i");
 
     identityOr.push({ handle: handleRegex });
     identityOr.push({ username: handleRegex });
@@ -231,7 +252,7 @@ async function findEmailInModash({ handle, platform, modashUserId }) {
   }
 
   if (modashUserId) {
-    const modashRegex = new RegExp(`^${escapeRegExp(modashUserId)}$`, 'i');
+    const modashRegex = new RegExp(`^${escapeRegExp(modashUserId)}$`, "i");
 
     identityOr.push({ userId: modashRegex });
     identityOr.push({ id: modashRegex });
@@ -241,18 +262,15 @@ async function findEmailInModash({ handle, platform, modashUserId }) {
   if (!identityOr.length) {
     return {
       email: null,
-      source: 'missing_identity',
+      source: "missing_identity",
       doc: null,
     };
   }
 
-  const modash = await mongoose.connection.collection('modashes').findOne({
+  const modash = await mongoose.connection.collection("modashes").findOne({
     $and: [
       {
-        $or: [
-          { provider: platformRegex },
-          { platform: platformRegex },
-        ],
+        $or: [{ provider: platformRegex }, { platform: platformRegex }],
       },
       {
         $or: identityOr,
@@ -263,7 +281,7 @@ async function findEmailInModash({ handle, platform, modashUserId }) {
   if (!modash) {
     return {
       email: null,
-      source: 'modash_not_found',
+      source: "modash_not_found",
       doc: null,
     };
   }
@@ -279,7 +297,7 @@ async function findEmailInModash({ handle, platform, modashUserId }) {
   if (directEmail) {
     return {
       email: directEmail,
-      source: 'modash_direct',
+      source: "modash_direct",
       doc: modash,
     };
   }
@@ -289,7 +307,7 @@ async function findEmailInModash({ handle, platform, modashUserId }) {
   if (contactEmail) {
     return {
       email: contactEmail,
-      source: 'modash_contact',
+      source: "modash_contact",
       doc: modash,
     };
   }
@@ -303,20 +321,20 @@ async function findEmailInModash({ handle, platform, modashUserId }) {
       modash.profileDescription,
     ]
       .filter(Boolean)
-      .join('\n')
+      .join("\n")
   );
 
   if (bioEmail) {
     return {
       email: bioEmail,
-      source: 'modash_bio',
+      source: "modash_bio",
       doc: modash,
     };
   }
 
   return {
     email: null,
-    source: 'modash_no_email',
+    source: "modash_no_email",
     doc: modash,
   };
 }
@@ -330,8 +348,8 @@ function toEmailArray(input) {
     return input.map((item) => cleanEmail(item)).filter(Boolean);
   }
 
-  if (typeof input === 'string') {
-    return input.split(',').map((item) => cleanEmail(item)).filter(Boolean);
+  if (typeof input === "string") {
+    return input.split(",").map((item) => cleanEmail(item)).filter(Boolean);
   }
 
   const email = cleanEmail(input);
@@ -345,23 +363,23 @@ function uniqueEmails(values) {
 function normalizeEmailTemplate(body = {}) {
   const template = body.emailTemplate || {};
 
-  const subject = cleanStr(template.subject || body.subject || '');
+  const subject = cleanStr(template.subject || body.subject || "");
 
   const text = String(
     template.textBody ||
       template.body ||
       body.textBody ||
       body.body ||
-      ''
+      ""
   ).trim();
 
-  const html = String(template.htmlBody || body.htmlBody || '').trim();
+  const html = String(template.htmlBody || body.htmlBody || "").trim();
 
   const proxyFromEmail =
     cleanEmail(template.fromEmail || body.fromEmail) ||
     cleanEmail(process.env.SES_FROM_EMAIL) ||
     cleanEmail(process.env.SES_FROM) ||
-    'confirm@collabglam.com';
+    "confirm@collabglam.com";
 
   const replyTo = uniqueEmails([
     ...toEmailArray(template.replyTo || body.replyTo),
@@ -376,9 +394,9 @@ function normalizeEmailTemplate(body = {}) {
         .filter((file) => file?.filename && file?.contentBase64)
         .map((file) => ({
           filename: cleanStr(file.filename),
-          contentType: file.contentType || 'application/octet-stream',
-          content: String(file.contentBase64).replace(/^data:.*;base64,/, ''),
-          encoding: 'base64',
+          contentType: file.contentType || "application/octet-stream",
+          content: String(file.contentBase64).replace(/^data:.*;base64,/, ""),
+          encoding: "base64",
         }))
     : [];
 
@@ -398,11 +416,11 @@ function normalizeEmailTemplate(body = {}) {
 
 function buildEmailTags({ brandId, campaignId, platform, handle }) {
   return [
-    { Name: 'type', Value: 'creator-invitation' },
-    { Name: 'platform', Value: platform },
-    { Name: 'handle', Value: handle.replace(/^@/, '') },
-    { Name: 'brandId', Value: brandId },
-    { Name: 'campaignId', Value: campaignId },
+    { Name: "type", Value: "creator-invitation" },
+    { Name: "platform", Value: platform },
+    { Name: "handle", Value: handle.replace(/^@/, "") },
+    { Name: "brandId", Value: brandId },
+    { Name: "campaignId", Value: campaignId },
   ];
 }
 
@@ -418,9 +436,9 @@ async function resolveMissingEmailDoc({
   handle,
   platform,
 }) {
-  const rawMissingEmailId = String(missingEmailId || '').trim();
+  const rawMissingEmailId = String(missingEmailId || "").trim();
   const cleanedEmail = cleanEmail(email);
-  const normalizedHandle = handle ? normalizeHandle(handle) : '';
+  const normalizedHandle = handle ? normalizeHandle(handle) : "";
   const normalizedPlatform = normalizePlatform(platform);
 
   let missing = null;
@@ -473,71 +491,50 @@ function invitationResponse(doc, refs = {}) {
 
   return {
     _id: String(doc._id),
+    invitationId: doc.invitationId || null,
 
     handle: doc.handle,
     platform: doc.platform,
+    userId: doc.userId || null,
     modashUserId: doc.modashUserId || null,
 
     status: doc.status,
     aiScore: doc.aiScore ?? null,
     rawAiScore: doc.rawAiScore ?? null,
-    recommendationReason: doc.recommendationReason || '',
+    recommendationReason: doc.recommendationReason || "",
 
     brandId,
-    brandName:
-      brand?.brandName ||
-      campaign?.brandName ||
-      doc.brandName ||
-      '',
-    brandEmail: brand?.email || '',
-    brandIndustry: brand?.industry || '',
-    brandCompanySize: brand?.companySize || '',
-    brand: brand
-      ? {
-          _id: String(brand._id),
-          brandName: brand.brandName || '',
-          email: brand.email || '',
-          name: brand.name || '',
-          industry: brand.industry || '',
-          companySize: brand.companySize || '',
-          proxyEmail: brand.proxyEmail || '',
-          subscription: brand.subscription || null,
-          subscriptionExpired: brand.subscriptionExpired ?? false,
-          isAdminCreated: brand.isAdminCreated ?? false,
-          signupCompleted: brand.signupCompleted ?? true,
-          createdAt: brand.createdAt || null,
-          updatedAt: brand.updatedAt || null,
-        }
-      : null,
+    brandName: brand?.brandName || campaign?.brandName || doc.brandName || "",
+    brandEmail: brand?.email || "",
+    brandIndustry: brand?.industry || "",
+    brandCompanySize: brand?.companySize || "",
 
     campaignId,
-    campaignName:
-      campaign?.campaignTitle ||
-      doc.campaignTitle ||
-      '',
+    campaignName: campaign?.campaignTitle || doc.campaignTitle || "",
+
     campaign: campaign
       ? {
           _id: String(campaign._id),
           brandId: toPlainId(campaign.brandId),
-          brandName: campaign.brandName || '',
-          campaignTitle: campaign.campaignTitle || '',
-          description: campaign.description || '',
-          campaignType: campaign.campaignType || '',
-          campaignCategory: campaign.campaignCategory || '',
-          campaignSubcategory: campaign.campaignSubcategory || '',
+          brandName: campaign.brandName || "",
+          campaignTitle: campaign.campaignTitle || "",
+          description: campaign.description || "",
+          campaignType: campaign.campaignType || "",
+          campaignCategory: campaign.campaignCategory || "",
+          campaignSubcategory: campaign.campaignSubcategory || "",
           campaignBudget: campaign.campaignBudget ?? null,
           budget: campaign.budget ?? null,
           influencerBudget: campaign.influencerBudget ?? null,
-          paymentType: campaign.paymentType || '',
+          paymentType: campaign.paymentType || "",
           platformSelection: campaign.platformSelection || [],
           numberOfInfluencers: campaign.numberOfInfluencers ?? null,
-          influencerTier: campaign.influencerTier || '',
+          influencerTier: campaign.influencerTier || "",
           minFollowers: campaign.minFollowers ?? null,
           maxFollowers: campaign.maxFollowers ?? null,
-          creatorContentLanguage: campaign.creatorContentLanguage || '',
-          audienceContentLanguage: campaign.audienceContentLanguage || '',
-          targetCountry: campaign.targetCountry || '',
-          additionalNotes: campaign.additionalNotes || '',
+          creatorContentLanguage: campaign.creatorContentLanguage || "",
+          audienceContentLanguage: campaign.audienceContentLanguage || "",
+          targetCountry: campaign.targetCountry || "",
+          additionalNotes: campaign.additionalNotes || "",
           hashtags: campaign.hashtags || [],
           timeline: campaign.timeline || null,
           startAt: campaign.startAt || null,
@@ -545,11 +542,11 @@ function invitationResponse(doc, refs = {}) {
           scheduledAt: campaign.scheduledAt || null,
           publishedAt: campaign.publishedAt || null,
           endedAt: campaign.endedAt || null,
-          status: campaign.status || '',
-          publishStatus: campaign.publishStatus || '',
-          approvalMode: campaign.approvalMode || '',
+          status: campaign.status || "",
+          publishStatus: campaign.publishStatus || "",
+          approvalMode: campaign.approvalMode || "",
           isFullyManaged: campaign.isFullyManaged ?? false,
-          managementType: campaign.managementType || '',
+          managementType: campaign.managementType || "",
           isActive: campaign.isActive ?? null,
           applicantCount: campaign.applicantCount ?? null,
           hasApplied: campaign.hasApplied ?? null,
@@ -566,9 +563,9 @@ function invitationResponse(doc, refs = {}) {
       ? {
           _id: String(missingEmail._id),
           email: missingEmail.email || null,
-          handle: missingEmail.handle || '',
-          platform: missingEmail.platform || '',
-          status: missingEmail.status || '',
+          handle: missingEmail.handle || "",
+          platform: missingEmail.platform || "",
+          status: missingEmail.status || "",
           youtube: missingEmail.youtube || null,
           createdByAdminId: missingEmail.createdByAdminId || null,
           createdAt: missingEmail.createdAt || null,
@@ -577,10 +574,7 @@ function invitationResponse(doc, refs = {}) {
       : null,
 
     creatorTitle:
-      missingEmail?.youtube?.title ||
-      missingEmail?.handle ||
-      doc.handle ||
-      '',
+      missingEmail?.youtube?.title || missingEmail?.handle || doc.handle || "",
 
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -590,44 +584,50 @@ function invitationResponse(doc, refs = {}) {
 exports.createInvitation = async (req, res) => {
   try {
     const brandId = normalizeObjectId(req.body?.brandId);
-    const campaignId = normalizeObjectId(req.body?.campaignId);
+    const campaignIds = normalizeCampaignIds(req.body);
 
-    const rawHandle = String(req.body?.handle || '').trim();
-    const rawPlatform = String(req.body?.platform || '').trim();
-    const rawStatus = String(req.body?.status || '').trim().toLowerCase();
+    const rawHandle = String(req.body?.handle || "").trim();
+    const rawPlatform = String(req.body?.platform || "").trim();
+    const rawStatus = String(req.body?.status || "").trim().toLowerCase();
 
-    const modashUserId = String(req.body?.modashUserId || '').trim() || null;
+    const userId = normalizeInfluencerUserId(req.body);
+    const modashUserId =
+      String(req.body?.modashUserId || userId || "").trim() || null;
+
     const aiScore = normalizeAiScore(req.body?.aiScore);
     const rawAiScore = Number.isFinite(Number(req.body?.rawAiScore))
       ? Number(req.body.rawAiScore)
       : null;
-    const recommendationReason = cleanStr(req.body?.recommendationReason || '');
+
+    const recommendationReason = cleanStr(
+      req.body?.recommendationReason || ""
+    );
 
     if (!brandId) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Valid brand _id is required.',
+        status: "error",
+        message: "Valid brand _id is required.",
       });
     }
 
-    if (!campaignId) {
+    if (!campaignIds.length) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Valid campaign _id is required.',
+        status: "error",
+        message: "Valid campaignId or campaignIds are required.",
       });
     }
 
     if (!rawHandle) {
       return res.status(400).json({
-        status: 'error',
-        message: 'handle is required.',
+        status: "error",
+        message: "handle is required.",
       });
     }
 
     if (!rawPlatform) {
       return res.status(400).json({
-        status: 'error',
-        message: 'platform is required.',
+        status: "error",
+        message: "platform is required.",
       });
     }
 
@@ -635,7 +635,7 @@ exports.createInvitation = async (req, res) => {
 
     if (!HANDLE_RX.test(handle)) {
       return res.status(400).json({
-        status: 'error',
+        status: "error",
         message:
           'Invalid handle. It must start with "@" and contain letters, numbers, ".", "_" or "-".',
       });
@@ -645,81 +645,45 @@ exports.createInvitation = async (req, res) => {
 
     if (!platform || !PLATFORM_ENUM.has(platform)) {
       return res.status(400).json({
-        status: 'error',
+        status: "error",
         message:
-          'Invalid platform. Use: youtube|instagram|tiktok. Aliases: yt, ig, tt.',
+          "Invalid platform. Use: youtube|instagram|tiktok. Aliases: yt, ig, tt.",
       });
     }
 
-    const status = STATUS_ENUM.has(rawStatus) ? rawStatus : 'invited';
+    const status = STATUS_ENUM.has(rawStatus) ? rawStatus : "invited";
 
-    const [brand, campaign] = await Promise.all([
-      getBrandByMongoId(brandId),
-      getCampaignByMongoId({ campaignId, brandId }),
-    ]);
+    const brand = await getBrandByMongoId(brandId);
 
     if (!brand) {
       return res.status(404).json({
-        status: 'error',
-        message: 'Brand not found for provided brand _id.',
+        status: "error",
+        message: "Brand not found for provided brand _id.",
       });
     }
 
-    if (!campaign) {
+    const campaigns = await Campaign.find({
+      _id: {
+        $in: campaignIds.map((id) => toObjectId(id)),
+      },
+      $or: [{ brandId: toObjectId(brandId) }, { brandId: String(brandId) }],
+    }).lean();
+
+    const campaignMap = new Map(
+      campaigns.map((campaign) => [String(campaign._id), campaign])
+    );
+
+    const missingCampaignIds = campaignIds.filter(
+      (campaignId) => !campaignMap.has(String(campaignId))
+    );
+
+    if (missingCampaignIds.length) {
       return res.status(404).json({
-        status: 'error',
-        message: 'Campaign not found for provided campaign _id and brand _id.',
+        status: "error",
+        message: "One or more campaigns were not found for this brand.",
+        missingCampaignIds,
       });
     }
-
-    let doc = await Invitation.findOne({
-      brandId,
-      campaignId,
-      handle,
-      platform,
-    });
-
-    let responseStatus = 'saved';
-    let httpStatus = 201;
-
-    if (doc) {
-      responseStatus = 'exists';
-      httpStatus = 200;
-
-      if (doc.status !== status) {
-        doc.status = status;
-        await doc.save();
-      }
-
-      return res.status(httpStatus).json({
-        status: responseStatus,
-        message: 'Invitation already exists for this campaign and creator.',
-        emailSent: false,
-        emailMeta: null,
-        emailSkippedReason: 'Duplicate invitation skipped.',
-        data: invitationResponse(doc, { brand, campaign }),
-      });
-    }
-
-    const payload = {
-      handle,
-      platform,
-      brandId,
-      campaignId,
-      status,
-    };
-
-    if (modashUserId) payload.modashUserId = modashUserId;
-    if (aiScore !== null) payload.aiScore = aiScore;
-    if (rawAiScore !== null) payload.rawAiScore = rawAiScore;
-    if (recommendationReason) payload.recommendationReason = recommendationReason;
-
-    doc = await Invitation.create(payload);
-
-    let emailSent = false;
-    let emailMeta = null;
-    let emailSkippedReason = null;
-    let pendingMissingEmailRecord = null;
 
     const emailTemplate = normalizeEmailTemplate(req.body);
 
@@ -729,6 +693,8 @@ exports.createInvitation = async (req, res) => {
       modashUserId,
     });
 
+    let pendingMissingEmailRecord = null;
+
     if (!emailLookup.email) {
       try {
         pendingMissingEmailRecord = await ensurePendingMissingEmailRecord({
@@ -736,105 +702,241 @@ exports.createInvitation = async (req, res) => {
           platform,
           sourceDoc: emailLookup.doc,
         });
-
-        if (pendingMissingEmailRecord?._id) {
-          doc.missingEmailId = String(pendingMissingEmailRecord._id);
-          await doc.save();
-        }
       } catch (missingErr) {
-        console.error('Failed to create pending MissingEmail:', missingErr);
-      }
-
-      emailSkippedReason =
-        'Invitation saved. No email found in Modash contacts, direct fields, or bio.';
-    } else if (!emailTemplate) {
-      emailSkippedReason =
-        'Invitation saved and email resolved, but emailTemplate was not provided or is missing subject/body.';
-    } else {
-      try {
-        const sent = await sendEmail({
-          to: emailLookup.email,
-          from: emailTemplate.from,
-          subject: emailTemplate.subject,
-          text: emailTemplate.text,
-          html: emailTemplate.html,
-          cc: emailTemplate.cc,
-          bcc: emailTemplate.bcc,
-          replyTo: emailTemplate.replyTo,
-          attachments: emailTemplate.attachments,
-          emailTags: buildEmailTags({
-            brandId,
-            campaignId,
-            platform,
-            handle,
-          }),
-        });
-
-        emailSent = Boolean(sent?.messageId);
-
-        emailMeta = {
-          recipientEmail: emailLookup.email,
-          emailSource: emailLookup.source,
-          missingEmailId: null,
-          messageId: sent?.messageId || null,
-          subject: emailTemplate.subject,
-          campaignId,
-        };
-      } catch (mailErr) {
-        console.error('Invitation AWS email send failed:', mailErr);
-
-        emailSkippedReason =
-          mailErr?.message || 'Invitation saved, but AWS email sending failed.';
+        console.error("Failed to create pending MissingEmail:", missingErr);
       }
     }
 
-    return res.status(httpStatus).json({
-      status: responseStatus,
-      message: 'Invitation created successfully.',
-      emailSent,
-      emailMeta,
-      emailSkippedReason,
-      data: invitationResponse(doc, {
-        brand,
-        campaign,
-        missingEmail: pendingMissingEmailRecord,
-      }),
+    const results = [];
+    let createdCount = 0;
+    let existingCount = 0;
+    let updatedCount = 0;
+    let emailSentCount = 0;
+
+    for (const campaignId of campaignIds) {
+      const campaign = campaignMap.get(String(campaignId));
+
+      let doc = await Invitation.findOne({
+        brandId,
+        campaignId,
+        handle,
+        platform,
+      });
+
+      let responseStatus = "saved";
+      let emailSent = false;
+      let emailMeta = null;
+      let emailSkippedReason = null;
+
+      if (doc) {
+        responseStatus = "exists";
+        existingCount += 1;
+
+        let changed = false;
+
+        if (doc.status !== status) {
+          doc.status = status;
+          changed = true;
+        }
+
+        if (userId && doc.userId !== userId) {
+          doc.userId = userId;
+          changed = true;
+        }
+
+        if (modashUserId && doc.modashUserId !== modashUserId) {
+          doc.modashUserId = modashUserId;
+          changed = true;
+        }
+
+        if (aiScore !== null && doc.aiScore !== aiScore) {
+          doc.aiScore = aiScore;
+          changed = true;
+        }
+
+        if (rawAiScore !== null && doc.rawAiScore !== rawAiScore) {
+          doc.rawAiScore = rawAiScore;
+          changed = true;
+        }
+
+        if (
+          recommendationReason &&
+          doc.recommendationReason !== recommendationReason
+        ) {
+          doc.recommendationReason = recommendationReason;
+          changed = true;
+        }
+
+        if (pendingMissingEmailRecord?._id && !doc.missingEmailId) {
+          doc.missingEmailId = String(pendingMissingEmailRecord._id);
+          changed = true;
+        }
+
+        if (changed) {
+          await doc.save();
+          updatedCount += 1;
+        }
+
+        emailSkippedReason = "Duplicate invitation skipped for this campaign.";
+      } else {
+        const payload = {
+          handle,
+          platform,
+          brandId,
+          campaignId,
+          status,
+          userId,
+          modashUserId,
+        };
+
+        if (aiScore !== null) payload.aiScore = aiScore;
+        if (rawAiScore !== null) payload.rawAiScore = rawAiScore;
+        if (recommendationReason) {
+          payload.recommendationReason = recommendationReason;
+        }
+
+        if (pendingMissingEmailRecord?._id) {
+          payload.missingEmailId = String(pendingMissingEmailRecord._id);
+        }
+
+        doc = await Invitation.create(payload);
+        createdCount += 1;
+
+        if (!emailLookup.email) {
+          emailSkippedReason =
+            "Invitation saved. No email found in Modash contacts, direct fields, or bio.";
+        } else if (!emailTemplate) {
+          emailSkippedReason =
+            "Invitation saved and email resolved, but emailTemplate was not provided or is missing subject/body.";
+        } else {
+          try {
+            const sent = await sendEmail({
+              to: emailLookup.email,
+              from: emailTemplate.from,
+              subject: emailTemplate.subject,
+              text: emailTemplate.text,
+              html: emailTemplate.html,
+              cc: emailTemplate.cc,
+              bcc: emailTemplate.bcc,
+              replyTo: emailTemplate.replyTo,
+              attachments: emailTemplate.attachments,
+              emailTags: buildEmailTags({
+                brandId,
+                campaignId,
+                platform,
+                handle,
+              }),
+            });
+
+            emailSent = Boolean(sent?.messageId);
+
+            if (emailSent) {
+              emailSentCount += 1;
+            }
+
+            emailMeta = {
+              recipientEmail: emailLookup.email,
+              emailSource: emailLookup.source,
+              missingEmailId: null,
+              messageId: sent?.messageId || null,
+              subject: emailTemplate.subject,
+              campaignId,
+            };
+          } catch (mailErr) {
+            console.error("Invitation AWS email send failed:", mailErr);
+
+            emailSkippedReason =
+              mailErr?.message ||
+              "Invitation saved, but AWS email sending failed.";
+          }
+        }
+      }
+
+      results.push({
+        status: responseStatus,
+        message:
+          responseStatus === "exists"
+            ? "Invitation already exists for this campaign and creator."
+            : "Invitation created successfully.",
+        emailSent,
+        emailMeta,
+        emailSkippedReason,
+        data: invitationResponse(doc, {
+          brand,
+          campaign,
+          missingEmail: pendingMissingEmailRecord,
+        }),
+      });
+    }
+
+    const multipleCampaigns = campaignIds.length > 1;
+
+    return res.status(createdCount ? 201 : 200).json({
+      status: createdCount ? "saved" : "exists",
+      message: multipleCampaigns
+        ? "Invitations processed successfully."
+        : createdCount
+          ? "Invitation created successfully."
+          : "Invitation already exists for this campaign and creator.",
+      createdCount,
+      existingCount,
+      updatedCount,
+      emailSentCount,
+      emailSent: emailSentCount > 0,
+      emailMeta: multipleCampaigns ? null : results[0]?.emailMeta || null,
+      emailSkippedReason: multipleCampaigns
+        ? null
+        : results[0]?.emailSkippedReason || null,
+      data: multipleCampaigns
+        ? results.map((item) => item.data)
+        : results[0]?.data || null,
+      results,
     });
   } catch (err) {
-    console.error('createInvitation error:', err);
+    console.error("createInvitation error:", err);
 
-    const statusCode = err?.code === 11000 ? 409 : err?.statusCode || err?.status || 500;
-    await saveErrorLog(req, err, statusCode, 'CREATE_INVITATION_ERROR');
+    const statusCode =
+      err?.code === 11000 ? 409 : err?.statusCode || err?.status || 500;
+
+    await saveErrorLog(req, err, statusCode, "CREATE_INVITATION_ERROR");
 
     if (err?.code === 11000) {
       return res.status(409).json({
-        status: 'error',
-        message: 'Invitation already exists for this campaign and creator.',
+        status: "error",
+        message:
+          "Duplicate MongoDB index is still blocking this invitation. Drop old unique indexes from invitations collection.",
+        duplicateKey: err.keyValue || null,
+        indexesToDrop: [
+          "brandId_1_handle_1_platform_1",
+          "brandId_1_campaignId_1_handle_1_platform_1",
+        ],
       });
     }
 
     return res.status(500).json({
-      status: 'error',
-      message: err?.message || 'Failed to create invitation.',
+      status: "error",
+      message: err?.message || "Failed to create invitation.",
     });
   }
 };
 
 exports.updateInvitationStatus = async (req, res) => {
   try {
-    const invitationId = normalizeObjectId(req.body?._id || req.body?.invitationId);
-    const rawStatus = String(req.body?.status || '').trim().toLowerCase();
+    const invitationId = normalizeObjectId(
+      req.body?._id || req.body?.invitationId
+    );
+    const rawStatus = String(req.body?.status || "").trim().toLowerCase();
 
     if (!invitationId) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Valid invitation _id is required.',
+        status: "error",
+        message: "Valid invitation _id is required.",
       });
     }
 
     if (!STATUS_ENUM.has(rawStatus)) {
       return res.status(400).json({
-        status: 'error',
+        status: "error",
         message: 'Invalid status. Use "invited" or "available".',
       });
     }
@@ -843,16 +945,22 @@ exports.updateInvitationStatus = async (req, res) => {
 
     if (!doc) {
       return res.status(404).json({
-        status: 'error',
-        message: 'Invitation not found for provided _id.',
+        status: "error",
+        message: "Invitation not found for provided _id.",
       });
     }
 
     doc.status = rawStatus;
 
+    const userId = normalizeInfluencerUserId(req.body);
+
+    if (userId) {
+      doc.userId = userId;
+    }
+
     let warning = null;
 
-    const rawMissingEmailId = String(req.body?.missingEmailId || '').trim();
+    const rawMissingEmailId = String(req.body?.missingEmailId || "").trim();
     const hasResolverInput =
       rawMissingEmailId ||
       req.body?.email ||
@@ -871,7 +979,7 @@ exports.updateInvitationStatus = async (req, res) => {
         doc.missingEmailId = String(missing._id);
       } else if (rawMissingEmailId) {
         warning =
-          'missingEmailId was not found as Mongo _id or custom id, so status was updated without changing invitation.missingEmailId.';
+          "missingEmailId was not found as Mongo _id or custom id, so status was updated without changing invitation.missingEmailId.";
       }
     }
 
@@ -880,52 +988,80 @@ exports.updateInvitationStatus = async (req, res) => {
     const [brand, campaign, missingEmail] = await Promise.all([
       doc.brandId ? Brand.findById(doc.brandId).lean() : null,
       doc.campaignId ? Campaign.findById(doc.campaignId).lean() : null,
-      doc.missingEmailId ? resolveMissingEmailDoc({ missingEmailId: doc.missingEmailId }) : null,
+      doc.missingEmailId
+        ? resolveMissingEmailDoc({ missingEmailId: doc.missingEmailId })
+        : null,
     ]);
 
     return res.json({
-      status: 'success',
+      status: "success",
       message: warning
-        ? 'Invitation status updated, but missing email could not be linked.'
-        : 'Invitation status updated.',
+        ? "Invitation status updated, but missing email could not be linked."
+        : "Invitation status updated.",
       warning,
       data: invitationResponse(doc, { brand, campaign, missingEmail }),
     });
   } catch (err) {
-    console.error('Error in updateInvitationStatus:', err);
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'UPDATE_INVITATION_STATUS_ERROR');
+    console.error("Error in updateInvitationStatus:", err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "UPDATE_INVITATION_STATUS_ERROR"
+    );
 
     return res.status(500).json({
-      status: 'error',
-      message: err?.message || 'Internal server error.',
+      status: "error",
+      message: err?.message || "Internal server error.",
     });
   }
 };
 
 exports.listInvitations = async (req, res) => {
   try {
-    const body = req.body || {};
+    const body = {
+      ...(req.query || {}),
+      ...(req.body || {}),
+    };
 
-    const page = Math.max(1, parseInt(body.page ?? '1', 10));
-    const limit = Math.min(200, Math.max(1, parseInt(body.limit ?? '50', 10)));
+    const page = Math.max(1, parseInt(body.page ?? "1", 10));
+    const limit = Math.min(200, Math.max(1, parseInt(body.limit ?? "50", 10)));
 
-    const brandId = body.brandId ? normalizeObjectId(body.brandId) : '';
-    const campaignId = body.campaignId ? normalizeObjectId(body.campaignId) : '';
+    const brandId = body.brandId ? normalizeObjectId(body.brandId) : "";
+    const campaignId = body.campaignId ? normalizeObjectId(body.campaignId) : "";
+    const campaignIds = Array.isArray(body.campaignIds)
+      ? body.campaignIds.map((id) => normalizeObjectId(id)).filter(Boolean)
+      : [];
 
-    const rawHandle = typeof body.handle === 'string' ? body.handle.trim() : '';
-    const rawPlatform = typeof body.platform === 'string' ? body.platform.trim() : '';
+    const userId = String(
+      body.userId ||
+        body.influencerUserId ||
+        body.creatorId ||
+        body.influencerId ||
+        ""
+    ).trim();
+
+    const rawHandle = typeof body.handle === "string" ? body.handle.trim() : "";
+    const rawPlatform =
+      typeof body.platform === "string" ? body.platform.trim() : "";
     const rawStatus =
-      typeof body.status === 'string' ? body.status.trim().toLowerCase() : '';
+      typeof body.status === "string" ? body.status.trim().toLowerCase() : "";
     const rawSearch =
-      typeof body.search === 'string' ? body.search.trim() : '';
+      typeof body.search === "string" ? body.search.trim() : "";
+
+    const missingEmailOnly =
+      body.missingEmailOnly === true ||
+      body.missingEmailOnly === "true" ||
+      body.onlyMissingEmail === true ||
+      body.onlyMissingEmail === "true";
 
     const query = {};
 
     if (body.brandId) {
       if (!brandId) {
         return res.status(400).json({
-          status: 'error',
-          message: 'Invalid brandId. Use brand _id.',
+          status: "error",
+          message: "Invalid brandId. Use brand _id.",
         });
       }
 
@@ -935,12 +1071,27 @@ exports.listInvitations = async (req, res) => {
     if (body.campaignId) {
       if (!campaignId) {
         return res.status(400).json({
-          status: 'error',
-          message: 'Invalid campaignId. Use campaign _id.',
+          status: "error",
+          message: "Invalid campaignId. Use campaign _id.",
         });
       }
 
       query.campaignId = campaignId;
+    }
+
+    if (body.campaignIds) {
+      if (!campaignIds.length) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid campaignIds. Use campaign _id array.",
+        });
+      }
+
+      query.campaignId = { $in: campaignIds };
+    }
+
+    if (userId) {
+      query.userId = userId;
     }
 
     if (rawHandle) {
@@ -948,8 +1099,8 @@ exports.listInvitations = async (req, res) => {
 
       if (!HANDLE_RX.test(handle)) {
         return res.status(400).json({
-          status: 'error',
-          message: 'Invalid handle format in filter.',
+          status: "error",
+          message: "Invalid handle format in filter.",
         });
       }
 
@@ -961,19 +1112,19 @@ exports.listInvitations = async (req, res) => {
 
       if (!platform) {
         return res.status(400).json({
-          status: 'error',
+          status: "error",
           message:
-            'Invalid platform filter. Use: youtube|instagram|tiktok. Aliases: yt, ig, tt.',
+            "Invalid platform filter. Use: youtube|instagram|tiktok. Aliases: yt, ig, tt.",
         });
       }
 
       query.platform = platform;
     }
 
-    if (rawStatus && rawStatus !== 'all') {
+    if (rawStatus && rawStatus !== "all") {
       if (!STATUS_ENUM.has(rawStatus)) {
         return res.status(400).json({
-          status: 'error',
+          status: "error",
           message: 'Invalid status filter. Use "invited", "available" or "all".',
         });
       }
@@ -981,8 +1132,15 @@ exports.listInvitations = async (req, res) => {
       query.status = rawStatus;
     }
 
+    if (missingEmailOnly) {
+      query.missingEmailId = {
+        $exists: true,
+        $nin: [null, ""],
+      };
+    }
+
     if (rawSearch) {
-      const rx = new RegExp(escapeRegExp(rawSearch), 'i');
+      const rx = new RegExp(escapeRegExp(rawSearch), "i");
 
       const [matchedBrands, matchedCampaigns, matchedMissingEmails] =
         await Promise.all([
@@ -995,7 +1153,7 @@ exports.listInvitations = async (req, res) => {
               { companySize: rx },
             ],
           })
-            .select('_id')
+            .select("_id")
             .lean(),
 
           Campaign.find({
@@ -1012,7 +1170,7 @@ exports.listInvitations = async (req, res) => {
               { hashtags: rx },
             ],
           })
-            .select('_id')
+            .select("_id")
             .lean(),
 
           MissingEmail.find({
@@ -1021,28 +1179,32 @@ exports.listInvitations = async (req, res) => {
               { handle: rx },
               { platform: rx },
               { status: rx },
-              { 'youtube.title': rx },
-              { 'youtube.description': rx },
-              { 'youtube.country': rx },
+              { "youtube.title": rx },
+              { "youtube.description": rx },
+              { "youtube.country": rx },
             ],
           })
-            .select('_id')
+            .select("_id")
             .lean(),
         ]);
 
       const matchedBrandIds = matchedBrands.map((item) => String(item._id));
-      const matchedCampaignIds = matchedCampaigns.map((item) => String(item._id));
+      const matchedCampaignIds = matchedCampaigns.map((item) =>
+        String(item._id)
+      );
       const matchedMissingEmailIds = matchedMissingEmails.map((item) =>
         String(item._id)
       );
 
       const searchOr = [
         { handle: rx },
+        { userId: rx },
         { modashUserId: rx },
         { recommendationReason: rx },
       ];
 
       const possibleHandle = normalizeHandle(rawSearch);
+
       if (HANDLE_RX.test(possibleHandle)) {
         searchOr.push({ handle: possibleHandle });
       }
@@ -1079,10 +1241,12 @@ exports.listInvitations = async (req, res) => {
     ]);
 
     const brandIds = [
-      ...new Set(docs.map((doc) => normalizeObjectId(doc.brandId)).filter(Boolean)),
+      ...new Set(
+        docs.map((doc) => normalizeObjectId(doc.brandId)).filter(Boolean)
+      ),
     ];
 
-    const campaignIds = [
+    const foundCampaignIds = [
       ...new Set(
         docs.map((doc) => normalizeObjectId(doc.campaignId)).filter(Boolean)
       ),
@@ -1091,7 +1255,7 @@ exports.listInvitations = async (req, res) => {
     const rawMissingEmailIds = [
       ...new Set(
         docs
-          .map((doc) => String(doc.missingEmailId || '').trim())
+          .map((doc) => String(doc.missingEmailId || "").trim())
           .filter(Boolean)
       ),
     ];
@@ -1111,69 +1275,69 @@ exports.listInvitations = async (req, res) => {
           })
             .select(
               [
-                'brandName',
-                'email',
-                'name',
-                'industry',
-                'companySize',
-                'proxyEmail',
-                'subscription',
-                'subscriptionExpired',
-                'isAdminCreated',
-                'signupCompleted',
-                'createdAt',
-                'updatedAt',
-              ].join(' ')
+                "brandName",
+                "email",
+                "name",
+                "industry",
+                "companySize",
+                "proxyEmail",
+                "subscription",
+                "subscriptionExpired",
+                "isAdminCreated",
+                "signupCompleted",
+                "createdAt",
+                "updatedAt",
+              ].join(" ")
             )
             .lean()
         : [],
 
-      campaignIds.length
+      foundCampaignIds.length
         ? Campaign.find({
-            _id: { $in: campaignIds.map((id) => toObjectId(id)) },
+            _id: { $in: foundCampaignIds.map((id) => toObjectId(id)) },
           })
             .select(
               [
-                'brandId',
-                'brandName',
-                'campaignTitle',
-                'description',
-                'campaignType',
-                'campaignCategory',
-                'campaignSubcategory',
-                'campaignBudget',
-                'budget',
-                'influencerBudget',
-                'paymentType',
-                'platformSelection',
-                'numberOfInfluencers',
-                'influencerTier',
-                'minFollowers',
-                'maxFollowers',
-                'creatorContentLanguage',
-                'audienceContentLanguage',
-                'targetCountry',
-                'additionalNotes',
-                'hashtags',
-                'timeline',
-                'startAt',
-                'endAt',
-                'scheduledAt',
-                'publishedAt',
-                'endedAt',
-                'status',
-                'publishStatus',
-                'approvalMode',
-                'isFullyManaged',
-                'managementType',
-                'isActive',
-                'applicantCount',
-                'hasApplied',
-                'isDraft',
-                'byAi',
-                'createdAt',
-                'updatedAt',
-              ].join(' ')
+                "brandId",
+                "brandName",
+                "campaignTitle",
+                "description",
+                "campaignType",
+                "campaignCategory",
+                "campaignSubcategory",
+                "campaignBudget",
+                "budget",
+                "influencerBudget",
+                "paymentType",
+                "platformSelection",
+                "numberOfInfluencers",
+                "influencerTier",
+                "minFollowers",
+                "maxFollowers",
+                "creatorContentLanguage",
+                "audienceContentLanguage",
+                "targetCountry",
+                "additionalNotes",
+                "hashtags",
+                "timeline",
+                "startAt",
+                "endAt",
+                "scheduledAt",
+                "publishedAt",
+                "endedAt",
+                "status",
+                "publishStatus",
+                "approvalMode",
+                "isFullyManaged",
+                "managementType",
+                "isActive",
+                "applicantCount",
+                "hasApplied",
+                "isDraft",
+                "byAi",
+                "createdAt",
+                "updatedAt",
+              ].join(" ")
             )
             .lean()
         : [],
@@ -1205,6 +1369,7 @@ exports.listInvitations = async (req, res) => {
     ]);
 
     const brandMap = new Map(brands.map((brand) => [String(brand._id), brand]));
+
     const campaignMap = new Map(
       campaigns.map((campaign) => [String(campaign._id), campaign])
     );
@@ -1214,7 +1379,13 @@ exports.listInvitations = async (req, res) => {
     for (const missing of missingEmails) {
       missingEmailMap.set(String(missing._id), missing);
 
-      for (const key of ['missingEmailId', 'missingId', 'uuid', 'publicId', 'id']) {
+      for (const key of [
+        "missingEmailId",
+        "missingId",
+        "uuid",
+        "publicId",
+        "id",
+      ]) {
         if (missing[key]) {
           missingEmailMap.set(String(missing[key]), missing);
         }
@@ -1223,14 +1394,19 @@ exports.listInvitations = async (req, res) => {
 
     const data = docs.map((doc) =>
       invitationResponse(doc, {
-        brand: brandMap.get(String(doc.brandId || '')),
-        campaign: campaignMap.get(String(doc.campaignId || '')),
-        missingEmail: missingEmailMap.get(String(doc.missingEmailId || '')),
+        brand: brandMap.get(String(doc.brandId || "")),
+        campaign: campaignMap.get(String(doc.campaignId || "")),
+        missingEmail: missingEmailMap.get(String(doc.missingEmailId || "")),
       })
     );
 
     return res.json({
-      status: 'success',
+      status: "success",
+      message: docs.length
+        ? "Invitation list fetched successfully."
+        : missingEmailOnly
+          ? "No invitations found with missingEmailId."
+          : "No invitations found.",
       page,
       limit,
       total,
@@ -1238,12 +1414,18 @@ exports.listInvitations = async (req, res) => {
       data,
     });
   } catch (err) {
-    console.error('listInvitations error:', err);
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'LIST_INVITATIONS_ERROR');
+    console.error("listInvitations error:", err);
+
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "LIST_INVITATIONS_ERROR"
+    );
 
     return res.status(500).json({
-      status: 'error',
-      message: err?.message || 'Internal server error.',
+      status: "error",
+      message: err?.message || "Internal server error.",
     });
   }
 };
@@ -1256,8 +1438,8 @@ exports.getInvitationList = async (req, res) => {
 
     if (!brandId) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Valid brand _id is required.',
+        status: "error",
+        message: "Valid brand _id is required.",
       });
     }
 
@@ -1268,8 +1450,8 @@ exports.getInvitationList = async (req, res) => {
 
     if (!invitations.length) {
       return res.json({
-        status: 'success',
-        message: 'No invitations found for this brand with missingEmailId.',
+        status: "success",
+        message: "No invitations found for this brand with missingEmailId.",
         data: [],
       });
     }
@@ -1277,7 +1459,7 @@ exports.getInvitationList = async (req, res) => {
     const missingIds = [
       ...new Set(
         invitations
-          .map((inv) => String(inv.missingEmailId || '').trim())
+          .map((inv) => String(inv.missingEmailId || "").trim())
           .filter(Boolean)
       ),
     ];
@@ -1287,7 +1469,9 @@ exports.getInvitationList = async (req, res) => {
 
     const campaignIds = [
       ...new Set(
-        invitations.map((inv) => normalizeObjectId(inv.campaignId)).filter(Boolean)
+        invitations
+          .map((inv) => normalizeObjectId(inv.campaignId))
+          .filter(Boolean)
       ),
     ];
 
@@ -1322,7 +1506,7 @@ exports.getInvitationList = async (req, res) => {
               $in: campaignIds.map((id) => toObjectId(id)),
             },
           })
-            .select('campaignTitle brandName campaignBudget status publishStatus')
+            .select("campaignTitle brandName campaignBudget status publishStatus")
             .lean()
         : [],
     ]);
@@ -1333,7 +1517,13 @@ exports.getInvitationList = async (req, res) => {
     for (const me of missingDocs) {
       missingMap.set(String(me._id), me);
 
-      for (const key of ['missingEmailId', 'missingId', 'uuid', 'publicId', 'id']) {
+      for (const key of [
+        "missingEmailId",
+        "missingId",
+        "uuid",
+        "publicId",
+        "id",
+      ]) {
         if (me[key]) {
           missingMap.set(String(me[key]), me);
         }
@@ -1345,24 +1535,23 @@ exports.getInvitationList = async (req, res) => {
     }
 
     const data = invitations.map((inv) => {
-      const me = missingMap.get(String(inv.missingEmailId || ''));
-      const campaign = campaignMap.get(String(inv.campaignId || ''));
+      const me = missingMap.get(String(inv.missingEmailId || ""));
+      const campaign = campaignMap.get(String(inv.campaignId || ""));
 
-      const title =
-        me?.youtube?.title ||
-        me?.handle ||
-        inv.handle ||
-        '';
+      const title = me?.youtube?.title || me?.handle || inv.handle || "";
 
       return {
         _id: String(inv._id),
-        handle: inv.handle || '',
-        platform: inv.platform || '',
-        status: inv.status || '',
+        invitationId: inv.invitationId || null,
+        handle: inv.handle || "",
+        platform: inv.platform || "",
+        userId: inv.userId || null,
+        modashUserId: inv.modashUserId || null,
+        status: inv.status || "",
         missingEmailId: inv.missingEmailId || null,
         campaignId: inv.campaignId || null,
-        campaignName: campaign?.campaignTitle || '',
-        brandName: campaign?.brandName || '',
+        campaignName: campaign?.campaignTitle || "",
+        brandName: campaign?.brandName || "",
         title,
         email: me?.email || null,
         missingEmail: me || null,
@@ -1370,17 +1559,22 @@ exports.getInvitationList = async (req, res) => {
     });
 
     return res.json({
-      status: 'success',
-      message: 'Invitation list fetched successfully.',
+      status: "success",
+      message: "Invitation list fetched successfully.",
       data,
     });
   } catch (err) {
-    console.error('Error in getInvitationList:', err);
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_INVITATION_LIST_ERROR');
+    console.error("Error in getInvitationList:", err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GET_INVITATION_LIST_ERROR"
+    );
 
     return res.status(500).json({
-      status: 'error',
-      message: 'Internal server error.',
+      status: "error",
+      message: "Internal server error.",
     });
   }
 };
@@ -1389,44 +1583,52 @@ const COOLDOWN_MS = 48 * 60 * 60 * 1000;
 
 async function computeBrandEligibilityForThread(threadId) {
   const messages = await EmailMessage.find({ thread: threadId })
-    .select('direction createdAt sentAt')
+    .select("direction createdAt sentAt")
     .sort({ createdAt: 1 })
     .lean();
 
-  const hasIncoming = messages.some((m) => m.direction === 'influencer_to_brand');
+  const hasIncoming = messages.some(
+    (m) => m.direction === "influencer_to_brand"
+  );
 
   if (hasIncoming) {
     return {
       canSend: true,
-      state: 'allowed',
-      reason: 'Influencer replied — messaging is unlocked.',
+      state: "allowed",
+      reason: "Influencer replied — messaging is unlocked.",
       nextAllowedAt: null,
-      outgoingCount: messages.filter((m) => m.direction === 'brand_to_influencer').length,
+      outgoingCount: messages.filter(
+        (m) => m.direction === "brand_to_influencer"
+      ).length,
     };
   }
 
-  const outgoing = messages.filter((m) => m.direction === 'brand_to_influencer');
+  const outgoing = messages.filter(
+    (m) => m.direction === "brand_to_influencer"
+  );
   const outgoingCount = outgoing.length;
 
   if (outgoingCount === 0) {
     return {
       canSend: true,
-      state: 'allowed',
-      reason: 'First email allowed.',
+      state: "allowed",
+      reason: "First email allowed.",
       nextAllowedAt: null,
       outgoingCount,
     };
   }
 
   if (outgoingCount === 1) {
-    const firstAt = new Date(outgoing[0].sentAt || outgoing[0].createdAt).getTime();
+    const firstAt = new Date(
+      outgoing[0].sentAt || outgoing[0].createdAt
+    ).getTime();
     const nextAllowedAt = new Date(firstAt + COOLDOWN_MS);
 
     if (Date.now() >= nextAllowedAt.getTime()) {
       return {
         canSend: true,
-        state: 'allowed',
-        reason: '48 hours passed — follow-up allowed.',
+        state: "allowed",
+        reason: "48 hours passed — follow-up allowed.",
         nextAllowedAt: null,
         outgoingCount,
       };
@@ -1434,8 +1636,8 @@ async function computeBrandEligibilityForThread(threadId) {
 
     return {
       canSend: false,
-      state: 'cooldown',
-      reason: 'Wait 48 hours before sending a follow-up. No reply yet.',
+      state: "cooldown",
+      reason: "Wait 48 hours before sending a follow-up. No reply yet.",
       nextAllowedAt: nextAllowedAt.toISOString(),
       outgoingCount,
     };
@@ -1443,9 +1645,9 @@ async function computeBrandEligibilityForThread(threadId) {
 
   return {
     canSend: false,
-    state: 'blocked',
+    state: "blocked",
     reason:
-      'You already sent 2 emails without a reply. You can message again only after the influencer replies.',
+      "You already sent 2 emails without a reply. You can message again only after the influencer replies.",
     nextAllowedAt: null,
     outgoingCount,
   };
@@ -1454,13 +1656,15 @@ async function computeBrandEligibilityForThread(threadId) {
 exports.getInvitationSendEligibility = async (req, res) => {
   try {
     const brandId = normalizeObjectId(req.body?.brandId);
-    const invitationId = normalizeObjectId(req.body?._id || req.body?.invitationId);
+    const invitationId = normalizeObjectId(
+      req.body?._id || req.body?.invitationId
+    );
 
     if (!brandId || !invitationId) {
       return res.status(400).json({
         canSend: false,
-        state: 'missing_email',
-        reason: 'brandId and invitation _id are required.',
+        state: "missing_email",
+        reason: "brandId and invitation _id are required.",
         nextAllowedAt: null,
       });
     }
@@ -1470,8 +1674,8 @@ exports.getInvitationSendEligibility = async (req, res) => {
     if (!brand) {
       return res.status(404).json({
         canSend: false,
-        state: 'missing_email',
-        reason: 'Brand not found.',
+        state: "missing_email",
+        reason: "Brand not found.",
         nextAllowedAt: null,
       });
     }
@@ -1481,8 +1685,8 @@ exports.getInvitationSendEligibility = async (req, res) => {
     if (!invitation) {
       return res.status(404).json({
         canSend: false,
-        state: 'missing_email',
-        reason: 'Invitation not found.',
+        state: "missing_email",
+        reason: "Invitation not found.",
         nextAllowedAt: null,
       });
     }
@@ -1490,8 +1694,8 @@ exports.getInvitationSendEligibility = async (req, res) => {
     if (invitation.brandId && invitation.brandId !== String(brand._id)) {
       return res.status(403).json({
         canSend: false,
-        state: 'missing_email',
-        reason: 'Invitation does not belong to this brand.',
+        state: "missing_email",
+        reason: "Invitation does not belong to this brand.",
         nextAllowedAt: null,
       });
     }
@@ -1499,8 +1703,8 @@ exports.getInvitationSendEligibility = async (req, res) => {
     if (!invitation.missingEmailId) {
       return res.status(200).json({
         canSend: false,
-        state: 'missing_email',
-        reason: 'No missing email record exists for this invitation.',
+        state: "missing_email",
+        reason: "No missing email record exists for this invitation.",
         nextAllowedAt: null,
         threadId: null,
       });
@@ -1515,8 +1719,8 @@ exports.getInvitationSendEligibility = async (req, res) => {
     if (!recipientEmail) {
       return res.status(200).json({
         canSend: false,
-        state: 'missing_email',
-        reason: 'Recipient email not found yet for this invitation.',
+        state: "missing_email",
+        reason: "Recipient email not found yet for this invitation.",
         nextAllowedAt: null,
         threadId: null,
       });
@@ -1525,14 +1729,14 @@ exports.getInvitationSendEligibility = async (req, res) => {
     const influencer = await InfluencerModel.findOne({
       email: recipientEmail,
     })
-      .select('_id')
+      .select("_id")
       .lean();
 
     if (!influencer) {
       return res.status(200).json({
         canSend: true,
-        state: 'allowed',
-        reason: 'First email allowed.',
+        state: "allowed",
+        reason: "First email allowed.",
         nextAllowedAt: null,
         threadId: null,
         outgoingCount: 0,
@@ -1543,14 +1747,14 @@ exports.getInvitationSendEligibility = async (req, res) => {
       brand: brand._id,
       influencer: influencer._id,
     })
-      .select('_id')
+      .select("_id")
       .lean();
 
     if (!thread) {
       return res.status(200).json({
         canSend: true,
-        state: 'allowed',
-        reason: 'First email allowed.',
+        state: "allowed",
+        reason: "First email allowed.",
         nextAllowedAt: null,
         threadId: null,
         outgoingCount: 0,
@@ -1564,13 +1768,18 @@ exports.getInvitationSendEligibility = async (req, res) => {
       threadId: String(thread._id),
     });
   } catch (err) {
-    console.error('getInvitationSendEligibility error:', err);
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, 'GET_INVITATION_SEND_ELIGIBILITY_ERROR');
+    console.error("getInvitationSendEligibility error:", err);
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GET_INVITATION_SEND_ELIGIBILITY_ERROR"
+    );
 
     return res.status(500).json({
       canSend: false,
-      state: 'missing_email',
-      reason: 'Internal server error.',
+      state: "missing_email",
+      reason: "Internal server error.",
       nextAllowedAt: null,
     });
   }
