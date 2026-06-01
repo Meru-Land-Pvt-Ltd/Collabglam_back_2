@@ -930,8 +930,7 @@ async function enrichBrandsWithAssignments(brandDocs = [], logId = "getAllBrands
   ]);
 
   console.log(
-    `[${logId}] 5.1 BrandAssigned + ASSIGNEE lookup: ${
-      Date.now() - assignmentStart
+    `[${logId}] 5.1 BrandAssigned + ASSIGNEE lookup: ${Date.now() - assignmentStart
     }ms | assignments=${assignments.length}`
   );
 
@@ -1006,8 +1005,7 @@ async function enrichBrandsWithAssignments(brandDocs = [], logId = "getAllBrands
   });
 
   console.log(
-    `[${logId}] 5 enrichBrandsWithAssignments total: ${
-      Date.now() - enrichStart
+    `[${logId}] 5 enrichBrandsWithAssignments total: ${Date.now() - enrichStart
     }ms | brands=${brandDocs.length}`
   );
 
@@ -1709,8 +1707,7 @@ exports.getAllBrands = async (req, res) => {
         .lean();
 
       console.log(
-        `[${logId}] 2.1 BME BrandAssigned query: ${
-          Date.now() - bmeQueryStart
+        `[${logId}] 2.1 BME BrandAssigned query: ${Date.now() - bmeQueryStart
         }ms | assignments=${assignments.length}`
       );
 
@@ -1814,8 +1811,7 @@ exports.getAllBrands = async (req, res) => {
     ]);
 
     console.log(
-      `[${logId}] 4 Brand find + total: ${
-        Date.now() - brandStart
+      `[${logId}] 4 Brand find + total: ${Date.now() - brandStart
       }ms | rawBrands=${rawBrands.length} | total=${total} | fastTotal=${canUseFastTotal}`
     );
 
@@ -1840,14 +1836,12 @@ exports.getAllBrands = async (req, res) => {
     ]);
 
     console.log(
-      `[${logId}] 5 + 6 enrich/admin parallel wait: ${
-        Date.now() - enrichAdminStart
+      `[${logId}] 5 + 6 enrich/admin parallel wait: ${Date.now() - enrichAdminStart
       }ms`
     );
 
     console.log(
-      `[${logId}] 6 getAdminMapByIds approx: ${
-        Date.now() - adminStart
+      `[${logId}] 6 getAdminMapByIds approx: ${Date.now() - adminStart
       }ms | ids=${creatorAdminIds.length}`
     );
 
@@ -4764,8 +4758,6 @@ exports.adminCreateInfluencer = async (req, res) => {
   }
 };
 
-
-
 exports.getBrandAssignedPlanHistoryList = async (req, res) => {
   try {
     const params = {
@@ -4827,19 +4819,56 @@ exports.getBrandAssignedPlanHistoryList = async (req, res) => {
     const finalSortBy = allowedSortFields.has(sortBy) ? sortBy : "createdAt";
     const dir = sortOrder === "asc" ? 1 : -1;
 
-    const [total, histories] = await Promise.all([
+    const [total, rawHistories] = await Promise.all([
       BrandAssignedPlanHistory.countDocuments(filter),
 
       BrandAssignedPlanHistory.find(filter)
-        .populate({
-          path: "assignedByAdminId",
-          select: "name email role",
-        })
         .sort({ [finalSortBy]: dir, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
     ]);
+
+    const adminIds = [
+      ...new Set(
+        rawHistories
+          .map((history) => String(history?.assignedByAdminId || "").trim())
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
+
+    const admins = adminIds.length
+      ? await AdminModel.find({
+        _id: {
+          $in: adminIds.map((id) => new mongoose.Types.ObjectId(id)),
+        },
+      })
+        .select("_id name email role")
+        .lean()
+      : [];
+
+    const adminMap = new Map(
+      admins.map((admin) => [
+        String(admin._id),
+        {
+          _id: admin._id,
+          name: admin.name || "",
+          email: admin.email || "",
+          role: admin.role || "",
+        },
+      ])
+    );
+
+    const histories = rawHistories.map((history) => {
+      const adminId = String(history?.assignedByAdminId || "").trim();
+      const assignedByAdmin = adminMap.get(adminId) || null;
+
+      return {
+        ...history,
+        assignedByAdminId: assignedByAdmin,
+        assignedByAdmin: assignedByAdmin,
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -4860,7 +4889,12 @@ exports.getBrandAssignedPlanHistoryList = async (req, res) => {
     });
   } catch (error) {
     console.error("getBrandAssignedPlanHistoryList error:", error);
-    await saveErrorLog(req, error, 500, "GET_BRAND_ASSIGNED_PLAN_HISTORY_LIST_ERROR");
+    await saveErrorLog(
+      req,
+      error,
+      500,
+      "GET_BRAND_ASSIGNED_PLAN_HISTORY_LIST_ERROR"
+    );
 
     return res.status(500).json({
       success: false,
@@ -4868,7 +4902,6 @@ exports.getBrandAssignedPlanHistoryList = async (req, res) => {
     });
   }
 };
-
 
 exports.adminEditCampaign = async (req, res) => {
   try {

@@ -2495,7 +2495,6 @@ function buildBalancedPlatformQuota(platforms = [], limit = DEFAULT_FRONTEND_UNI
 }
 
 function buildBalancedPlatformFetchPlan(platforms = [], limit = DEFAULT_FRONTEND_UNIFIED_LIMIT) {
-  const quota = buildBalancedPlatformQuota(platforms, limit);
   const orderedPlatforms = [];
 
   for (const rawPlatform of asArray(platforms)) {
@@ -2505,12 +2504,18 @@ function buildBalancedPlatformFetchPlan(platforms = [], limit = DEFAULT_FRONTEND
     }
   }
 
-  return orderedPlatforms
-    .map((platform) => ({
-      platform,
-      limit: Math.max(0, parseInt(String(quota[platform] || 0), 10) || 0),
-    }))
-    .filter((entry) => entry.limit > 0);
+  const safeLimit = Math.max(
+    1,
+    parseInt(String(limit ?? DEFAULT_FRONTEND_UNIFIED_LIMIT), 10) || DEFAULT_FRONTEND_UNIFIED_LIMIT
+  );
+
+  // Fetch a full page from each selected platform, then balance while rendering.
+  // The old quota-based fetch (for example IG=8, TikTok=7 for limit=15) could
+  // make recommendations look uneven or empty when one platform returned fewer rows.
+  return orderedPlatforms.map((platform) => ({
+    platform,
+    limit: safeLimit,
+  }));
 }
 
 function applySearchFetchLimit(target, fetchLimit) {
@@ -5163,16 +5168,55 @@ exports.getModashLocationController = async (req, res) => {
   }
 };
 
+function isUsefulCampaignSearchValue(value) {
+  const text = cleanStr(value);
+  if (!text) return false;
+  if (/^[a-f0-9]{24}$/i.test(text)) return false;
+
+  const lower = text.toLowerCase();
+  if (/([a-z]{2,6})\1{2,}/i.test(lower)) return false;
+
+  return true;
+}
+
 function buildCampaignRecommendationQuery(campaign = {}) {
-  return [
+  const details = campaign.details || {};
+
+  const values = uniqStrings([
     campaign.campaignTitle,
     campaign.productOrServiceName,
+    campaign.campaignGoal,
+    campaign.campaignObjective,
     campaign.campaignCategory,
     campaign.campaignSubcategory,
     campaign.description,
     campaign.additionalNotes,
-  ]
-    .filter(Boolean)
+    details.category && details.category.name,
+    ...(Array.isArray(details.subcategories)
+      ? details.subcategories.flatMap((x) => [
+        x && x.name,
+        ...(Array.isArray(x && x.tags) ? x.tags : []),
+      ])
+      : []),
+    ...(Array.isArray(details.campaignGoals)
+      ? details.campaignGoals.map((x) => x && x.goal)
+      : []),
+    ...(Array.isArray(details.contentFormats)
+      ? details.contentFormats.map((x) => x && x.format)
+      : []),
+    ...(Array.isArray(campaign.categories)
+      ? campaign.categories.flatMap((x) => [
+        x && x.categoryName,
+        x && x.subcategoryName,
+      ])
+      : []),
+    ...(Array.isArray(campaign.hashtags) ? campaign.hashtags : []),
+    ...(Array.isArray(campaign.preferredHashtags)
+      ? campaign.preferredHashtags
+      : []),
+  ]).filter(isUsefulCampaignSearchValue);
+
+  return values
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -5354,10 +5398,17 @@ async function getRecommendedInfluencersForCampaign(req, res) {
     const brandId = cleanStr(req.body?.brandId || req.query?.brandId);
     const campaignId = cleanStr(req.body?.campaignId || req.query?.campaignId);
     const limit = Math.min(
-      30,
+      15,
+      Math.max(
+        10,
+        parseInt(String(req.body?.limit || req.query?.limit || 15), 10) || 15
+      )
+    );
+    const minimumResults = Math.min(
+      limit,
       Math.max(
         1,
-        parseInt(String(req.body?.limit || req.query?.limit || 15), 10) || 15
+        parseInt(String(req.body?.minResults || req.query?.minResults || 10), 10) || 10
       )
     );
 
@@ -5394,7 +5445,7 @@ async function getRecommendedInfluencersForCampaign(req, res) {
     if (requestedPlatforms.includes("youtube")) {
       const youtubeResult = await getYouTubeRecommendationsForCampaign(
         campaign,
-        { limit }
+        { limit, minResults: minimumResults }
       );
 
       return res.json({
@@ -5425,6 +5476,28 @@ async function getRecommendedInfluencersForCampaign(req, res) {
     // Example:
     // ["instagram", "tiktok"] => Modash AI Search only
     const platforms = requestedPlatforms.filter((p) => p !== "youtube");
+
+    if (!platforms.length) {
+      return res.json({
+        status: "success",
+        campaignId,
+        query: "",
+        results: [],
+        total: 0,
+        meta: {
+          source: "modash_ai",
+          requestedPlatforms,
+          platforms,
+          warnings: [
+            {
+              message: "No Instagram or TikTok platform is selected for Modash recommendations.",
+            },
+          ],
+          rule: "no_youtube_use_modash_ai_only",
+        },
+      });
+    }
+
     const body = buildCampaignRecommendationBody(campaign);
     const fetchPlan = buildBalancedPlatformFetchPlan(platforms, limit);
     const fetchLimitByPlatform = new Map(
@@ -5466,14 +5539,113 @@ async function getRecommendedInfluencersForCampaign(req, res) {
       }
     }
 
-    const merged = mergeUnifiedSearchItems(
+    for (let pageIndex = 1; pageIndex < 4; pageIndex += 1) {
+      const currentMerged = mergeUnifiedSearchItems(
+        responses.flatMap((entry) =>
+          Array.isArray(entry.results) ? entry.results : []
+        )
+      );
+
+      if (currentMerged.length >= minimumResults) break;
+
+      for (const platform of platforms) {
+        const fetchLimit = fetchLimitByPlatform.get(platform) || limit;
+
+        try {
+          responses.push(
+            await runAiPlatformSearch(
+              platform,
+              {
+                brandId,
+                query,
+                searchMode: "ai",
+                body,
+                ai: { query },
+              },
+              pageIndex,
+              fetchLimit
+            )
+          );
+        } catch (err) {
+          if (isAuthError(err)) {
+            warnings.push({
+              platform,
+              kind: "ai",
+              page: pageIndex,
+              message:
+                "AI search page skipped because Modash AI endpoint is not allowed for this key.",
+            });
+          } else {
+            throw err;
+          }
+        }
+      }
+    }
+
+    let merged = mergeUnifiedSearchItems(
       responses.flatMap((entry) =>
         Array.isArray(entry.results) ? entry.results : []
       )
     );
 
-    const cachedEnriched = await enrichResultsFromCache(merged);
-    const orderedResults = decorateUnifiedResults(cachedEnriched, query);
+    let cachedEnriched = await enrichResultsFromCache(merged);
+    let orderedResults = decorateUnifiedResults(cachedEnriched, query);
+
+    // If Modash AI returns fewer than the minimum display count, fill the same
+    // platform set using the standard search endpoint. This keeps the invitation
+    // page at 10-15 cards without mixing YouTube into Modash-only campaigns.
+    if (orderedResults.length < minimumResults) {
+      const standardResponses = [];
+
+      for (let pageIndex = 0; pageIndex < 3; pageIndex += 1) {
+        const currentMerged = mergeUnifiedSearchItems(
+          responses
+            .concat(standardResponses)
+            .flatMap((entry) =>
+              Array.isArray(entry.results) ? entry.results : []
+            )
+        );
+
+        if (currentMerged.length >= minimumResults) break;
+
+        for (const platform of platforms) {
+          const fetchLimit = fetchLimitByPlatform.get(platform) || limit;
+
+          try {
+            standardResponses.push(
+              await runStandardPlatformSearch(
+                platform,
+                body,
+                query,
+                pageIndex,
+                fetchLimit
+              )
+            );
+          } catch (err) {
+            warnings.push({
+              platform,
+              kind: "standard",
+              page: pageIndex,
+              message: buildSafeErrorMessage(
+                err,
+                "Standard search fallback skipped for this platform."
+              ),
+            });
+          }
+        }
+      }
+
+      if (standardResponses.length) {
+        responses.push(...standardResponses);
+        merged = mergeUnifiedSearchItems(
+          responses.flatMap((entry) =>
+            Array.isArray(entry.results) ? entry.results : []
+          )
+        );
+        cachedEnriched = await enrichResultsFromCache(merged);
+        orderedResults = decorateUnifiedResults(cachedEnriched, query);
+      }
+    }
 
     const balancedResults =
       platforms.length > 1
@@ -5504,6 +5676,7 @@ async function getRecommendedInfluencersForCampaign(req, res) {
         requestedPlatforms,
         platforms,
         warnings,
+        minimumResults,
         rule: "no_youtube_use_modash_ai_only",
       },
     });
@@ -6237,6 +6410,76 @@ function buildRateCardFromCampaignAndReport({
   };
 }
 
+
+function buildVirtualRateCardInfluencerDoc({ reportJSON, platform, body = {} }) {
+  const normalized = normalizeReportData(reportJSON || {});
+  const profile = normalized.profile || {};
+  const rootProfile = (reportJSON && reportJSON.profile) || {};
+
+  const rawUsername = cleanStr(
+    profile.username ||
+    profile.handle ||
+    reportJSON?.username ||
+    reportJSON?.handle ||
+    rootProfile?.username ||
+    rootProfile?.handle ||
+    ''
+  ).replace(/^@/, '');
+
+  const userId = cleanStr(
+    body.youtubeChannelId ||
+    body.channelId ||
+    body.modashUserId ||
+    body.userId ||
+    profile.userId ||
+    reportJSON?.userId ||
+    reportJSON?.channelId ||
+    rootProfile?.userId ||
+    rootProfile?.channelId ||
+    rawUsername
+  );
+
+  const handle = cleanStr(
+    body.handle ||
+    profile.handle ||
+    reportJSON?.handle ||
+    rootProfile?.handle ||
+    (rawUsername ? `@${rawUsername}` : '')
+  );
+
+  return {
+    _id: null,
+    provider: platform,
+    userId: userId || null,
+    username: rawUsername || null,
+    fullname:
+      cleanStr(profile.fullname || reportJSON?.fullname || reportJSON?.name || rootProfile?.fullname || rootProfile?.name) ||
+      rawUsername ||
+      'Creator',
+    handle: handle || (rawUsername ? `@${rawUsername}` : null),
+    url: profile.url || reportJSON?.url || rootProfile?.url || null,
+    picture: profile.picture || reportJSON?.picture || rootProfile?.picture || null,
+    followers: readFirstNumber(profile.followers, reportJSON?.followers, rootProfile?.followers),
+    engagementRate: normalizePercentToFraction(
+      profile.engagementRate ?? reportJSON?.engagementRate ?? rootProfile?.engagementRate
+    ),
+    averageViews: readFirstNumber(
+      profile.averageViews,
+      normalized.avgViews,
+      normalized.avgReelsPlays,
+      reportJSON?.avgViews,
+      reportJSON?.averageViews,
+      rootProfile?.avgViews,
+      rootProfile?.averageViews
+    ),
+    country: normalized.country || reportJSON?.country || rootProfile?.country || null,
+    language: normalized.language || reportJSON?.language || rootProfile?.language || null,
+    audience: normalized.audience || reportJSON?.audience || rootProfile?.audience || null,
+    categories: normalized.categories || reportJSON?.categories || rootProfile?.categories || [],
+    providerRaw: reportJSON || null,
+  };
+}
+
 async function getSuggestedRateCard(req, res) {
   try {
     const body = req.body || {};
@@ -6251,11 +6494,10 @@ async function getSuggestedRateCard(req, res) {
       'campaignId'
     );
 
-    const influencerObjectId = requireMongoObjectId(
-      body.influencerId || body.influencer_id || body.modashProfileId,
-      'influencerId'
+    const rawInfluencerId = cleanStr(
+      body.influencerId || body.influencer_id || body.modashProfileId
     );
-
+    const influencerObjectId = toMongoObjectId(rawInfluencerId);
     const currency = cleanStr(body.currency || 'USD') || 'USD';
 
     const campaign = await Campaign.findOne({
@@ -6270,18 +6512,16 @@ async function getSuggestedRateCard(req, res) {
       });
     }
 
-    const influencerDoc = await ModashProfile.findOne({
-      _id: influencerObjectId,
-    }).lean();
+    let influencerDoc = null;
 
-    if (!influencerDoc) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Influencer not found',
-      });
+    if (influencerObjectId) {
+      influencerDoc = await ModashProfile.findOne({
+        _id: influencerObjectId,
+      }).lean();
     }
 
-    const platform = normalizePlatform(body.platform || influencerDoc.provider || '');
+    const reportJSON = body.report || body.raw || influencerDoc?.providerRaw || null;
+    const platform = normalizePlatform(body.platform || influencerDoc?.provider || '');
 
     if (!platform) {
       return res.status(400).json({
@@ -6290,14 +6530,32 @@ async function getSuggestedRateCard(req, res) {
       });
     }
 
+    if (!influencerDoc) {
+      if (platform === 'youtube' && reportJSON) {
+        influencerDoc = buildVirtualRateCardInfluencerDoc({
+          reportJSON,
+          platform,
+          body,
+        });
+      } else if (rawInfluencerId && !influencerObjectId) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Valid influencerId is required',
+        });
+      } else {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Influencer not found',
+        });
+      }
+    }
+
     if (cleanStr(influencerDoc.provider) && cleanStr(influencerDoc.provider) !== platform) {
       return res.status(400).json({
         status: 'error',
         message: 'Influencer platform does not match requested platform',
       });
     }
-
-    const reportJSON = body.report || body.raw || influencerDoc.providerRaw || null;
 
     if (!reportJSON) {
       return res.status(400).json({
