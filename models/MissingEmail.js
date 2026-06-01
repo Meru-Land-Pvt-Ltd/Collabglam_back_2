@@ -1,6 +1,4 @@
 // models/MissingEmail.js
-'use strict';
-
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
@@ -38,7 +36,6 @@ const MissingEmailSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Optional because pending missing-email records may not have email yet.
     email: {
       type: String,
       required: false,
