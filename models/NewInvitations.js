@@ -127,6 +127,35 @@ const InvitationSchema = new mongoose.Schema(
       trim: true,
     },
 
+    emailTextBody: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    emailHtmlBody: {
+      type: String,
+      default: "",
+    },
+
+    emailAttachments: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    emailSendStatus: {
+      type: String,
+      enum: ["pending_email", "sent", "failed", "skipped"],
+      default: "pending_email",
+      index: true,
+    },
+
+    emailSkippedReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     emailMessageId: {
       type: String,
       default: null,
@@ -191,6 +220,7 @@ InvitationSchema.index({ brandId: 1, campaignId: 1, status: 1 });
 InvitationSchema.index({ createdAt: -1 });
 InvitationSchema.index({ brandId: 1, campaignId: 1, handle: 1, platform: 1, permanentCampaignLock: 1 });
 InvitationSchema.index({ followUpSentAt: -1 });
+InvitationSchema.index({ brandId: 1, emailSendStatus: 1 });
 
 module.exports =
   mongoose.models.Invitations ||

@@ -438,9 +438,15 @@ function normalizeEmailTemplate(body = {}, { brand, fallbackSubject = "" } = {})
   };
 }
 
-function buildEmailTags({ brandId, campaignId, platform, handle }) {
+function buildEmailTags({
+  brandId,
+  campaignId,
+  platform,
+  handle,
+  type = "creator-invitation",
+}) {
   return [
-    { Name: "type", Value: "creator-invitation" },
+    { Name: "type", Value: type },
     { Name: "platform", Value: platform },
     { Name: "handle", Value: handle.replace(/^@/, "") },
     { Name: "brandId", Value: brandId },
@@ -574,6 +580,11 @@ function invitationResponse(doc, refs = {}) {
     emailTo: doc.emailTo || null,
     emailFrom: doc.emailFrom || null,
     emailSubject: doc.emailSubject || "",
+    emailTextBody: doc.emailTextBody || "",
+    emailHtmlBody: doc.emailHtmlBody || "",
+    emailAttachments: doc.emailAttachments || [],
+    emailSendStatus: doc.emailSendStatus || "pending_email",
+    emailSkippedReason: doc.emailSkippedReason || "",
     emailMessageId: doc.emailMessageId || null,
     emailSentAt: doc.emailSentAt || null,
 
@@ -784,14 +795,18 @@ exports.createInvitation = async (req, res) => {
       missingEmailId: req.body?.missingEmailId,
     });
 
-    if (!recipientEmail) {
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Influencer email not found in MissingEmail for this handle. Please resolve the missing email first.",
-        handle,
-        platform,
-      });
+    let pendingMissingEmailRecord = missingEmail || null;
+
+    if (!recipientEmail && !pendingMissingEmailRecord) {
+      try {
+        pendingMissingEmailRecord = await ensurePendingMissingEmailRecord({
+          handle,
+          platform,
+          sourceDoc: null,
+        });
+      } catch (missingErr) {
+        console.error("Failed to create pending MissingEmail:", missingErr);
+      }
     }
 
     const results = [];
@@ -854,8 +869,8 @@ exports.createInvitation = async (req, res) => {
           changed = true;
         }
 
-        if (missingEmail?._id && !doc.missingEmailId) {
-          doc.missingEmailId = String(missingEmail._id);
+        if (pendingMissingEmailRecord?._id && !doc.missingEmailId) {
+          doc.missingEmailId = String(pendingMissingEmailRecord._id);
           changed = true;
         }
 
@@ -882,12 +897,53 @@ exports.createInvitation = async (req, res) => {
           payload.recommendationReason = recommendationReason;
         }
 
-        if (missingEmail?._id) {
-          payload.missingEmailId = String(missingEmail._id);
+        if (pendingMissingEmailRecord?._id) {
+          payload.missingEmailId = String(pendingMissingEmailRecord._id);
         }
+
+        payload.emailFrom = emailTemplate.from;
+        payload.emailSubject = emailTemplate.subject;
+        payload.emailTextBody = emailTemplate.text;
+        payload.emailHtmlBody = emailTemplate.html;
+        payload.emailAttachments = emailTemplate.attachments || [];
+        payload.emailSendStatus = recipientEmail ? "pending_email" : "pending_email";
+        payload.emailSkippedReason = recipientEmail
+          ? ""
+          : "Invitation Sent to the influencer.";
 
         doc = await Invitation.create(payload);
         createdCount += 1;
+
+        if (!recipientEmail) {
+          emailSkippedReason =
+            "Invitation Sent to the Influencer.";
+
+          results.push({
+            status: responseStatus,
+            message:
+              "Invitation sent to the infleucner.",
+            emailSent: false,
+            emailMeta: {
+              recipientEmail: null,
+              emailSource: "missing_email",
+              missingEmailId: pendingMissingEmailRecord?._id
+                ? String(pendingMissingEmailRecord._id)
+                : null,
+              subject: emailTemplate.subject,
+              campaignId,
+              from: emailTemplate.from,
+              sendStatus: "pending_email",
+            },
+            emailSkippedReason,
+            data: invitationResponse(doc, {
+              brand,
+              campaign,
+              missingEmail: pendingMissingEmailRecord,
+            }),
+          });
+
+          continue;
+        }
 
         try {
           const sent = await sendEmail({
@@ -905,7 +961,7 @@ exports.createInvitation = async (req, res) => {
               campaignId,
               platform,
               handle,
-              type: "creator-followup",
+              type: "creator-invitation",
             }),
           });
 
@@ -917,11 +973,16 @@ exports.createInvitation = async (req, res) => {
             doc.emailTo = recipientEmail;
             doc.emailFrom = emailTemplate.from;
             doc.emailSubject = emailTemplate.subject;
+            doc.emailTextBody = emailTemplate.text;
+            doc.emailHtmlBody = emailTemplate.html;
+            doc.emailAttachments = emailTemplate.attachments || [];
             doc.emailMessageId = sent?.messageId || null;
             doc.emailSentAt = new Date();
+            doc.emailSendStatus = "sent";
+            doc.emailSkippedReason = "";
 
-            if (missingEmail?._id && !doc.missingEmailId) {
-              doc.missingEmailId = String(missingEmail._id);
+            if (pendingMissingEmailRecord?._id && !doc.missingEmailId) {
+              doc.missingEmailId = String(pendingMissingEmailRecord._id);
             }
 
             await doc.save();
@@ -930,17 +991,30 @@ exports.createInvitation = async (req, res) => {
           emailMeta = {
             recipientEmail,
             emailSource: "missing_email",
-            missingEmailId: missingEmail?._id ? String(missingEmail._id) : null,
+            missingEmailId: pendingMissingEmailRecord?._id
+              ? String(pendingMissingEmailRecord._id)
+              : null,
             messageId: sent?.messageId || null,
             subject: emailTemplate.subject,
             campaignId,
             from: emailTemplate.from,
+            sendStatus: doc.emailSendStatus,
           };
         } catch (mailErr) {
           console.error("Invitation AWS email send failed:", mailErr);
 
           emailSkippedReason =
             mailErr?.message || "Invitation saved, but AWS email sending failed.";
+
+          doc.emailSendStatus = "failed";
+          doc.emailSkippedReason = emailSkippedReason;
+          doc.emailFrom = emailTemplate.from;
+          doc.emailSubject = emailTemplate.subject;
+          doc.emailTextBody = emailTemplate.text;
+          doc.emailHtmlBody = emailTemplate.html;
+          doc.emailAttachments = emailTemplate.attachments || [];
+
+          await doc.save();
         }
       }
 
@@ -967,9 +1041,11 @@ exports.createInvitation = async (req, res) => {
       status: createdCount ? "saved" : "exists",
       message: multipleCampaigns
         ? "Invitations processed successfully."
-        : createdCount
-          ? "Invitation created successfully."
-          : "Invitation already exists for this campaign and creator.",
+        : createdCount && emailSentCount > 0
+          ? "Invitation created and email sent successfully."
+          : createdCount
+            ? "Invitation created and email sent successfully."
+            : "Invitation already exists for this campaign and creator.",
       createdCount,
       existingCount,
       updatedCount,
@@ -1161,7 +1237,7 @@ exports.sendInvitationFollowUp = async (req, res) => {
         campaignId,
         platform,
         handle,
-        type: "creator-followup",
+        type: "creator-invitation",
       }),
     });
 
