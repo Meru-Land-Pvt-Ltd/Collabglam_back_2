@@ -2412,118 +2412,364 @@ async function buildUniqueBrandFolderSlug(brandId, title, excludeId = null) {
   }
 }
 
+function folderIsPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function folderGetSourceItem(rawItem = {}) {
+  const item = folderIsPlainObject(rawItem) ? rawItem : {};
+  const raw = folderIsPlainObject(item.raw) ? item.raw : item;
+
+  return {
+    item,
+    raw,
+    source: {
+      ...raw,
+      ...item,
+    },
+  };
+}
+
+function folderFirstText(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+
+    if (Array.isArray(value)) {
+      const nested = folderFirstText(...value);
+      if (nested) return nested;
+      continue;
+    }
+
+    if (folderIsPlainObject(value)) {
+      const nested = folderFirstText(
+        value.code,
+        value.isoCode,
+        value.countryCode,
+        value.languageCode,
+        value.name,
+        value.title,
+        value.label,
+        value.value,
+        value.country,
+        value.language,
+        value.city,
+        value.region
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
+    const text = folderCleanStr(value);
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function folderArrayValues(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      return value.filter(Boolean);
+    }
+
+    if (typeof value === "string" && value.trim()) {
+      return value
+        .split(",")
+        .map((item) => folderCleanStr(item))
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
+function folderNumberValue(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+
+  return null;
+}
+
+function folderBooleanValue(...values) {
+  for (const value of values) {
+    if (value === true) return true;
+    if (value === false) return false;
+
+    const text = folderCleanStr(value).toLowerCase();
+    if (["true", "1", "yes"].includes(text)) return true;
+    if (["false", "0", "no"].includes(text)) return false;
+  }
+
+  return false;
+}
+
 function getBrandFolderProfileKey(item = {}) {
-  const id = folderCleanStr(
-    item.profileKey ||
-    item.influencerId ||
-    item.creatorId ||
-    item.userId ||
-    item.modashId ||
-    item._id ||
-    item.id
+  const { source } = folderGetSourceItem(item);
+
+  const explicitProfileKey = folderCleanStr(source.profileKey);
+  if (explicitProfileKey) return explicitProfileKey;
+
+  const influencerId = folderFirstText(
+    source.influencerId,
+    source.creatorId,
+    source.userId,
+    source.modashId,
+    source.channelId,
+    source.id,
+    source._id
   );
 
-  if (id) return id.startsWith("id:") ? id : `id:${id}`;
+  if (influencerId) return `id:${influencerId}`;
 
-  const email = folderCleanStr(item.email).toLowerCase();
+  const email = folderFirstText(source.email).toLowerCase();
   if (email) return `email:${email}`;
 
-  const link = folderCleanStr(item.primaryLink || item.profileUrl || item.url || item.links?.[0])
+  const link = folderFirstText(
+    source.primaryLink,
+    source.profileUrl,
+    source.profile_url,
+    source.url,
+    source.links?.[0]
+  )
     .toLowerCase()
     .replace(/\/+$/, "");
 
   if (link) return `link:${link}`;
 
-  const handle = folderCleanStr(item.handle || item.username || item.userName)
+  const handle = folderFirstText(
+    source.handle,
+    source.username,
+    source.userName,
+    source.screenName
+  )
     .toLowerCase()
     .replace(/^@+/, "");
 
-  const provider = folderCleanStr(item.provider || item.platform).toLowerCase();
+  const provider = folderFirstText(source.provider, source.platform).toLowerCase();
 
-  if (handle || provider) return `handle:${provider}:${handle}`;
+  if (handle) return `handle:${provider || "unknown"}:${handle}`;
 
-  const name = folderCleanStr(item.name || item.fullname || item.fullName).toLowerCase();
+  const name = folderFirstText(
+    source.name,
+    source.fullname,
+    source.fullName
+  ).toLowerCase();
 
   return name ? `name:${name}:${provider}` : "";
 }
 
 function normalizeBrandFolderItem(rawItem = {}, status = "saved") {
-  const categories = Array.isArray(rawItem.categories)
-    ? rawItem.categories
-    : Array.isArray(rawItem.niche)
-      ? rawItem.niche
-      : rawItem.category
-        ? [rawItem.category]
-        : rawItem.niche
-          ? [rawItem.niche]
-          : [];
+  const { item, raw, source } = folderGetSourceItem(rawItem);
 
-  const primaryLink = folderCleanStr(
-    rawItem.primaryLink || rawItem.profileUrl || rawItem.url || rawItem.links?.[0]
+  const profileKey = getBrandFolderProfileKey(source);
+
+  const influencerId = folderFirstText(
+    source.influencerId,
+    source.creatorId,
+    source.userId,
+    source.modashId,
+    source.channelId,
+    source.id,
+    source._id
   );
 
-  const picture = folderCleanStr(
-    rawItem.picture ||
-    rawItem.avatarUrl ||
-    rawItem.profileImage ||
-    rawItem.profilePicture ||
-    rawItem.image ||
-    rawItem.thumbnail ||
-    rawItem.avatar ||
-    rawItem.profilePicUrl
+  const provider = folderFirstText(source.provider, source.platform);
+  const platform = folderFirstText(source.platform, source.provider);
+
+  const handle = folderFirstText(
+    source.handle,
+    source.username,
+    source.userName,
+    source.screenName
+  ).replace(/^@+/, "");
+
+  const primaryLink = folderFirstText(
+    source.primaryLink,
+    source.profileUrl,
+    source.profile_url,
+    source.url,
+    source.links?.[0]
   );
 
-  return {
-    profileKey: getBrandFolderProfileKey(rawItem),
+  const picture = folderFirstText(
+    source.picture,
+    source.avatarUrl,
+    source.profileImage,
+    source.profilePicture,
+    source.image,
+    source.thumbnail,
+    source.avatar,
+    source.profilePicUrl,
+    source.photo
+  );
 
-    influencerId: folderCleanStr(
-      rawItem.influencerId || rawItem.creatorId || rawItem.userId || rawItem._id || rawItem.id
+  const country = folderFirstText(
+    source.country,
+    source.countryCode,
+    source.location?.country,
+    source.location?.countryCode,
+    source.location?.isoCode,
+    source.profile?.country,
+    source.account?.country,
+    source.audience?.country,
+    source.audience?.countries?.[0],
+    source.audience?.geoCountries?.[0],
+    source.audience?.topCountries?.[0]
+  );
+
+  const language = folderFirstText(
+    source.language,
+    source.languageCode,
+    source.languages,
+    source.profile?.language,
+    source.account?.language,
+    source.audience?.language,
+    source.audience?.languages,
+    source.stats?.language
+  );
+
+  const location = folderFirstText(
+    source.location?.name,
+    source.location?.fullName,
+    source.location?.city,
+    source.location?.region,
+    source.location,
+    country
+  );
+
+  const categories = folderArrayValues(
+    source.categories,
+    source.niche,
+    source.category ? [source.category] : [],
+    source.topicTags,
+    source.interests
+  );
+
+  const links = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(source.links) ? source.links : []),
+        primaryLink,
+      ]
+        .map(folderCleanStr)
+        .filter(Boolean)
+    )
+  );
+
+  const normalized = {
+    profileKey,
+
+    influencerId,
+    creatorId: folderFirstText(source.creatorId, influencerId),
+    userId: folderFirstText(source.userId, influencerId),
+    modashId: folderFirstText(source.modashId),
+    channelId: folderFirstText(source.channelId),
+
+    name: folderFirstText(
+      source.name,
+      source.fullname,
+      source.fullName,
+      source.username,
+      handle
     ),
-    creatorId: folderCleanStr(rawItem.creatorId || rawItem.influencerId || rawItem.userId || rawItem._id || rawItem.id),
-    userId: folderCleanStr(rawItem.userId || rawItem.influencerId || rawItem.creatorId || rawItem._id || rawItem.id),
-    modashId: folderCleanStr(rawItem.modashId),
+    fullname: folderFirstText(source.fullname, source.fullName, source.name),
+    fullName: folderFirstText(source.fullName, source.fullname, source.name),
+    username: folderFirstText(source.username, source.userName, handle),
+    userName: folderFirstText(source.userName, source.username, handle),
+    handle,
 
-    name: folderCleanStr(rawItem.name || rawItem.fullname || rawItem.fullName || rawItem.username),
-    fullname: folderCleanStr(rawItem.fullname || rawItem.fullName || rawItem.name),
-    username: folderCleanStr(rawItem.username || rawItem.userName || rawItem.handle),
-    handle: folderCleanStr(rawItem.handle || rawItem.username || rawItem.userName),
+    email: folderFirstText(source.email).toLowerCase(),
+    emails: folderArrayValues(source.emails, source.contacts?.emails),
 
-    email: folderCleanStr(rawItem.email).toLowerCase(),
+    provider,
+    platform,
 
-    provider: folderCleanStr(rawItem.provider || rawItem.platform),
-    platform: folderCleanStr(rawItem.platform || rawItem.provider),
+    country,
+    countryCode: folderFirstText(source.countryCode, country),
 
-    country: folderCleanStr(rawItem.country),
-    language: folderCleanStr(rawItem.language),
-    location: folderCleanStr(rawItem.location || rawItem.country),
+    language,
+    languageCode: folderFirstText(source.languageCode, language),
+    languages: folderArrayValues(source.languages, source.audience?.languages),
+
+    location,
+    city: folderFirstText(source.city, source.location?.city),
+    region: folderFirstText(
+      source.region,
+      source.state,
+      source.location?.region,
+      source.location?.state
+    ),
 
     categories,
     niche: categories,
 
-    followers: Number.isFinite(Number(rawItem.followers)) ? Number(rawItem.followers) : null,
-    engagements: Number.isFinite(Number(rawItem.engagements)) ? Number(rawItem.engagements) : null,
-    engagementRate: Number.isFinite(Number(rawItem.engagementRate)) ? Number(rawItem.engagementRate) : null,
-    averageViews: Number.isFinite(Number(rawItem.averageViews)) ? Number(rawItem.averageViews) : null,
+    followers: folderNumberValue(
+      source.followers,
+      source.followerCount,
+      source.stats?.followers
+    ),
+    engagements: folderNumberValue(
+      source.engagements,
+      source.stats?.engagements
+    ),
+    engagementRate: folderNumberValue(
+      source.engagementRate,
+      source.stats?.engagementRate
+    ),
+    averageViews: folderNumberValue(
+      source.averageViews,
+      source.avgViews,
+      source.stats?.avgViews,
+      source.stats?.views
+    ),
 
     primaryLink,
-    profileUrl: folderCleanStr(rawItem.profileUrl || primaryLink),
-    url: folderCleanStr(rawItem.url || primaryLink),
-    links: Array.isArray(rawItem.links)
-      ? rawItem.links.map(folderCleanStr).filter(Boolean)
-      : primaryLink
-        ? [primaryLink]
-        : [],
+    profileUrl: folderFirstText(source.profileUrl, source.profile_url, primaryLink),
+    url: folderFirstText(source.url, primaryLink),
+    links,
 
     picture,
-    avatarUrl: folderCleanStr(rawItem.avatarUrl || picture),
-    profileImage: folderCleanStr(rawItem.profileImage || picture),
+    avatarUrl: folderFirstText(source.avatarUrl, picture),
+    profileImage: folderFirstText(source.profileImage, picture),
+
+    bio: folderFirstText(source.bio, source.description),
+    description: folderFirstText(source.description, source.bio),
+
+    isVerified: folderBooleanValue(source.isVerified, source.verified),
+    verified: folderBooleanValue(source.verified, source.isVerified),
+    isPrivate: folderBooleanValue(source.isPrivate),
+
+    searchType: folderFirstText(source.searchType) || "standard",
+
+    // Keep source as string if it was string, otherwise default.
+    source: typeof source.source === "string"
+      ? folderCleanStr(source.source || "standard")
+      : "standard",
 
     status,
-    raw: rawItem,
 
-    addedAt: new Date(),
+    // Important full nested details
+    audience: source.audience || raw.audience || null,
+    stats: source.stats || raw.stats || null,
+    contacts: source.contacts || raw.contacts || null,
+    profile: source.profile || raw.profile || null,
+    account: source.account || raw.account || null,
+
+    raw: {
+      ...raw,
+      ...item,
+    },
+
+    addedAt: source.addedAt || new Date(),
     updatedAt: new Date(),
   };
+
+  return normalized;
 }
 
 async function findBrandFolderCampaignSnapshot(campaignId, brandId) {
@@ -3689,11 +3935,14 @@ async function addbookmarkProfile(req, res) {
       success: true,
       message: result.added
         ? "Profile bookmarked successfully"
-        : "Profile already exists in bookmarked folder",
+        : result.updated
+          ? "Profile bookmark updated successfully"
+          : "Profile already exists in bookmarked folder",
       data: {
         folder: serializeBrandFolderDetail(folder.toObject()),
         addedCount: result.added,
         skippedCount: result.skipped,
+        updatedCount: result.updated,
         savedKeys: folder.items.map((item) => item.profileKey).filter(Boolean),
       },
     });

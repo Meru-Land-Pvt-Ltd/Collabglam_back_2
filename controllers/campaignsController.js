@@ -2362,7 +2362,16 @@ function getAuthedBrandIdForCampaignDropdown(req = {}) {
   );
 }
 
-function getNonFullManagedCampaignSearchOr(search) {
+// ===============================
+// GET BRAND CREATED CAMPAIGNS ONLY
+// Excludes campaigns created by admin
+// ===============================
+
+function getBrandIdOnlyForCampaignDropdown(req = {}) {
+  return clean(req.query?.brandId || req.body?.brandId);
+}
+
+function getBrandCreatedCampaignSearchOr(search) {
   const term = clean(search);
 
   if (!term) return [];
@@ -2378,38 +2387,11 @@ function getNonFullManagedCampaignSearchOr(search) {
   ];
 }
 
-function getNonFullManagedCampaignNor() {
-  const textFields = [
-    "campaignType",
-    "type",
-    "planType",
-    "planName",
-    "plan",
-    "packageType",
-    "packageName",
-    "subscriptionPlan",
-    "managementType",
-    "serviceType",
-    "creatorManagement",
-    "campaignMode",
-    "mode",
-    "source",
-    "creatorType",
-  ];
-
+function getAdminCreatedCampaignNor() {
   return [
     { approvalMode: "admin_review" },
-    { "createdBy.role": "admin" },
-    { isFullyManaged: true },
-    { fullyManaged: true },
-    { fullManaged: true },
-    { isFullManaged: true },
-    { is_full_managed: true },
-    { isManaged: true },
-    { managedByAdmin: true },
-    ...textFields.map((field) => ({
-      [field]: { $in: FULLY_MANAGED_CAMPAIGN_TEXT_MARKERS },
-    })),
+    { "createdBy.role": { $regex: /^admin$/i } },
+    { "createdBy.userModel": { $regex: /^Master$/i } },
   ];
 }
 
@@ -2441,7 +2423,7 @@ function pickSafeCampaignLabel(candidates = [], fallback = "Campaign") {
   return fallback;
 }
 
-function serializeNonFullManagedCampaign(campaignDoc = {}) {
+function serializeBrandCreatedCampaign(campaignDoc = {}) {
   const id = campaignDoc?._id ? String(campaignDoc._id) : "";
 
   const label = pickSafeCampaignLabel(
@@ -2504,7 +2486,10 @@ function serializeNonFullManagedCampaign(campaignDoc = {}) {
     createdBy: campaignDoc.createdBy || null,
     details: campaignDoc.details || null,
 
-    isFullyManaged: false,
+    isFullyManaged: Boolean(
+      campaignDoc.isFullyManaged || campaignDoc.managementType === "fully_managed"
+    ),
+    managementType: campaignDoc.managementType || "",
   };
 }
 
@@ -2512,21 +2497,31 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
   const requestId = getRequestId(req);
 
   try {
-    const rawBrandId = getAuthedBrandIdForCampaignDropdown(req);
+    const rawBrandId = getBrandIdOnlyForCampaignDropdown(req);
 
     if (!rawBrandId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: "Brand authentication is required.",
+        message: "brandId is required.",
         campaigns: [],
         data: {
           campaigns: [],
           total: 0,
         },
+        pagination: {
+          total: 0,
+          page: 1,
+          limit: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+        requestId,
       });
     }
 
     const brandDoc = await findBrandDocByAnyId(rawBrandId);
+
     const brandObjectId = brandDoc?._id
       ? String(brandDoc._id)
       : isOid(rawBrandId)
@@ -2542,52 +2537,55 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
           campaigns: [],
           total: 0,
         },
+        pagination: {
+          total: 0,
+          page: 1,
+          limit: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+        requestId,
       });
     }
 
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.max(Math.min(parseInt(req.query.limit, 10) || 200, 500), 1);
+    const page = Math.max(
+      parseInt(req.query.page || req.body?.page, 10) || 1,
+      1
+    );
+
+    const limit = Math.max(
+      Math.min(parseInt(req.query.limit || req.body?.limit, 10) || 200, 500),
+      1
+    );
+
     const skip = (page - 1) * limit;
-    const search = clean(req.query.search || req.query.q);
-    const includeDrafts =
-      String(req.query.includeDrafts || req.query.includeDraft || "")
-        .trim()
-        .toLowerCase() === "true";
+
+    const search = clean(
+      req.query.search ||
+        req.query.q ||
+        req.body?.search ||
+        req.body?.q
+    );
 
     const filter = {
       brandId: toObjectId(brandObjectId),
-      $nor: getNonFullManagedCampaignNor(),
+
+      // Exclude campaigns created by admin
+      $nor: getAdminCreatedCampaignNor(),
     };
 
-    if (!includeDrafts) {
-      filter.$and = [
-        {
-          $or: [
-            { isDraft: { $exists: false } },
-            { isDraft: { $ne: 1 } },
-          ],
-        },
-        {
-          $or: [
-            { status: { $exists: false } },
-            { status: { $nin: ["draft", "archived"] } },
-          ],
-        },
-      ];
-    } else {
-      filter.status = { $ne: "archived" };
-    }
+    const searchOr = getBrandCreatedCampaignSearchOr(search);
 
-    const searchOr = getNonFullManagedCampaignSearchOr(search);
     if (searchOr.length) {
-      filter.$and = Array.isArray(filter.$and) ? filter.$and : [];
-      filter.$and.push({ $or: searchOr });
+      filter.$and = [{ $or: searchOr }];
     }
 
     const sort = { updatedAt: -1, createdAt: -1 };
 
     const [total, docs] = await Promise.all([
       Campaign.countDocuments(filter),
+
       Campaign.find(filter)
         .select([
           "_id",
@@ -2613,6 +2611,8 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
           "campaignBudget",
           "budget",
           "createdBy",
+          "isFullyManaged",
+          "managementType",
           "createdAt",
           "updatedAt",
           "publishedAt",
@@ -2638,18 +2638,19 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
       );
     }
 
-    const campaigns = enrichedDocs.map(serializeNonFullManagedCampaign);
+    const campaigns = enrichedDocs.map(serializeBrandCreatedCampaign);
+    const totalPages = Math.ceil(total / limit);
 
     return res.status(200).json({
       success: true,
-      message: "Non fully managed campaigns fetched successfully.",
+      message: "Brand-created campaigns fetched successfully.",
       campaigns,
       data: {
         campaigns,
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages,
         hasNextPage: page * limit < total,
         hasPrevPage: page > 1,
       },
@@ -2657,14 +2658,20 @@ exports.getNonFullManagedCampaigns = async (req, res) => {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages,
         hasNextPage: page * limit < total,
         hasPrevPage: page > 1,
       },
       requestId,
     });
   } catch (err) {
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_NON_FULL_MANAGED_CAMPAIGNS_ERROR");
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GET_BRAND_CREATED_CAMPAIGNS_ERROR"
+    );
+
     console.error("[getNonFullManagedCampaigns] Error:", err);
     return sendControllerError(res, requestId, err);
   }
