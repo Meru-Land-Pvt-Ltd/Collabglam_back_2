@@ -64,12 +64,12 @@ function normalizeInfluencerUserId(body = {}) {
   return (
     String(
       body.userId ||
-        body.influencerUserId ||
-        body.creatorId ||
-        body.influencerId ||
-        body.modashUserId ||
-        body.channelId ||
-        ""
+      body.influencerUserId ||
+      body.creatorId ||
+      body.influencerId ||
+      body.modashUserId ||
+      body.channelId ||
+      ""
     ).trim() || null
   );
 }
@@ -360,47 +360,71 @@ function uniqueEmails(values) {
   return [...new Set(values.map((item) => cleanEmail(item)).filter(Boolean))];
 }
 
-function normalizeEmailTemplate(body = {}) {
-  const template = body.emailTemplate || {};
+function normalizeEmailTemplate(body = {}, { brand, fallbackSubject = "" } = {}) {
+  const template = body.emailTemplate || body.email || {};
 
-  const subject = cleanStr(template.subject || body.subject || "");
+  const subject = cleanStr(
+    template.subject ||
+    body.subject ||
+    body.emailSubject ||
+    fallbackSubject ||
+    ""
+  );
 
   const text = String(
     template.textBody ||
-      template.body ||
-      body.textBody ||
-      body.body ||
-      ""
+    template.body ||
+    body.textBody ||
+    body.body ||
+    body.emailBody ||
+    ""
   ).trim();
 
-  const html = String(template.htmlBody || body.htmlBody || "").trim();
+  const html = String(
+    template.htmlBody ||
+    body.htmlBody ||
+    body.emailHtmlBody ||
+    ""
+  ).trim();
 
-  const proxyFromEmail =
-    cleanEmail(template.fromEmail || body.fromEmail) ||
-    cleanEmail(process.env.SES_FROM_EMAIL) ||
-    cleanEmail(process.env.SES_FROM) ||
-    "confirm@collabglam.com";
+  const proxyFromEmail = cleanEmail(brand?.proxyEmail);
 
-  const replyTo = uniqueEmails([
-    ...toEmailArray(template.replyTo || body.replyTo),
-    proxyFromEmail,
-  ]);
+  const replyTo = proxyFromEmail ? [proxyFromEmail] : [];
 
   const cc = toEmailArray(template.cc || body.cc);
   const bcc = toEmailArray(template.bcc || body.bcc);
 
-  const attachments = Array.isArray(template.attachments)
-    ? template.attachments
-        .filter((file) => file?.filename && file?.contentBase64)
-        .map((file) => ({
-          filename: cleanStr(file.filename),
-          contentType: file.contentType || "application/octet-stream",
-          content: String(file.contentBase64).replace(/^data:.*;base64,/, ""),
-          encoding: "base64",
-        }))
+  const rawAttachments =
+    template.attachments ||
+    body.emailAttachments ||
+    body.attachments ||
+    [];
+
+  const attachments = Array.isArray(rawAttachments)
+    ? rawAttachments
+      .filter((file) => file?.filename && (file?.contentBase64 || file?.content))
+      .map((file) => ({
+        filename: cleanStr(file.filename),
+        contentType: file.contentType || file.mimeType || "application/octet-stream",
+        content: String(file.contentBase64 || file.content || "").replace(
+          /^data:.*;base64,/,
+          ""
+        ),
+        encoding: "base64",
+      }))
     : [];
 
-  if (!subject || (!text && !html)) return null;
+  if (!proxyFromEmail) {
+    return {
+      error: "Brand proxyEmail is required to send invitation email.",
+    };
+  }
+
+  if (!subject || (!text && !html)) {
+    return {
+      error: "Email subject and body are required.",
+    };
+  }
 
   return {
     from: proxyFromEmail,
@@ -480,6 +504,51 @@ async function resolveMissingEmailDoc({
   return missing;
 }
 
+async function resolveInfluencerEmailFromMissingEmail({ handle, platform, missingEmailId }) {
+  const normalizedHandle = normalizeHandle(handle);
+  const normalizedPlatform = normalizePlatform(platform);
+
+  let missingEmail = null;
+
+  if (missingEmailId) {
+    missingEmail = await resolveMissingEmailDoc({
+      missingEmailId,
+      handle: normalizedHandle,
+      platform: normalizedPlatform,
+    });
+  }
+
+  if (!missingEmail && normalizedHandle) {
+    missingEmail = await resolveMissingEmailDoc({
+      handle: normalizedHandle,
+      platform: normalizedPlatform,
+    });
+  }
+
+  if (!missingEmail && normalizedHandle) {
+    missingEmail = await MissingEmail.findOne({
+      handle: normalizedHandle,
+    }).lean();
+  }
+
+  const recipientEmail = cleanEmail(missingEmail?.email);
+
+  return {
+    missingEmail,
+    recipientEmail,
+  };
+}
+
+function buildEmailTags({ brandId, campaignId, platform, handle, type = "creator-invitation" }) {
+  return [
+    { Name: "type", Value: type },
+    { Name: "platform", Value: platform },
+    { Name: "handle", Value: handle.replace(/^@/, "") },
+    { Name: "brandId", Value: brandId },
+    { Name: "campaignId", Value: campaignId },
+  ];
+}
+
 function invitationResponse(doc, refs = {}) {
   const brand = refs.brand || null;
   const campaign = refs.campaign || null;
@@ -502,6 +571,18 @@ function invitationResponse(doc, refs = {}) {
     aiScore: doc.aiScore ?? null,
     rawAiScore: doc.rawAiScore ?? null,
     recommendationReason: doc.recommendationReason || "",
+    emailTo: doc.emailTo || null,
+    emailFrom: doc.emailFrom || null,
+    emailSubject: doc.emailSubject || "",
+    emailMessageId: doc.emailMessageId || null,
+    emailSentAt: doc.emailSentAt || null,
+
+    followUpEmailTo: doc.followUpEmailTo || null,
+    followUpEmailFrom: doc.followUpEmailFrom || null,
+    followUpSubject: doc.followUpSubject || "",
+    followUpMessageId: doc.followUpMessageId || null,
+    followUpSentAt: doc.followUpSentAt || null,
+    permanentCampaignLock: Boolean(doc.permanentCampaignLock),
 
     brandId,
     brandName: brand?.brandName || campaign?.brandName || doc.brandName || "",
@@ -514,63 +595,63 @@ function invitationResponse(doc, refs = {}) {
 
     campaign: campaign
       ? {
-          _id: String(campaign._id),
-          brandId: toPlainId(campaign.brandId),
-          brandName: campaign.brandName || "",
-          campaignTitle: campaign.campaignTitle || "",
-          description: campaign.description || "",
-          campaignType: campaign.campaignType || "",
-          campaignCategory: campaign.campaignCategory || "",
-          campaignSubcategory: campaign.campaignSubcategory || "",
-          campaignBudget: campaign.campaignBudget ?? null,
-          budget: campaign.budget ?? null,
-          influencerBudget: campaign.influencerBudget ?? null,
-          paymentType: campaign.paymentType || "",
-          platformSelection: campaign.platformSelection || [],
-          numberOfInfluencers: campaign.numberOfInfluencers ?? null,
-          influencerTier: campaign.influencerTier || "",
-          minFollowers: campaign.minFollowers ?? null,
-          maxFollowers: campaign.maxFollowers ?? null,
-          creatorContentLanguage: campaign.creatorContentLanguage || "",
-          audienceContentLanguage: campaign.audienceContentLanguage || "",
-          targetCountry: campaign.targetCountry || "",
-          additionalNotes: campaign.additionalNotes || "",
-          hashtags: campaign.hashtags || [],
-          timeline: campaign.timeline || null,
-          startAt: campaign.startAt || null,
-          endAt: campaign.endAt || null,
-          scheduledAt: campaign.scheduledAt || null,
-          publishedAt: campaign.publishedAt || null,
-          endedAt: campaign.endedAt || null,
-          status: campaign.status || "",
-          publishStatus: campaign.publishStatus || "",
-          approvalMode: campaign.approvalMode || "",
-          isFullyManaged: campaign.isFullyManaged ?? false,
-          managementType: campaign.managementType || "",
-          isActive: campaign.isActive ?? null,
-          applicantCount: campaign.applicantCount ?? null,
-          hasApplied: campaign.hasApplied ?? null,
-          isDraft: campaign.isDraft ?? null,
-          byAi: campaign.byAi ?? null,
-          createdAt: campaign.createdAt || null,
-          updatedAt: campaign.updatedAt || null,
-        }
+        _id: String(campaign._id),
+        brandId: toPlainId(campaign.brandId),
+        brandName: campaign.brandName || "",
+        campaignTitle: campaign.campaignTitle || "",
+        description: campaign.description || "",
+        campaignType: campaign.campaignType || "",
+        campaignCategory: campaign.campaignCategory || "",
+        campaignSubcategory: campaign.campaignSubcategory || "",
+        campaignBudget: campaign.campaignBudget ?? null,
+        budget: campaign.budget ?? null,
+        influencerBudget: campaign.influencerBudget ?? null,
+        paymentType: campaign.paymentType || "",
+        platformSelection: campaign.platformSelection || [],
+        numberOfInfluencers: campaign.numberOfInfluencers ?? null,
+        influencerTier: campaign.influencerTier || "",
+        minFollowers: campaign.minFollowers ?? null,
+        maxFollowers: campaign.maxFollowers ?? null,
+        creatorContentLanguage: campaign.creatorContentLanguage || "",
+        audienceContentLanguage: campaign.audienceContentLanguage || "",
+        targetCountry: campaign.targetCountry || "",
+        additionalNotes: campaign.additionalNotes || "",
+        hashtags: campaign.hashtags || [],
+        timeline: campaign.timeline || null,
+        startAt: campaign.startAt || null,
+        endAt: campaign.endAt || null,
+        scheduledAt: campaign.scheduledAt || null,
+        publishedAt: campaign.publishedAt || null,
+        endedAt: campaign.endedAt || null,
+        status: campaign.status || "",
+        publishStatus: campaign.publishStatus || "",
+        approvalMode: campaign.approvalMode || "",
+        isFullyManaged: campaign.isFullyManaged ?? false,
+        managementType: campaign.managementType || "",
+        isActive: campaign.isActive ?? null,
+        applicantCount: campaign.applicantCount ?? null,
+        hasApplied: campaign.hasApplied ?? null,
+        isDraft: campaign.isDraft ?? null,
+        byAi: campaign.byAi ?? null,
+        createdAt: campaign.createdAt || null,
+        updatedAt: campaign.updatedAt || null,
+      }
       : null,
 
     missingEmailId,
     email: missingEmail?.email || null,
     missingEmail: missingEmail
       ? {
-          _id: String(missingEmail._id),
-          email: missingEmail.email || null,
-          handle: missingEmail.handle || "",
-          platform: missingEmail.platform || "",
-          status: missingEmail.status || "",
-          youtube: missingEmail.youtube || null,
-          createdByAdminId: missingEmail.createdByAdminId || null,
-          createdAt: missingEmail.createdAt || null,
-          updatedAt: missingEmail.updatedAt || null,
-        }
+        _id: String(missingEmail._id),
+        email: missingEmail.email || null,
+        handle: missingEmail.handle || "",
+        platform: missingEmail.platform || "",
+        status: missingEmail.status || "",
+        youtube: missingEmail.youtube || null,
+        createdByAdminId: missingEmail.createdByAdminId || null,
+        createdAt: missingEmail.createdAt || null,
+        updatedAt: missingEmail.updatedAt || null,
+      }
       : null,
 
     creatorTitle:
@@ -685,26 +766,32 @@ exports.createInvitation = async (req, res) => {
       });
     }
 
-    const emailTemplate = normalizeEmailTemplate(req.body);
-
-    const emailLookup = await resolveCreatorEmail({
-      handle,
-      platform,
-      modashUserId,
+    const emailTemplate = normalizeEmailTemplate(req.body, {
+      brand,
+      fallbackSubject: `Invitation to Collaborate - ${brand.brandName || "CollabGlam"}`,
     });
 
-    let pendingMissingEmailRecord = null;
+    if (emailTemplate?.error) {
+      return res.status(400).json({
+        status: "error",
+        message: emailTemplate.error,
+      });
+    }
 
-    if (!emailLookup.email) {
-      try {
-        pendingMissingEmailRecord = await ensurePendingMissingEmailRecord({
-          handle,
-          platform,
-          sourceDoc: emailLookup.doc,
-        });
-      } catch (missingErr) {
-        console.error("Failed to create pending MissingEmail:", missingErr);
-      }
+    const { missingEmail, recipientEmail } = await resolveInfluencerEmailFromMissingEmail({
+      handle,
+      platform,
+      missingEmailId: req.body?.missingEmailId,
+    });
+
+    if (!recipientEmail) {
+      return res.status(400).json({
+        status: "error",
+        message:
+          "Influencer email not found in MissingEmail for this handle. Please resolve the missing email first.",
+        handle,
+        platform,
+      });
     }
 
     const results = [];
@@ -767,8 +854,8 @@ exports.createInvitation = async (req, res) => {
           changed = true;
         }
 
-        if (pendingMissingEmailRecord?._id && !doc.missingEmailId) {
-          doc.missingEmailId = String(pendingMissingEmailRecord._id);
+        if (missingEmail?._id && !doc.missingEmailId) {
+          doc.missingEmailId = String(missingEmail._id);
           changed = true;
         }
 
@@ -795,60 +882,65 @@ exports.createInvitation = async (req, res) => {
           payload.recommendationReason = recommendationReason;
         }
 
-        if (pendingMissingEmailRecord?._id) {
-          payload.missingEmailId = String(pendingMissingEmailRecord._id);
+        if (missingEmail?._id) {
+          payload.missingEmailId = String(missingEmail._id);
         }
 
         doc = await Invitation.create(payload);
         createdCount += 1;
 
-        if (!emailLookup.email) {
-          emailSkippedReason =
-            "Invitation saved. No email found in Modash contacts, direct fields, or bio.";
-        } else if (!emailTemplate) {
-          emailSkippedReason =
-            "Invitation saved and email resolved, but emailTemplate was not provided or is missing subject/body.";
-        } else {
-          try {
-            const sent = await sendEmail({
-              to: emailLookup.email,
-              from: emailTemplate.from,
-              subject: emailTemplate.subject,
-              text: emailTemplate.text,
-              html: emailTemplate.html,
-              cc: emailTemplate.cc,
-              bcc: emailTemplate.bcc,
-              replyTo: emailTemplate.replyTo,
-              attachments: emailTemplate.attachments,
-              emailTags: buildEmailTags({
-                brandId,
-                campaignId,
-                platform,
-                handle,
-              }),
-            });
+        try {
+          const sent = await sendEmail({
+            to: recipientEmail,
+            from: emailTemplate.from,
+            subject: emailTemplate.subject,
+            text: emailTemplate.text,
+            html: emailTemplate.html,
+            cc: emailTemplate.cc,
+            bcc: emailTemplate.bcc,
+            replyTo: emailTemplate.replyTo,
+            attachments: emailTemplate.attachments,
+            emailTags: buildEmailTags({
+              brandId,
+              campaignId,
+              platform,
+              handle,
+              type: "creator-followup",
+            }),
+          });
 
-            emailSent = Boolean(sent?.messageId);
+          emailSent = Boolean(sent?.messageId);
 
-            if (emailSent) {
-              emailSentCount += 1;
+          if (emailSent) {
+            emailSentCount += 1;
+
+            doc.emailTo = recipientEmail;
+            doc.emailFrom = emailTemplate.from;
+            doc.emailSubject = emailTemplate.subject;
+            doc.emailMessageId = sent?.messageId || null;
+            doc.emailSentAt = new Date();
+
+            if (missingEmail?._id && !doc.missingEmailId) {
+              doc.missingEmailId = String(missingEmail._id);
             }
 
-            emailMeta = {
-              recipientEmail: emailLookup.email,
-              emailSource: emailLookup.source,
-              missingEmailId: null,
-              messageId: sent?.messageId || null,
-              subject: emailTemplate.subject,
-              campaignId,
-            };
-          } catch (mailErr) {
-            console.error("Invitation AWS email send failed:", mailErr);
-
-            emailSkippedReason =
-              mailErr?.message ||
-              "Invitation saved, but AWS email sending failed.";
+            await doc.save();
           }
+
+          emailMeta = {
+            recipientEmail,
+            emailSource: "missing_email",
+            missingEmailId: missingEmail?._id ? String(missingEmail._id) : null,
+            messageId: sent?.messageId || null,
+            subject: emailTemplate.subject,
+            campaignId,
+            from: emailTemplate.from,
+          };
+        } catch (mailErr) {
+          console.error("Invitation AWS email send failed:", mailErr);
+
+          emailSkippedReason =
+            mailErr?.message || "Invitation saved, but AWS email sending failed.";
         }
       }
 
@@ -864,7 +956,7 @@ exports.createInvitation = async (req, res) => {
         data: invitationResponse(doc, {
           brand,
           campaign,
-          missingEmail: pendingMissingEmailRecord,
+          missingEmail,
         }),
       });
     }
@@ -916,6 +1008,215 @@ exports.createInvitation = async (req, res) => {
     return res.status(500).json({
       status: "error",
       message: err?.message || "Failed to create invitation.",
+    });
+  }
+};
+
+exports.sendInvitationFollowUp = async (req, res) => {
+  try {
+    const brandId = normalizeObjectId(req.body?.brandId);
+    const campaignId = normalizeObjectId(req.body?.campaignId);
+
+    const rawHandle = String(req.body?.handle || "").trim();
+    const rawPlatform = String(req.body?.platform || "").trim();
+
+    const userId = normalizeInfluencerUserId(req.body);
+    const modashUserId =
+      String(req.body?.modashUserId || userId || "").trim() || null;
+
+    if (!brandId) {
+      return res.status(400).json({
+        status: "error",
+        message: "Valid brand _id is required.",
+      });
+    }
+
+    if (!campaignId) {
+      return res.status(400).json({
+        status: "error",
+        message: "Valid campaignId is required.",
+      });
+    }
+
+    if (!rawHandle) {
+      return res.status(400).json({
+        status: "error",
+        message: "handle is required.",
+      });
+    }
+
+    if (!rawPlatform) {
+      return res.status(400).json({
+        status: "error",
+        message: "platform is required.",
+      });
+    }
+
+    const handle = normalizeHandle(rawHandle);
+
+    if (!HANDLE_RX.test(handle)) {
+      return res.status(400).json({
+        status: "error",
+        message:
+          'Invalid handle. It must start with "@" and contain letters, numbers, ".", "_" or "-".',
+      });
+    }
+
+    const platform = normalizePlatform(rawPlatform);
+
+    if (!platform || !PLATFORM_ENUM.has(platform)) {
+      return res.status(400).json({
+        status: "error",
+        message:
+          "Invalid platform. Use: youtube|instagram|tiktok. Aliases: yt, ig, tt.",
+      });
+    }
+
+    const [brand, campaign] = await Promise.all([
+      getBrandByMongoId(brandId),
+      Campaign.findOne({
+        _id: toObjectId(campaignId),
+        $or: [{ brandId: toObjectId(brandId) }, { brandId: String(brandId) }],
+      }).lean(),
+    ]);
+
+    if (!brand) {
+      return res.status(404).json({
+        status: "error",
+        message: "Brand not found for provided brand _id.",
+      });
+    }
+
+    if (!campaign) {
+      return res.status(404).json({
+        status: "error",
+        message: "Campaign not found for this brand.",
+      });
+    }
+
+    const doc = await Invitation.findOne({
+      brandId,
+      campaignId,
+      handle,
+      platform,
+    });
+
+    if (!doc) {
+      return res.status(404).json({
+        status: "error",
+        message: "Invitation not found. Send the invitation first before follow-up.",
+      });
+    }
+
+    if (doc.permanentCampaignLock || doc.followUpSentAt) {
+      return res.status(409).json({
+        status: "error",
+        message: "Follow-up already sent. This campaign is permanently locked.",
+        data: invitationResponse(doc, { brand, campaign }),
+      });
+    }
+
+    const { missingEmail, recipientEmail } =
+      await resolveInfluencerEmailFromMissingEmail({
+        handle,
+        platform,
+        missingEmailId: doc.missingEmailId || req.body?.missingEmailId,
+      });
+
+    if (!recipientEmail) {
+      return res.status(400).json({
+        status: "error",
+        message:
+          "Influencer email not found in MissingEmail for this handle. Please resolve the missing email first.",
+        handle,
+        platform,
+      });
+    }
+
+    const emailTemplate = normalizeEmailTemplate(req.body, {
+      brand,
+      fallbackSubject: `Follow-up: Invitation to Collaborate - ${brand.brandName || "CollabGlam"
+        }`,
+    });
+
+    if (emailTemplate?.error) {
+      return res.status(400).json({
+        status: "error",
+        message: emailTemplate.error,
+      });
+    }
+
+    const sent = await sendEmail({
+      to: recipientEmail,
+      from: emailTemplate.from,
+      subject: emailTemplate.subject,
+      text: emailTemplate.text,
+      html: emailTemplate.html,
+      cc: emailTemplate.cc,
+      bcc: emailTemplate.bcc,
+      replyTo: emailTemplate.replyTo,
+      attachments: emailTemplate.attachments,
+      emailTags: buildEmailTags({
+        brandId,
+        campaignId,
+        platform,
+        handle,
+        type: "creator-followup",
+      }),
+    });
+
+    doc.status = "invited";
+
+    if (userId && doc.userId !== userId) {
+      doc.userId = userId;
+    }
+
+    if (modashUserId && doc.modashUserId !== modashUserId) {
+      doc.modashUserId = modashUserId;
+    }
+
+    if (missingEmail?._id) {
+      doc.missingEmailId = String(missingEmail._id);
+    }
+
+    doc.followUpEmailTo = recipientEmail;
+    doc.followUpEmailFrom = emailTemplate.from;
+    doc.followUpSubject = emailTemplate.subject;
+    doc.followUpMessageId = sent?.messageId || null;
+    doc.followUpSentAt = new Date();
+    doc.permanentCampaignLock = true;
+
+    await doc.save();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Follow-up email sent successfully. Campaign locked permanently.",
+      emailSent: Boolean(sent?.messageId),
+      emailMeta: {
+        recipientEmail,
+        emailSource: "missing_email",
+        missingEmailId: missingEmail?._id ? String(missingEmail._id) : null,
+        messageId: sent?.messageId || null,
+        subject: emailTemplate.subject,
+        from: emailTemplate.from,
+        campaignId,
+      },
+      data: invitationResponse(doc, {
+        brand,
+        campaign,
+        missingEmail,
+      }),
+    });
+  } catch (err) {
+    console.error("sendInvitationFollowUp error:", err);
+
+    const statusCode = err?.statusCode || err?.status || 500;
+
+    await saveErrorLog(req, err, statusCode, "SEND_INVITATION_FOLLOWUP_ERROR");
+
+    return res.status(500).json({
+      status: "error",
+      message: err?.message || "Failed to send follow-up email.",
     });
   }
 };
@@ -1035,10 +1336,10 @@ exports.listInvitations = async (req, res) => {
 
     const userId = String(
       body.userId ||
-        body.influencerUserId ||
-        body.creatorId ||
-        body.influencerId ||
-        ""
+      body.influencerUserId ||
+      body.creatorId ||
+      body.influencerId ||
+      ""
     ).trim();
 
     const rawHandle = typeof body.handle === "string" ? body.handle.trim() : "";
@@ -1271,100 +1572,100 @@ exports.listInvitations = async (req, res) => {
     const [brands, campaigns, missingEmails] = await Promise.all([
       brandIds.length
         ? Brand.find({
-            _id: { $in: brandIds.map((id) => toObjectId(id)) },
-          })
-            .select(
-              [
-                "brandName",
-                "email",
-                "name",
-                "industry",
-                "companySize",
-                "proxyEmail",
-                "subscription",
-                "subscriptionExpired",
-                "isAdminCreated",
-                "signupCompleted",
-                "createdAt",
-                "updatedAt",
-              ].join(" ")
-            )
-            .lean()
+          _id: { $in: brandIds.map((id) => toObjectId(id)) },
+        })
+          .select(
+            [
+              "brandName",
+              "email",
+              "name",
+              "industry",
+              "companySize",
+              "proxyEmail",
+              "subscription",
+              "subscriptionExpired",
+              "isAdminCreated",
+              "signupCompleted",
+              "createdAt",
+              "updatedAt",
+            ].join(" ")
+          )
+          .lean()
         : [],
 
       foundCampaignIds.length
         ? Campaign.find({
-            _id: { $in: foundCampaignIds.map((id) => toObjectId(id)) },
-          })
-            .select(
-              [
-                "brandId",
-                "brandName",
-                "campaignTitle",
-                "description",
-                "campaignType",
-                "campaignCategory",
-                "campaignSubcategory",
-                "campaignBudget",
-                "budget",
-                "influencerBudget",
-                "paymentType",
-                "platformSelection",
-                "numberOfInfluencers",
-                "influencerTier",
-                "minFollowers",
-                "maxFollowers",
-                "creatorContentLanguage",
-                "audienceContentLanguage",
-                "targetCountry",
-                "additionalNotes",
-                "hashtags",
-                "timeline",
-                "startAt",
-                "endAt",
-                "scheduledAt",
-                "publishedAt",
-                "endedAt",
-                "status",
-                "publishStatus",
-                "approvalMode",
-                "isFullyManaged",
-                "managementType",
-                "isActive",
-                "applicantCount",
-                "hasApplied",
-                "isDraft",
-                "byAi",
-                "createdAt",
-                "updatedAt",
-              ].join(" ")
-            )
-            .lean()
+          _id: { $in: foundCampaignIds.map((id) => toObjectId(id)) },
+        })
+          .select(
+            [
+              "brandId",
+              "brandName",
+              "campaignTitle",
+              "description",
+              "campaignType",
+              "campaignCategory",
+              "campaignSubcategory",
+              "campaignBudget",
+              "budget",
+              "influencerBudget",
+              "paymentType",
+              "platformSelection",
+              "numberOfInfluencers",
+              "influencerTier",
+              "minFollowers",
+              "maxFollowers",
+              "creatorContentLanguage",
+              "audienceContentLanguage",
+              "targetCountry",
+              "additionalNotes",
+              "hashtags",
+              "timeline",
+              "startAt",
+              "endAt",
+              "scheduledAt",
+              "publishedAt",
+              "endedAt",
+              "status",
+              "publishStatus",
+              "approvalMode",
+              "isFullyManaged",
+              "managementType",
+              "isActive",
+              "applicantCount",
+              "hasApplied",
+              "isDraft",
+              "byAi",
+              "createdAt",
+              "updatedAt",
+            ].join(" ")
+          )
+          .lean()
         : [],
 
       rawMissingEmailIds.length
         ? MissingEmail.find({
-            $or: [
-              ...(mongoMissingEmailIds.length
-                ? [
-                    {
-                      _id: {
-                        $in: mongoMissingEmailIds.map((id) => toObjectId(id)),
-                      },
-                    },
-                  ]
-                : []),
-              ...(customMissingEmailIds.length
-                ? [
-                    { missingEmailId: { $in: customMissingEmailIds } },
-                    { missingId: { $in: customMissingEmailIds } },
-                    { uuid: { $in: customMissingEmailIds } },
-                    { publicId: { $in: customMissingEmailIds } },
-                    { id: { $in: customMissingEmailIds } },
-                  ]
-                : []),
-            ],
-          }).lean()
+          $or: [
+            ...(mongoMissingEmailIds.length
+              ? [
+                {
+                  _id: {
+                    $in: mongoMissingEmailIds.map((id) => toObjectId(id)),
+                  },
+                },
+              ]
+              : []),
+            ...(customMissingEmailIds.length
+              ? [
+                { missingEmailId: { $in: customMissingEmailIds } },
+                { missingId: { $in: customMissingEmailIds } },
+                { uuid: { $in: customMissingEmailIds } },
+                { publicId: { $in: customMissingEmailIds } },
+                { id: { $in: customMissingEmailIds } },
+              ]
+              : []),
+          ],
+        }).lean()
         : [],
     ]);
 
@@ -1478,36 +1779,36 @@ exports.getInvitationList = async (req, res) => {
     const [missingDocs, campaigns] = await Promise.all([
       missingIds.length
         ? MissingEmail.find({
-            $or: [
-              ...(mongoMissingIds.length
-                ? [
-                    {
-                      _id: {
-                        $in: mongoMissingIds.map((id) => toObjectId(id)),
-                      },
-                    },
-                  ]
-                : []),
-              ...(customMissingIds.length
-                ? [
-                    { missingEmailId: { $in: customMissingIds } },
-                    { missingId: { $in: customMissingIds } },
-                    { uuid: { $in: customMissingIds } },
-                    { publicId: { $in: customMissingIds } },
-                    { id: { $in: customMissingIds } },
-                  ]
-                : []),
-            ],
-          }).lean()
+          $or: [
+            ...(mongoMissingIds.length
+              ? [
+                {
+                  _id: {
+                    $in: mongoMissingIds.map((id) => toObjectId(id)),
+                  },
+                },
+              ]
+              : []),
+            ...(customMissingIds.length
+              ? [
+                { missingEmailId: { $in: customMissingIds } },
+                { missingId: { $in: customMissingIds } },
+                { uuid: { $in: customMissingIds } },
+                { publicId: { $in: customMissingIds } },
+                { id: { $in: customMissingIds } },
+              ]
+              : []),
+          ],
+        }).lean()
         : [],
       campaignIds.length
         ? Campaign.find({
-            _id: {
-              $in: campaignIds.map((id) => toObjectId(id)),
-            },
-          })
-            .select("campaignTitle brandName campaignBudget status publishStatus")
-            .lean()
+          _id: {
+            $in: campaignIds.map((id) => toObjectId(id)),
+          },
+        })
+          .select("campaignTitle brandName campaignBudget status publishStatus")
+          .lean()
         : [],
     ]);
 
