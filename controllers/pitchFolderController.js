@@ -1435,7 +1435,7 @@ function applyItemMutations(item, body = {}, actorId = null) {
 }
 
 function getShareBaseUrl() {
-  return process.env.PITCH_FOLDER_SHARE_BASE_URL || 'https://collabglam.com/pitch-folder/shared';
+  return process.env.PITCH_FOLDER_SHARE_BASE_URL || 'http://localhost:3000/pitch-folder/shared';
 }
 
 function buildCreatorPopulate() {
@@ -3831,6 +3831,7 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
     });
   }
 };
+
 exports.updateSharedFolderGoodFit = async (req, res) => {
   try {
     const token = cleanStr(req.params.token);

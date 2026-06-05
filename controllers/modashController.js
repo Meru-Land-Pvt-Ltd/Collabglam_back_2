@@ -6484,32 +6484,53 @@ async function getSuggestedRateCard(req, res) {
   try {
     const body = req.body || {};
 
-    const brandObjectId = requireMongoObjectId(
-      body.brandId || body.brand_id,
-      'brandId'
-    );
+    const rawBrandId = cleanStr(body.brandId || body.brand_id);
+    const brandObjectId = rawBrandId ? toMongoObjectId(rawBrandId) : null;
 
-    const campaignObjectId = requireMongoObjectId(
-      body.campaignId || body.campaign_id,
-      'campaignId'
-    );
+    if (rawBrandId && !brandObjectId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid brandId is required when brandId is provided',
+      });
+    }
+
+    const rawCampaignId = cleanStr(body.campaignId || body.campaign_id);
+    const campaignObjectId = rawCampaignId ? toMongoObjectId(rawCampaignId) : null;
+
+    if (rawCampaignId && !campaignObjectId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid campaignId is required when campaignId is provided',
+      });
+    }
 
     const rawInfluencerId = cleanStr(
       body.influencerId || body.influencer_id || body.modashProfileId
     );
+
     const influencerObjectId = toMongoObjectId(rawInfluencerId);
     const currency = cleanStr(body.currency || 'USD') || 'USD';
 
-    const campaign = await Campaign.findOne({
-      _id: campaignObjectId,
-      brandId: brandObjectId,
-    }).lean();
+    let campaign = null;
 
-    if (!campaign) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Campaign not found for this brand',
-      });
+    // Campaign is optional now.
+    // Only fetch and validate campaign when campaignId is provided.
+    if (campaignObjectId) {
+      const campaignQuery = {
+        _id: campaignObjectId,
+        ...(brandObjectId ? { brandId: brandObjectId } : {}),
+      };
+
+      campaign = await Campaign.findOne(campaignQuery).lean();
+
+      if (!campaign) {
+        return res.status(404).json({
+          status: 'error',
+          message: brandObjectId
+            ? 'Campaign not found for this brand'
+            : 'Campaign not found',
+        });
+      }
     }
 
     let influencerDoc = null;
@@ -6550,7 +6571,10 @@ async function getSuggestedRateCard(req, res) {
       }
     }
 
-    if (cleanStr(influencerDoc.provider) && cleanStr(influencerDoc.provider) !== platform) {
+    if (
+      cleanStr(influencerDoc.provider) &&
+      cleanStr(influencerDoc.provider) !== platform
+    ) {
       return res.status(400).json({
         status: 'error',
         message: 'Influencer platform does not match requested platform',
@@ -6566,7 +6590,7 @@ async function getSuggestedRateCard(req, res) {
     }
 
     const rateCard = buildRateCardFromCampaignAndReport({
-      campaign,
+      campaign: campaign || {},
       influencerDoc,
       reportJSON,
       platform,
@@ -6580,7 +6604,12 @@ async function getSuggestedRateCard(req, res) {
   } catch (err) {
     console.error('[getSuggestedRateCard] Error:', err);
 
-    await saveErrorLog(req, err, err.status || 500, "GET_SUGGESTED_RATE_CARD_ERROR");
+    await saveErrorLog(
+      req,
+      err,
+      err.status || 500,
+      'GET_SUGGESTED_RATE_CARD_ERROR'
+    );
 
     return res.status(err.status || 500).json({
       status: 'error',
