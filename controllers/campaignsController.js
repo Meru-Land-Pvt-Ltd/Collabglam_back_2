@@ -3502,10 +3502,42 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
       );
     }
 
+    const brandIds = [
+      ...new Set(
+        enrichedCampaigns
+          .map((campaign) => String(campaign.brandId || "").trim())
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
+
+    const brandDocs = brandIds.length
+      ? await Brand.find(
+          {
+            _id: {
+              $in: brandIds.map((id) => new mongoose.Types.ObjectId(id)),
+            },
+          },
+          "_id brandName name profilePic"
+        ).lean()
+      : [];
+
+    const brandMap = new Map(
+      brandDocs.map((brand) => [
+        String(brand._id),
+        {
+          _id: String(brand._id),
+          brandId: String(brand._id),
+          brandName: brand.brandName || brand.name || "",
+          brandprofilepic: brand.profilePic || "",
+        },
+      ])
+    );
+
     const applyByCampaignId = new Map();
 
     for (const doc of applyRecs) {
       const key = String(doc.campaignId || "").trim();
+
       if (key && !applyByCampaignId.has(key)) {
         applyByCampaignId.set(key, doc);
       }
@@ -3528,7 +3560,15 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
       String(age.range || age.name || age.label || "").trim();
 
     const campaigns = enrichedCampaigns.map((campaign) => {
+      const campaignMongoId = String(campaign._id || "");
       const campaignId = String(campaign._id || campaign.campaignId || "");
+      const brandId = String(campaign.brandId || "");
+      const brandInfo = brandMap.get(brandId) || {
+        _id: brandId,
+        brandId,
+        brandName: campaign.brandName || "",
+        brandprofilepic: "",
+      };
 
       const related =
         applyByCampaignId.get(String(campaign._id || "")) ||
@@ -3574,44 +3614,103 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
           ? targetCountryValues.join(", ")
           : String(campaign.targetCountry || "").trim();
 
-      const targetAgeGroupValues = Array.isArray(
-        campaign.details?.targetAgeRanges
-      )
-        ? campaign.details.targetAgeRanges.map(getAgeRangeName).filter(Boolean)
+      const targetAgeRanges = Array.isArray(campaign.details?.targetAgeRanges)
+        ? campaign.details.targetAgeRanges
         : [];
 
-      const campaignGoalValues = Array.isArray(
-        campaign.details?.campaignGoals
-      )
-        ? campaign.details.campaignGoals.map(getGoalName).filter(Boolean)
+      const targetAgeGroupValues = targetAgeRanges
+        .map(getAgeRangeName)
+        .filter(Boolean);
+
+      const campaignGoals = Array.isArray(campaign.details?.campaignGoals)
+        ? campaign.details.campaignGoals
         : [];
+
+      const campaignGoalValues = campaignGoals.map(getGoalName).filter(Boolean);
+
+      const images = campaign.productImages || campaign.images || [];
 
       return {
-        ...campaign,
-
         id: campaignId,
+        _id: campaignMongoId,
         campaignId,
         campaignName: campaign.campaignTitle || "",
-        name: campaign.campaignTitle || "",
         campaignTitle: campaign.campaignTitle || "",
+        name: campaign.campaignTitle || "",
 
-        influencer: {
-          _id: internalInfluencerId,
-          influencerId: publicInfluencerId,
-          name: inf.name || "",
+        brandId,
+        brandName: campaign.brandName || brandInfo.brandName || "",
+        brandprofilepic: brandInfo.brandprofilepic || "",
+
+        brand: {
+          _id: brandInfo._id || brandId,
+          brandId: brandInfo.brandId || brandId,
+          brandName: campaign.brandName || brandInfo.brandName || "",
+          profilePic: brandInfo.brandprofilepic || "",
         },
 
-        images: campaign.productImages || campaign.images || [],
+        description: campaign.description || "",
+        campaignType: campaign.campaignType || "",
+        campaignCategory: campaign.campaignCategory || "",
+        campaignSubcategory: campaign.campaignSubcategory || "",
 
+        categoryId: campaign.categoryId ? String(campaign.categoryId) : "",
+        subcategoryIds: Array.isArray(campaign.subcategoryIds)
+          ? campaign.subcategoryIds.map((id) => String(id))
+          : [],
+
+        categories: Array.isArray(campaign.categories)
+          ? campaign.categories
+          : [],
+
+        productImages: images,
+        images,
+        productLink: campaign.productLink || "",
+        videoLink: campaign.videoLink || "",
+
+        campaignGoals,
         campaignGoalValues,
-        targetCountryValues,
+
+        platformSelection: Array.isArray(campaign.platformSelection)
+          ? campaign.platformSelection
+          : [],
+
+        contentFormats: campaign.details?.contentFormats || [],
+        contentLanguages: campaign.details?.contentLanguages || [],
+        influencerTiers: campaign.details?.influencerTiers || [],
+
         targetCountries,
+        targetCountryValues,
         targetCountry,
+        targetAgeRanges,
         targetAgeGroupValues,
 
-        applicationStatus,
-        appliedDate: related?.createdAt || campaign.createdAt,
+        numberOfInfluencers: campaign.numberOfInfluencers || 0,
+        minFollowers: campaign.minFollowers || 0,
+        maxFollowers: campaign.maxFollowers || 0,
 
+        budget: campaign.budget || campaign.campaignBudget || 0,
+        campaignBudget: campaign.campaignBudget || campaign.budget || 0,
+        influencerBudget: campaign.influencerBudget || 0,
+        paymentType: campaign.paymentType || "",
+
+        application: {
+          status: applicationStatus,
+          appliedDate: related?.createdAt || campaign.createdAt || null,
+          hasApplied: 1,
+          hasApproved: isApproved ? 1 : 0,
+          isApproved: isApproved ? 1 : 0,
+          isContracted: 0,
+          isAccepted: 0,
+          hasMilestone: 0,
+          contractId: null,
+          contractMongoId: null,
+          feeAmount: 0,
+          contractStatus: null,
+        },
+
+        applicationStatus,
+        appliedDate: related?.createdAt || campaign.createdAt || null,
         hasApplied: 1,
         hasApproved: isApproved ? 1 : 0,
         isApproved: isApproved ? 1 : 0,
@@ -3623,15 +3722,36 @@ exports.getAppliedCampaignsByInfluencer = async (req, res) => {
         feeAmount: 0,
         contractStatus: null,
 
-        budget: campaign.budget || campaign.campaignBudget || 0,
-        campaignBudget: campaign.campaignBudget || campaign.budget || 0,
-        influencerBudget: campaign.influencerBudget || 0,
+        status: campaign.status || "",
+        publishStatus: campaign.publishStatus || "",
+        approvalMode: campaign.approvalMode || "",
+        isActive: campaign.isActive ?? 0,
+        isDraft: campaign.isDraft ?? 0,
+        byAi: campaign.byAi ?? 0,
+        isFullyManaged: Boolean(campaign.isFullyManaged),
+        managementType: campaign.managementType || "",
 
         timeline: {
           startDate: campaign.startAt || campaign.timeline?.startDate || null,
           endDate: campaign.endAt || campaign.timeline?.endDate || null,
           ...(campaign.timeline || {}),
         },
+
+        startAt: campaign.startAt || null,
+        endAt: campaign.endAt || null,
+        publishedAt: campaign.publishedAt || null,
+        scheduledAt: campaign.scheduledAt || null,
+        createdAt: campaign.createdAt || null,
+        updatedAt: campaign.updatedAt || null,
+
+        influencer: {
+          _id: internalInfluencerId,
+          influencerId: publicInfluencerId,
+          name: inf.name || "",
+          email: inf.email || "",
+        },
+
+        details: campaign.details || null,
       };
     });
 
@@ -5445,6 +5565,151 @@ exports.viewCampaignByIdForInfluencer = async (req, res) => {
 exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
   const requestId = getRequestId(req);
 
+  const firstNonEmpty = (...values) => {
+    for (const value of values) {
+      const text = String(value || "").trim();
+      if (text) return text;
+    }
+    return "";
+  };
+
+  const pickUrlFromValue = (value) => {
+    if (!value) return "";
+
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (/^https?:\/\//i.test(text) || /^data:image\//i.test(text)) {
+        return text;
+      }
+      return "";
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = pickUrlFromValue(item);
+        if (found) return found;
+      }
+      return "";
+    }
+
+    if (typeof value === "object") {
+      return firstNonEmpty(
+        pickUrlFromValue(value.url),
+        pickUrlFromValue(value.secure_url),
+        pickUrlFromValue(value.Location),
+        pickUrlFromValue(value.location),
+        pickUrlFromValue(value.src),
+        pickUrlFromValue(value.path),
+        pickUrlFromValue(value.imageUrl),
+        pickUrlFromValue(value.profileImage),
+        pickUrlFromValue(value.profilePic),
+        pickUrlFromValue(value.profilePicture),
+        pickUrlFromValue(value.avatar)
+      );
+    }
+
+    return "";
+  };
+
+  const pickInfluencerProfileImage = (influencer = {}) => {
+    const directImage = firstNonEmpty(
+      pickUrlFromValue(influencer.profileimage),
+      pickUrlFromValue(influencer.profileImage),
+      pickUrlFromValue(influencer.profilePic),
+      pickUrlFromValue(influencer.profilepic),
+      pickUrlFromValue(influencer.profilePicture),
+      pickUrlFromValue(influencer.avatar),
+      pickUrlFromValue(influencer.avatarUrl),
+      pickUrlFromValue(influencer.image),
+      pickUrlFromValue(influencer.imageUrl),
+      pickUrlFromValue(influencer.picture),
+      pickUrlFromValue(influencer.photo),
+      pickUrlFromValue(influencer.photoUrl)
+    );
+
+    if (directImage) return directImage;
+
+    const imageKeys = new Set([
+      "profileimage",
+      "profile_image",
+      "profilepic",
+      "profile_pic",
+      "profilepicture",
+      "profile_picture",
+      "profilephotourl",
+      "profile_photo_url",
+      "profilepicurl",
+      "profile_pic_url",
+      "avatar",
+      "avatarurl",
+      "avatar_url",
+      "image",
+      "imageurl",
+      "image_url",
+      "picture",
+      "pictureurl",
+      "picture_url",
+      "photo",
+      "photourl",
+      "photo_url",
+      "displaypicture",
+      "display_picture",
+      "dp",
+      "thumbnail",
+      "thumbnailurl",
+      "thumbnail_url"
+    ]);
+
+    const visited = new WeakSet();
+
+    const scan = (value) => {
+      if (!value) return "";
+
+      if (typeof value === "string") {
+        return pickUrlFromValue(value);
+      }
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const found = scan(item);
+          if (found) return found;
+        }
+        return "";
+      }
+
+      if (typeof value === "object") {
+        if (visited.has(value)) return "";
+        visited.add(value);
+
+        for (const [key, val] of Object.entries(value)) {
+          const normalizedKey = String(key || "")
+            .toLowerCase()
+            .replace(/[\s.-]/g, "");
+
+          if (imageKeys.has(normalizedKey)) {
+            const found = pickUrlFromValue(val);
+            if (found) return found;
+          }
+        }
+
+        for (const val of Object.values(value)) {
+          const found = scan(val);
+          if (found) return found;
+        }
+      }
+
+      return "";
+    };
+
+    return firstNonEmpty(
+      scan(influencer.page1),
+      scan(influencer.page2),
+      scan(influencer.page3),
+      scan(influencer.socialProfiles),
+      scan(influencer.onboarding)
+    );
+  };
+
   try {
     const { influencerId, page = 1, limit = 10, search = "" } = req.body || {};
 
@@ -5573,7 +5838,11 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
     const [brandDocs, applyDocsForCampaigns] = await Promise.all([
       brandObjectIds.length
         ? Brand.find(
-            { _id: { $in: brandObjectIds.map((id) => new mongoose.Types.ObjectId(id)) } },
+            {
+              _id: {
+                $in: brandObjectIds.map((id) => new mongoose.Types.ObjectId(id))
+              }
+            },
             "_id profilePic"
           ).lean()
         : Promise.resolve([]),
@@ -5651,16 +5920,20 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
           handle: applicant.handle || null,
           status: applicant.status || "",
           appliedAt: applicant.appliedAt || applicant.createdAt || null,
-          profileimage:
-            applicant.profileimage ||
-            applicant.profileImage ||
-            applicant.profilePic ||
-            applicant.profilepic ||
-            applicant.profilePicture ||
-            applicant.avatar ||
-            applicant.avatarUrl ||
-            applicant.image ||
-            ""
+          profileimage: firstNonEmpty(
+            pickUrlFromValue(applicant.profileimage),
+            pickUrlFromValue(applicant.profileImage),
+            pickUrlFromValue(applicant.profilePic),
+            pickUrlFromValue(applicant.profilepic),
+            pickUrlFromValue(applicant.profilePicture),
+            pickUrlFromValue(applicant.avatar),
+            pickUrlFromValue(applicant.avatarUrl),
+            pickUrlFromValue(applicant.image),
+            pickUrlFromValue(applicant.imageUrl),
+            pickUrlFromValue(applicant.picture),
+            pickUrlFromValue(applicant.photo),
+            pickUrlFromValue(applicant.photoUrl)
+          )
         });
       }
     }
@@ -5675,48 +5948,33 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
       ? await Influencer.find(
           {
             $or: [
-              { influencerId: { $in: applicantIds } },
               { email: { $in: applicantIds } },
               ...(applicantObjectIds.length
                 ? [{ _id: { $in: applicantObjectIds } }]
                 : [])
             ]
           },
-          "_id influencerId name fullName email handle profileimage profileImage profilePic profilepic profilePicture avatar avatarUrl image"
+          "_id email name country countryName location primaryPlatform page1 page2 page3"
         ).lean()
       : [];
-
-    const getProfileImage = (doc = {}) =>
-      doc.profileimage ||
-      doc.profileImage ||
-      doc.profilePic ||
-      doc.profilepic ||
-      doc.profilePicture ||
-      doc.avatar ||
-      doc.avatarUrl ||
-      doc.image ||
-      "";
 
     const influencerMap = new Map();
 
     for (const inf of influencerDocs) {
       const hydratedInfluencer = {
         _id: inf._id ? String(inf._id) : "",
-        influencerId: String(inf.influencerId || inf._id || ""),
+        influencerId: inf._id ? String(inf._id) : "",
         name:
           inf.name ||
-          inf.fullName ||
           inf.email ||
-          inf.handle ||
-          String(inf.influencerId || inf._id || ""),
+          String(inf._id || ""),
         email: inf.email || "",
-        handle: inf.handle || null,
-        profileimage: getProfileImage(inf)
+        handle: null,
+        profileimage: pickInfluencerProfileImage(inf)
       };
 
       const keys = [
         inf._id ? String(inf._id) : "",
-        inf.influencerId ? String(inf.influencerId) : "",
         inf.email ? String(inf.email) : ""
       ].filter(Boolean);
 
@@ -5736,12 +5994,29 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
           const hydrated = influencerMap.get(applicantId) || {};
 
           return {
-            _id: hydrated._id || (mongoose.Types.ObjectId.isValid(applicantId) ? applicantId : ""),
-            influencerId: hydrated.influencerId || applicant.influencerId || applicantId,
-            name: hydrated.name || applicant.name || applicantId,
-            email: hydrated.email || applicant.email || "",
-            handle: hydrated.handle || applicant.handle || null,
-            profileimage: hydrated.profileimage || applicant.profileimage || "",
+            _id:
+              hydrated._id ||
+              (mongoose.Types.ObjectId.isValid(applicantId) ? applicantId : ""),
+            influencerId:
+              hydrated.influencerId ||
+              applicant.influencerId ||
+              applicantId,
+            name:
+              hydrated.name ||
+              applicant.name ||
+              applicantId,
+            email:
+              hydrated.email ||
+              applicant.email ||
+              "",
+            handle:
+              hydrated.handle ||
+              applicant.handle ||
+              null,
+            profileimage:
+              hydrated.profileimage ||
+              applicant.profileimage ||
+              "",
             status: applicant.status || "",
             appliedAt: applicant.appliedAt || null
           };
