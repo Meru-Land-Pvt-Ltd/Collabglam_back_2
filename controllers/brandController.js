@@ -5,6 +5,10 @@ const OpenAI = require("openai");
 
 const BrandInfo = require("../models/brandInfo");
 const BrandModelImport = require("../models/brand");
+const WorkspaceModelImport = require("../models/workspace");
+const WorkspaceMemberModelImport = require("../models/workspaceMember");
+const WorkspaceActivityModelImport = require("../models/workspaceActivity");
+const WorkspaceInvitationModelImport = require("../models/workspaceInvitation");
 const BrandCoupon = require("../models/brandCoupon");
 const { BrandFolderModel } = require("../models/brandFolder");
 let PitchFolderForBrandGoodFit = null;
@@ -35,6 +39,7 @@ const SubscriptionPlan = require("../models/subscription");
 const { uploadBrandProfilePicToS3 } = require("../utils/uploadBase64ImagesToS3");
 const { BookmarkFolder } = require("../models/bookMarkFolder");
 const saveErrorLog = require("../services/errorLog.service");
+const { getBrandRealEmail } = require("../utils/workspaceBrandClone");
 
 void OpenAI;
 void BrandInfo;
@@ -49,6 +54,26 @@ try {
 
 const BrandModel =
   BrandModelImport.BrandModel || BrandModelImport.default || BrandModelImport;
+
+const WorkspaceModel =
+  WorkspaceModelImport.WorkspaceModel ||
+  WorkspaceModelImport.default ||
+  WorkspaceModelImport;
+
+const WorkspaceMemberModel =
+  WorkspaceMemberModelImport.WorkspaceMemberModel ||
+  WorkspaceMemberModelImport.default ||
+  WorkspaceMemberModelImport;
+
+const WorkspaceActivityModel =
+  WorkspaceActivityModelImport.WorkspaceActivityModel ||
+  WorkspaceActivityModelImport.default ||
+  WorkspaceActivityModelImport;
+
+const WorkspaceInvitationModel =
+  WorkspaceInvitationModelImport.WorkspaceInvitationModel ||
+  WorkspaceInvitationModelImport.default ||
+  WorkspaceInvitationModelImport;
 
 const VerifyOtpModel =
   VerifyOtpModelImport.VerifyOtpModel ||
@@ -234,6 +259,7 @@ function buildSafeSignupPayload(body) {
     companySize: safeTrim(body.companySize),
     industry: safeTrim(body.industry),
     passwordHash: String(body.password || ""),
+    inviteToken: safeTrim(body.inviteToken),
   };
 }
 
@@ -348,7 +374,10 @@ function handleControllerError(next, err, context = "brandController") {
 }
 
 async function findBrandByEmail(email, includePassword = false) {
-  let query = BrandModel.findOne({ email: normalizeEmail(email) });
+  let query = BrandModel.findOne({
+    email: normalizeEmail(email),
+    isWorkspaceBrand: { $ne: true },
+  });
 
   if (includePassword) {
     query = query.select("+password");
@@ -722,6 +751,340 @@ async function getActiveFreeBrandPlan() {
   return freePlan;
 }
 
+
+function slugifyWorkspaceName(value) {
+  const base = safeTrim(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+  return base || `workspace-${Date.now()}`;
+}
+
+function buildFullAccessPermissions() {
+  return {
+    campaigns: {
+      view: true,
+      create: true,
+      update: true,
+      delete: true,
+    },
+    influencers: {
+      view: true,
+      manage: true,
+    },
+    contracts: {
+      view: true,
+      create: true,
+      update: true,
+      approve: true,
+    },
+    deliverables: {
+      view: true,
+      review: true,
+      approve: true,
+    },
+    payments: {
+      view: true,
+      manage: true,
+      approve: true,
+    },
+    reports: {
+      view: true,
+    },
+    team: {
+      view: true,
+      invite: true,
+      remove: true,
+      changeRole: true,
+    },
+    settings: {
+      view: true,
+      update: true,
+    },
+  };
+}
+
+async function buildUniqueWorkspaceSlug(brandName) {
+  const base = slugifyWorkspaceName(`${brandName || "brand"} workspace`);
+  let slug = base;
+  let counter = 2;
+
+  while (await WorkspaceModel.findOne({ slug }).select("_id").lean()) {
+    slug = `${base}-${counter}`;
+    counter += 1;
+  }
+
+  return slug;
+}
+
+function serializeWorkspaceForResponse(workspace) {
+  if (!workspace) return null;
+
+  const plain = workspace.toObject ? workspace.toObject() : { ...workspace };
+  const workspaceId = String(plain._id || plain.id || "");
+
+  return {
+    ...plain,
+    workspaceId,
+  };
+}
+
+async function ensureOwnerWorkspaceMember({ workspaceId, brandId, email, workspaceBrandId = brandId }) {
+  await WorkspaceMemberModel.findOneAndUpdate(
+    {
+      workspaceId,
+      userId: brandId,
+    },
+    {
+      $setOnInsert: {
+        workspaceId,
+        brandId: workspaceBrandId,
+        rootBrandId: brandId,
+        workspaceBrandId,
+        brandRealEmail: normalizeEmail(email),
+        userId: brandId,
+        email: normalizeEmail(email),
+        role: "owner",
+        accessType: "full_access",
+        permissions: buildFullAccessPermissions(),
+        status: "accepted",
+        invitedBy: "",
+        joinedAt: new Date(),
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+    }
+  ).exec();
+}
+
+async function createOrEnsureBrandWorkspace(brand) {
+  if (!brand?._id) {
+    throw new InternalError("Brand is required to create workspace");
+  }
+
+  const brandId = String(brand._id);
+  let workspace = null;
+
+  if (brand.workspaceId && mongoose.Types.ObjectId.isValid(String(brand.workspaceId))) {
+    workspace = await WorkspaceModel.findOne({
+      _id: brand.workspaceId,
+      $or: [{ brandId }, { ownerBrandId: brandId }, { createdBy: brandId }],
+    }).lean();
+  }
+
+  if (!workspace) {
+    workspace = await WorkspaceModel.findOne({
+      $or: [{ brandId }, { ownerBrandId: brandId }, { createdBy: brandId }],
+      status: { $ne: "deleted" },
+    })
+      .sort({ isDefault: -1, createdAt: 1 })
+      .lean();
+  }
+
+  if (!workspace) {
+    const brandName = safeTrim(brand.brandName || brand.name || "Brand");
+    const slug = await buildUniqueWorkspaceSlug(brandName);
+
+    const brandRealEmail = getBrandRealEmail(brand);
+
+    const createdWorkspace = await WorkspaceModel.create({
+      brandId,
+      ownerBrandId: brandId,
+      brandRealEmail,
+      name: `${brandName} Workspace`,
+      slug,
+      logo: safeTrim(brand.profilePic),
+      status: "active",
+      createdBy: brandId,
+      isDefault: true,
+    });
+
+    workspace = createdWorkspace.toObject();
+
+    await WorkspaceActivityModel.create({
+      workspaceId: String(workspace._id),
+      brandId,
+      action: "WORKSPACE_CREATED",
+      module: "workspace",
+      performedBy: brandId,
+      performedRole: "owner",
+      message: "Workspace created during brand registration",
+      metadata: {
+        source: "brand_controller",
+      },
+    });
+  }
+
+  const workspacePayload = serializeWorkspaceForResponse(workspace);
+  const workspaceId = workspacePayload.workspaceId;
+
+  await WorkspaceModel.updateOne(
+    { _id: workspaceId },
+    {
+      $set: {
+        ownerBrandId: workspace.ownerBrandId || brandId,
+        brandRealEmail: workspace.brandRealEmail || getBrandRealEmail(brand),
+      },
+    }
+  ).exec();
+
+  await BrandModel.updateOne(
+    { _id: brand._id },
+    { $set: { workspaceId } }
+  ).exec();
+
+  await ensureOwnerWorkspaceMember({ workspaceId, brandId, workspaceBrandId: workspacePayload.brandId || brandId, email: brand.email });
+
+  return workspacePayload;
+}
+
+async function getUserWorkspacesForResponse(userId) {
+  const memberships = await WorkspaceMemberModel.find({
+    userId: String(userId),
+    status: "accepted",
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  const workspaceIds = memberships
+    .map((member) => String(member.workspaceId || ""))
+    .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+  const workspaces = workspaceIds.length
+    ? await WorkspaceModel.find({
+        _id: { $in: workspaceIds },
+        status: { $ne: "deleted" },
+      })
+        .sort({ updatedAt: -1 })
+        .lean()
+    : [];
+
+  const memberByWorkspaceId = new Map(
+    memberships.map((member) => [String(member.workspaceId), member])
+  );
+
+  return workspaces.map((workspace) => {
+    const workspacePayload = serializeWorkspaceForResponse(workspace);
+    const membership = memberByWorkspaceId.get(workspacePayload.workspaceId);
+
+    return {
+      ...workspacePayload,
+      role: membership?.role || "",
+      accessType: membership?.accessType || "",
+      permissions: membership?.permissions || {},
+      memberStatus: membership?.status || "",
+    };
+  });
+}
+
+function serializeAcceptedInvitationResult(result) {
+  if (!result) return null;
+
+  const invitation = result.invitation?.toObject
+    ? result.invitation.toObject()
+    : result.invitation || {};
+  const member = result.member?.toObject ? result.member.toObject() : result.member || {};
+
+  return {
+    invitationId: String(invitation._id || ""),
+    workspaceId: String(invitation.workspaceId || member.workspaceId || ""),
+    brandId: String(invitation.brandId || member.brandId || ""),
+    email: normalizeEmail(invitation.email || member.email),
+    role: member.role || invitation.role || "admin",
+    accessType: member.accessType || invitation.accessType || "full_access",
+    memberId: String(member._id || ""),
+    status: invitation.status || "accepted",
+  };
+}
+
+async function acceptWorkspaceInvitationForUser({ token, userId, userEmail }) {
+  const cleanToken = safeTrim(token);
+
+  if (!cleanToken) return null;
+
+  const invitation = await WorkspaceInvitationModel.findOne({
+    token: cleanToken,
+    status: "pending",
+  });
+
+  if (!invitation) {
+    throw new ValidationError("Invitation not found or already accepted.");
+  }
+
+  if (new Date(invitation.expiresAt).getTime() < Date.now()) {
+    invitation.status = "expired";
+    await invitation.save();
+    throw new ValidationError("Invitation expired.");
+  }
+
+  const inviteType = invitation.inviteType || "email";
+
+  if (inviteType === "email" && normalizeEmail(invitation.email) !== normalizeEmail(userEmail)) {
+    throw new ValidationError("This invitation belongs to another email.");
+  }
+
+  const member = await WorkspaceMemberModel.findOneAndUpdate(
+    {
+      workspaceId: invitation.workspaceId,
+      userId: String(userId),
+    },
+    {
+      $setOnInsert: {
+        workspaceId: invitation.workspaceId,
+        brandId: invitation.brandId,
+        rootBrandId: String(userId),
+        workspaceBrandId: invitation.workspaceBrandId || invitation.brandId,
+        brandRealEmail: normalizeEmail(userEmail || invitation.email),
+        userId: String(userId),
+        email: normalizeEmail(userEmail || invitation.email),
+        role: invitation.role || "admin",
+        accessType: invitation.accessType || "full_access",
+        permissions: invitation.permissions || buildFullAccessPermissions(),
+        status: "accepted",
+        invitedBy: invitation.invitedBy,
+        joinedAt: new Date(),
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+    }
+  );
+
+  if (inviteType === "email") {
+    invitation.status = "accepted";
+    invitation.acceptedBy = String(userId);
+    invitation.acceptedAt = new Date();
+  } else {
+    invitation.acceptedCount = Number(invitation.acceptedCount || 0) + 1;
+    invitation.acceptedBy = String(userId);
+    invitation.acceptedAt = new Date();
+  }
+  await invitation.save();
+
+  await WorkspaceActivityModel.create({
+    workspaceId: invitation.workspaceId,
+    brandId: invitation.brandId,
+    action: "INVITATION_ACCEPTED",
+    module: "team",
+    performedBy: String(userId),
+    performedRole: invitation.role || "admin",
+    message: `${normalizeEmail(userEmail || invitation.email)} accepted workspace invitation`,
+    metadata: {
+      invitationId: String(invitation._id),
+      memberId: String(member._id),
+      accessType: invitation.accessType,
+      inviteType,
+    },
+  });
+
+  return { invitation, member };
+}
+
+
 async function sendSignupOtp(req, res, next) {
   const requestId = req.requestId || "";
   let otpDoc = null;
@@ -879,8 +1242,20 @@ async function verifyOtpSignUp(req, res, next) {
     await clearAllOtpDocs(email, "signup");
     await clearAllOtpDocs(email, "reset_password");
 
+    const workspace = await createOrEnsureBrandWorkspace(brand);
+    const inviteToken = safeTrim(payload.inviteToken || req.body?.inviteToken);
+    const acceptedInvitationResult = inviteToken
+      ? await acceptWorkspaceInvitationForUser({
+          token: inviteToken,
+          userId: String(brand._id),
+          userEmail: brand.email,
+        })
+      : null;
+    const workspaces = await getUserWorkspacesForResponse(String(brand._id));
+
     const token = signJwt({
       brandId: String(brand._id),
+      workspaceId: workspace.workspaceId,
       role: "brand",
       email: brand.email,
     });
@@ -891,6 +1266,12 @@ async function verifyOtpSignUp(req, res, next) {
       {
         message: "Brand signup successful",
         brandId: String(brand._id),
+        workspaceId: workspace.workspaceId,
+        workspace,
+        acceptedInvitation: serializeAcceptedInvitationResult(
+          acceptedInvitationResult
+        ),
+        workspaces,
         token,
       },
       requestId
@@ -1156,8 +1537,20 @@ async function signInBrand(req, res, next) {
 
     await resetSigninLimit(email);
 
+    const workspace = await createOrEnsureBrandWorkspace(brand);
+    const inviteToken = safeTrim(req.body?.inviteToken);
+    const acceptedInvitationResult = inviteToken
+      ? await acceptWorkspaceInvitationForUser({
+          token: inviteToken,
+          userId: String(brand._id),
+          userEmail: brand.email,
+        })
+      : null;
+    const workspaces = await getUserWorkspacesForResponse(String(brand._id));
+
     const token = signJwt({
       brandId: String(brand._id),
+      workspaceId: workspace.workspaceId,
       role: "brand",
       email: brand.email,
     });
@@ -1170,6 +1563,12 @@ async function signInBrand(req, res, next) {
       {
         message: "Brand sign in successful",
         brandId: String(brand._id),
+        workspaceId: workspace.workspaceId,
+        workspace,
+        acceptedInvitation: serializeAcceptedInvitationResult(
+          acceptedInvitationResult
+        ),
+        workspaces,
         token,
         route: routeInfo.route,
         onboarding: {
@@ -1279,8 +1678,20 @@ async function googleAuthBrand(req, res, next) {
       await brand.save();
     }
 
+    const workspace = await createOrEnsureBrandWorkspace(brand);
+    const inviteToken = safeTrim(req.body?.inviteToken);
+    const acceptedInvitationResult = inviteToken
+      ? await acceptWorkspaceInvitationForUser({
+          token: inviteToken,
+          userId: String(brand._id),
+          userEmail: brand.email,
+        })
+      : null;
+    const workspaces = await getUserWorkspacesForResponse(String(brand._id));
+
     const token = signJwt({
       brandId: String(brand._id),
+      workspaceId: workspace.workspaceId,
       role: "brand",
       email: brand.email,
     });
@@ -1295,6 +1706,12 @@ async function googleAuthBrand(req, res, next) {
           ? "Google brand signup started"
           : "Google brand sign in successful",
         brandId: String(brand._id),
+        workspaceId: workspace.workspaceId,
+        workspace,
+        acceptedInvitation: serializeAcceptedInvitationResult(
+          acceptedInvitationResult
+        ),
+        workspaces,
         token,
         email: brand.email,
         brandName: brand.brandName || brand.name || "",

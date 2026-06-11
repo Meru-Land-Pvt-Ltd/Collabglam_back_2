@@ -64,7 +64,7 @@ const errorLogRoutes = require("./routes/errorLog.routes");
 const brandSignatureRoutes = require("./routes/brandSignatureRoutes");
 const influencerSignatureRoutes = require("./routes/influencerSignatureRoutes");
 const brandMemberRoutes = require("./routes/brandMemberRoutes");
-
+const workspaceRoutes = require("./routes/workspaceRoutes");
 const app = express();
 const server = http.createServer(app);
 
@@ -422,7 +422,7 @@ app.use("/error-logs", errorLogRoutes);
 app.use("/", brandSignatureRoutes);
 app.use("/", influencerSignatureRoutes);
 app.use("/brand-members", brandMemberRoutes);
-
+app.use("/workspace", workspaceRoutes);
 /* =========================================================
    404 HANDLER
 ========================================================= */

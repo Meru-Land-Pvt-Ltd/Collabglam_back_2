@@ -86,6 +86,10 @@ function isPendingAdminCreatedBrand(doc) {
   return doc?.isAdminCreated === true && doc?.signupCompleted === false;
 }
 
+function isWorkspaceBrandDoc(doc) {
+  return doc?.isWorkspaceBrand === true;
+}
+
 function isGoogleProvider(doc) {
   const authProvider = String(doc?.authProvider || "").toLowerCase();
   const provider = String(doc?.provider || "").toLowerCase();
@@ -106,6 +110,36 @@ const brandSchema = new Schema(
     brandName: {
       type: String,
       required: [true, "Brand name is required"],
+      trim: true,
+    },
+
+    workspaceId: {
+      type: String,
+      default: "",
+      index: true,
+      trim: true,
+    },
+
+    // false = real login/main brand. true = workspace-specific brand clone.
+    isWorkspaceBrand: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // Main real brand/account id for workspace-brand clone records.
+    primaryBrandId: {
+      type: Schema.Types.ObjectId,
+      ref: "Brand",
+      default: null,
+      index: true,
+    },
+
+    // Workspace id that this cloned brand belongs to.
+    workspaceBrandFor: {
+      type: String,
+      default: "",
+      index: true,
       trim: true,
     },
 
@@ -167,7 +201,7 @@ const brandSchema = new Schema(
       type: String,
       required: [
         function requiredIndustry() {
-          return !isPendingAdminCreatedBrand(this);
+          return !(isPendingAdminCreatedBrand(this) || isWorkspaceBrandDoc(this));
         },
         "Industry is required",
       ],
@@ -217,12 +251,32 @@ const brandSchema = new Schema(
       type: String,
       required: [
         function requiredPassword() {
-          return !(isGoogleProvider(this) || isPendingAdminCreatedBrand(this));
+          return !(isGoogleProvider(this) || isPendingAdminCreatedBrand(this) || isWorkspaceBrandDoc(this));
         },
         "Password is required",
       ],
       minlength: 8,
       select: false,
+    },
+
+    // For workspace-brand clone records, email is an internal unique email,
+    // and brandRealEmail keeps the real owner/login email.
+    brandRealEmail: {
+      type: String,
+      default: undefined,
+      trim: true,
+      lowercase: true,
+      index: true,
+      set: (value) => {
+        const cleaned = String(value || "").trim().toLowerCase();
+        return cleaned ? cleaned : undefined;
+      },
+      validate: {
+        validator(value) {
+          return value == null || emailRegex.test(value);
+        },
+        message: "Invalid brand real email",
+      },
     },
 
     proxyEmail: {
@@ -307,6 +361,7 @@ const brandSchema = new Schema(
       transform(_doc, ret) {
         delete ret.password;
         ret.brandId = String(ret._id);
+        ret.brandRealEmail = ret.brandRealEmail || ret.proxyEmail || ret.email || "";
         return ret;
       },
     },
@@ -314,6 +369,7 @@ const brandSchema = new Schema(
       transform(_doc, ret) {
         delete ret.password;
         ret.brandId = String(ret._id);
+        ret.brandRealEmail = ret.brandRealEmail || ret.proxyEmail || ret.email || "";
         return ret;
       },
     },
@@ -321,6 +377,10 @@ const brandSchema = new Schema(
 );
 
 brandSchema.index({ email: 1 }, { unique: true });
+brandSchema.index({ brandRealEmail: 1 });
+brandSchema.index({ isWorkspaceBrand: 1, primaryBrandId: 1 });
+brandSchema.index({ workspaceBrandFor: 1 });
+brandSchema.index({ workspaceId: 1 });
 brandSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 brandSchema.index({ googleSub: 1 }, { unique: true, sparse: true });
 brandSchema.index({ authProvider: 1, createdAt: -1 });
