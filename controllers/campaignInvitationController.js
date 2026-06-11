@@ -53,11 +53,11 @@ function extractTokenFromRequest(req) {
 
   return String(
     req.headers["x-auth-token"] ||
-      req.headers["x-access-token"] ||
-      req.headers.token ||
-      req.cookies?.token ||
-      req.body?.token ||
-      ""
+    req.headers["x-access-token"] ||
+    req.headers.token ||
+    req.cookies?.token ||
+    req.body?.token ||
+    ""
   ).trim();
 }
 
@@ -94,10 +94,10 @@ async function verifyAdminTokenForInvitation(req) {
 
   const adminId = String(
     decoded?.adminId ||
-      decoded?._id ||
-      decoded?.id ||
-      decoded?.masterId ||
-      ""
+    decoded?._id ||
+    decoded?.id ||
+    decoded?.masterId ||
+    ""
   ).trim();
 
   if (!isObjectId(adminId)) {
@@ -169,73 +169,228 @@ async function enrichInvitations(
   let influencerMap = new Map();
   let modashMap = new Map();
 
-  if (includeCampaign && invitations.length) {
+  const safeInvitations = Array.isArray(invitations) ? invitations : [];
+
+  const toStringId = (value) => {
+    if (!value) return "";
+    if (typeof value === "object" && value._id) return String(value._id);
+    return String(value).trim();
+  };
+
+  const toObjectIdArray = (ids = []) =>
+    ids
+      .map((id) => String(id || "").trim())
+      .filter((id) => isObjectId(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+  const normalizeIdArray = (value) => {
+    if (!Array.isArray(value)) return [];
+
+    return value
+      .map((item) => {
+        if (!item) return "";
+        if (typeof item === "object" && item._id) return String(item._id);
+        return String(item).trim();
+      })
+      .filter(Boolean);
+  };
+
+  const normalizeProductImages = (campaign = {}) => {
+    if (Array.isArray(campaign.productImages)) return campaign.productImages;
+    if (Array.isArray(campaign.images)) return campaign.images;
+    return [];
+  };
+
+  const buildCampaignResponse = (campaign = null) => {
+    if (!campaign) return null;
+
+    const campaignId = campaign._id ? String(campaign._id) : null;
+
+    const categoryId = campaign.categoryId
+      ? String(campaign.categoryId)
+      : "";
+
+    const categories = Array.isArray(campaign.categories)
+      ? campaign.categories
+      : [];
+
+    const category =
+      categoryId || campaign.campaignCategory
+        ? {
+            id: categoryId,
+            name:
+              campaign.campaignCategory ||
+              categories[0]?.categoryName ||
+              "",
+          }
+        : null;
+
+    const subcategoryIds = normalizeIdArray(campaign.subcategoryIds);
+
+    const subcategories = categories.map((item) => ({
+      categoryId: item.categoryId ? String(item.categoryId) : categoryId,
+      categoryName: item.categoryName || campaign.campaignCategory || "",
+      subcategoryId: item.subcategoryId ? String(item.subcategoryId) : "",
+      subcategoryName: item.subcategoryName || "",
+    }));
+
+    const productImages = normalizeProductImages(campaign);
+
+    return {
+      campaignId,
+      campaignTitle: campaign.campaignTitle || "",
+      campaignName: campaign.campaignTitle || "",
+      description: campaign.description || "",
+
+      campaignType: campaign.campaignType || "",
+      campaignCategory: campaign.campaignCategory || "",
+      campaignSubcategory: campaign.campaignSubcategory || "",
+
+      category,
+      categoryId,
+      subcategoryIds,
+      categories,
+      subcategories,
+
+      campaignGoals: Array.isArray(campaign.campaignGoals)
+        ? campaign.campaignGoals
+        : [],
+      campaignGoalValues: Array.isArray(campaign.campaignGoalValues)
+        ? campaign.campaignGoalValues
+        : [],
+
+      productImages,
+
+      targetCountry: campaign.targetCountry || "",
+      targetCountryIds: Array.isArray(campaign.targetCountryIds)
+        ? campaign.targetCountryIds
+        : [],
+
+      targetAgeRanges: Array.isArray(campaign.targetAgeRanges)
+        ? campaign.targetAgeRanges
+        : [],
+      targetAgeGroupValues: Array.isArray(campaign.targetAgeGroupValues)
+        ? campaign.targetAgeGroupValues
+        : [],
+
+      platformSelection: Array.isArray(campaign.platformSelection)
+        ? campaign.platformSelection
+        : [],
+
+      contentFormats: Array.isArray(campaign.contentFormats)
+        ? campaign.contentFormats
+        : [],
+      contentLanguageIds: Array.isArray(campaign.contentLanguageIds)
+        ? campaign.contentLanguageIds
+        : [],
+      influencerTierIds: Array.isArray(campaign.influencerTierIds)
+        ? campaign.influencerTierIds
+        : [],
+      preferredHashtags: Array.isArray(campaign.preferredHashtags)
+        ? campaign.preferredHashtags
+        : [],
+
+      campaignBudget: campaign.campaignBudget ?? null,
+      budget: campaign.budget ?? campaign.campaignBudget ?? null,
+      influencerBudget: campaign.influencerBudget ?? null,
+
+      minFollowers: campaign.minFollowers ?? null,
+      maxFollowers: campaign.maxFollowers ?? null,
+      paymentType: campaign.paymentType || null,
+
+      startAt: campaign.startAt || null,
+      endAt: campaign.endAt || null,
+      timeline: campaign.timeline || {
+        startDate: campaign.startAt || null,
+        endDate: campaign.endAt || null,
+      },
+
+      status: campaign.status || null,
+      publishStatus: campaign.publishStatus || null,
+      isActive: campaign.isActive ?? null,
+      isDraft: campaign.isDraft ?? null,
+      byAi: campaign.byAi ?? null,
+
+      isFullyManaged: Boolean(campaign.isFullyManaged),
+      managementType: campaign.managementType || "",
+
+      createdAt: campaign.createdAt || null,
+      updatedAt: campaign.updatedAt || null,
+    };
+  };
+
+  if (includeCampaign && safeInvitations.length) {
     const campaignIds = [
       ...new Set(
-        invitations
-          .map((i) => i.campaignId)
-          .filter(Boolean)
-          .map(String)
+        safeInvitations
+          .map((inv) => toStringId(inv.campaignId))
+          .filter((id) => isObjectId(id))
       ),
     ];
 
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } })
-      .select(
-        "_id campaignTitle brandId description campaignBudget budget influencerBudget minFollowers maxFollowers targetCountry targetAgeRanges paymentType startAt endAt status isActive"
-      )
-      .lean();
+    const campaigns = campaignIds.length
+      ? await Campaign.find({
+          _id: { $in: toObjectIdArray(campaignIds) },
+        }).lean()
+      : [];
 
-    campaignMap = new Map(campaigns.map((c) => [String(c._id), c]));
+    campaignMap = new Map(
+      campaigns.map((campaign) => [
+        String(campaign._id),
+        buildCampaignResponse(campaign),
+      ])
+    );
   }
 
-  if (includeNames && invitations.length) {
-    const brandIds = [
-      ...new Set(
-        invitations
-          .map((i) => i.brandId)
-          .filter(Boolean)
-          .map(String)
-      ),
-    ];
+  if (includeNames && safeInvitations.length) {
+    const brandIdSet = new Set();
+
+    for (const inv of safeInvitations) {
+      const brandId = toStringId(inv.brandId);
+      if (isObjectId(brandId)) brandIdSet.add(brandId);
+    }
+
+    const brandIds = [...brandIdSet];
 
     const influencerIds = [
       ...new Set(
-        invitations
-          .map((i) => i.influencerId)
-          .filter(Boolean)
-          .map(String)
+        safeInvitations
+          .map((inv) => toStringId(inv.influencerId))
+          .filter((id) => isObjectId(id))
       ),
     ];
 
     const modashUserIds = [
       ...new Set(
-        invitations
-          .map((i) => i.modashUserId)
+        safeInvitations
+          .map((inv) => inv.modashUserId)
           .filter(Boolean)
-          .map((x) => String(x).trim())
+          .map((id) => String(id).trim())
       ),
     ];
 
     const platforms = [
       ...new Set(
-        invitations
-          .map((i) => i.platform)
+        safeInvitations
+          .map((inv) => inv.platform)
           .filter(Boolean)
-          .map((x) => String(x).trim().toLowerCase())
+          .map((platform) => String(platform).trim().toLowerCase())
       ),
     ];
 
     const [brands, influencers, modashDocs] = await Promise.all([
       brandIds.length
-        ? Brand.find({ _id: { $in: brandIds } })
-            .select("_id name brandName companyName email")
+        ? Brand.find({ _id: { $in: toObjectIdArray(brandIds) } })
+            .select("_id name brandName companyName email profilePic")
             .lean()
-        : [],
+        : Promise.resolve([]),
+
       influencerIds.length
-        ? Influencer.find({ _id: { $in: influencerIds } })
+        ? Influencer.find({ _id: { $in: toObjectIdArray(influencerIds) } })
             .select("_id name email")
             .lean()
-        : [],
+        : Promise.resolve([]),
+
       modashUserIds.length
         ? Modash.find({
             userId: { $in: modashUserIds },
@@ -243,47 +398,51 @@ async function enrichInvitations(
           })
             .select("userId provider fullname username handle")
             .lean()
-        : [],
+        : Promise.resolve([]),
     ]);
 
     brandMap = new Map(
-      brands.map((b) => [
-        String(b._id),
+      brands.map((brand) => [
+        String(brand._id),
         {
-          brandName: b.name || b.brandName || b.companyName || "",
-          brandEmail: b.email || null,
+          brandId: String(brand._id),
+          brandName: brand.name || brand.brandName || brand.companyName || "",
+          email: brand.email || null,
+          brandprofilepic: brand.profilePic || "",
         },
       ])
     );
 
     influencerMap = new Map(
-      influencers.map((i) => [
-        String(i._id),
+      influencers.map((influencer) => [
+        String(influencer._id),
         {
-          influencerName: i.name || "",
-          influencerEmail: i.email || null,
+          influencerId: String(influencer._id),
+          influencerName: influencer.name || "",
+          email: influencer.email || null,
         },
       ])
     );
 
     modashMap = new Map(
-      modashDocs.map((m) => [
-        `${String(m.userId).trim()}|${String(m.provider)
+      modashDocs.map((modash) => [
+        `${String(modash.userId).trim()}|${String(modash.provider)
           .trim()
           .toLowerCase()}`,
-        m.fullname || m.username || m.handle || "",
+        modash.fullname || modash.username || modash.handle || "",
       ])
     );
   }
 
-  return invitations.map((inv) => {
+  return safeInvitations.map((inv) => {
     const campaign = includeCampaign
-      ? campaignMap.get(String(inv.campaignId))
+      ? campaignMap.get(String(inv.campaignId)) || null
       : null;
 
-    const brandInfo = includeNames
-      ? brandMap.get(String(inv.brandId))
-      : null;
+    const brandId = inv.brandId ? String(inv.brandId) : null;
+
+    const brandInfo =
+      includeNames && brandId ? brandMap.get(String(brandId)) : null;
 
     const influencerInfo = includeNames
       ? influencerMap.get(String(inv.influencerId))
@@ -302,56 +461,32 @@ async function enrichInvitations(
     }
 
     const out = {
-      _id: String(inv._id),
+      invitationId: String(inv._id),
 
-      brandId: inv.brandId ? String(inv.brandId) : null,
-      brandName: includeNames ? brandInfo?.brandName || null : undefined,
-
-      influencerId: inv.influencerId ? String(inv.influencerId) : null,
-      influencerName: includeNames ? influencerName || null : undefined,
-      influencerEmail: includeNames
-        ? influencerInfo?.influencerEmail || null
-        : undefined,
-
-      campaignId: inv.campaignId ? String(inv.campaignId) : null,
-      campaignTitle: includeCampaign
-        ? campaign?.campaignTitle || null
-        : undefined,
-      description: includeCampaign ? campaign?.description || null : undefined,
-
-      campaignBudget: includeCampaign
-        ? campaign?.campaignBudget ?? null
-        : undefined,
-      budget: includeCampaign ? campaign?.budget ?? null : undefined,
-      influencerBudget: includeCampaign
-        ? campaign?.influencerBudget ?? null
-        : undefined,
-
-      minFollowers: includeCampaign
-        ? campaign?.minFollowers ?? null
-        : undefined,
-      maxFollowers: includeCampaign
-        ? campaign?.maxFollowers ?? null
-        : undefined,
-      targetCountry: includeCampaign
-        ? campaign?.targetCountry ?? null
-        : undefined,
-      targetAgeRanges: includeCampaign
-        ? campaign?.targetAgeRanges ?? []
-        : undefined,
-      paymentType: includeCampaign
-        ? campaign?.paymentType ?? null
-        : undefined,
-      startAt: includeCampaign ? campaign?.startAt ?? null : undefined,
-      endAt: includeCampaign ? campaign?.endAt ?? null : undefined,
-
+      status: inv.status || null,
       platform: inv.platform || null,
       handle: inv.handle || null,
       emailTo: inv.emailTo || null,
       missingEmailId: inv.missingEmailId || null,
       modashUserId: inv.modashUserId || null,
 
-      status: inv.status,
+      brand: includeNames
+        ? {
+            brandId,
+            brandName: brandInfo?.brandName || null,
+            email: brandInfo?.email || null,
+            brandprofilepic: brandInfo?.brandprofilepic || "",
+          }
+        : undefined,
+
+      influencer: {
+        influencerId: inv.influencerId ? String(inv.influencerId) : null,
+        influencerName: includeNames ? influencerName || null : undefined,
+        email: includeNames ? influencerInfo?.email || null : undefined,
+      },
+
+      campaign: includeCampaign ? campaign : undefined,
+
       sentAt: inv.sentAt || null,
       failedAt: inv.failedAt || null,
       failReason: inv.failReason || null,
@@ -360,11 +495,26 @@ async function enrichInvitations(
         ? String(inv.createdByAdminId)
         : null,
 
-      createdAt: inv.createdAt,
-      updatedAt: inv.updatedAt,
+      createdAt: inv.createdAt || null,
+      updatedAt: inv.updatedAt || null,
     };
 
-    Object.keys(out).forEach((k) => out[k] === undefined && delete out[k]);
+    Object.keys(out).forEach((key) => {
+      if (out[key] === undefined) delete out[key];
+    });
+
+    if (out.brand) {
+      Object.keys(out.brand).forEach((key) => {
+        if (out.brand[key] === undefined) delete out.brand[key];
+      });
+    }
+
+    if (out.influencer) {
+      Object.keys(out.influencer).forEach((key) => {
+        if (out.influencer[key] === undefined) delete out.influencer[key];
+      });
+    }
+
     return out;
   });
 }
@@ -1263,10 +1413,10 @@ exports.getAcceptedAdminCreatedCampaigns = async (req, res) => {
 
       const campaigns = campaignIds.length
         ? await Campaign.find({
-            _id: {
-              $in: campaignIds.map((id) => new mongoose.Types.ObjectId(id)),
-            },
-          }).lean()
+          _id: {
+            $in: campaignIds.map((id) => new mongoose.Types.ObjectId(id)),
+          },
+        }).lean()
         : [];
 
       campaignDetailsMap = new Map(
