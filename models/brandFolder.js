@@ -1,5 +1,3 @@
-"use strict";
-
 const mongoose = require("mongoose");
 const { Schema, model, models } = mongoose;
 
@@ -15,20 +13,6 @@ const LinkedCampaignSchema = new Schema(
   { _id: false }
 );
 
-const SourceRefSchema = new Schema(
-  {
-    source: { type: String, default: "", trim: true },
-    pitchFolderId: { type: Schema.Types.Mixed, default: null },
-    pitchFolderTitle: { type: String, default: "", trim: true },
-    pitchItemId: { type: Schema.Types.Mixed, default: null },
-    campaignId: { type: Schema.Types.Mixed, default: null },
-    campaignsId: { type: String, default: "", trim: true },
-    campaignTitle: { type: String, default: "", trim: true },
-    importedAt: { type: Date, default: Date.now },
-  },
-  { _id: false }
-);
-
 const BrandFolderInfluencerSchema = new Schema(
   {
     profileKey: { type: String, required: true, trim: true },
@@ -37,23 +21,34 @@ const BrandFolderInfluencerSchema = new Schema(
     creatorId: { type: String, default: "", trim: true },
     userId: { type: String, default: "", trim: true },
     modashId: { type: String, default: "", trim: true },
+    channelId: { type: String, default: "", trim: true },
 
     name: { type: String, default: "", trim: true },
     fullname: { type: String, default: "", trim: true },
+    fullName: { type: String, default: "", trim: true },
     username: { type: String, default: "", trim: true },
+    userName: { type: String, default: "", trim: true },
     handle: { type: String, default: "", trim: true },
 
     email: { type: String, default: "", lowercase: true, trim: true },
+    emails: { type: [Schema.Types.Mixed], default: [] },
 
     provider: { type: String, default: "", trim: true },
     platform: { type: String, default: "", trim: true },
 
     country: { type: String, default: "", trim: true },
-    language: { type: String, default: "", trim: true },
-    location: { type: String, default: "", trim: true },
+    countryCode: { type: String, default: "", trim: true },
 
-    categories: { type: [String], default: [] },
-    niche: { type: [String], default: [] },
+    language: { type: String, default: "", trim: true },
+    languageCode: { type: String, default: "", trim: true },
+    languages: { type: [Schema.Types.Mixed], default: [] },
+
+    location: { type: String, default: "", trim: true },
+    city: { type: String, default: "", trim: true },
+    region: { type: String, default: "", trim: true },
+
+    categories: { type: [Schema.Types.Mixed], default: [] },
+    niche: { type: [Schema.Types.Mixed], default: [] },
 
     followers: { type: Number, default: null },
     engagements: { type: Number, default: null },
@@ -69,19 +64,63 @@ const BrandFolderInfluencerSchema = new Schema(
     avatarUrl: { type: String, default: "", trim: true },
     profileImage: { type: String, default: "", trim: true },
 
+    bio: { type: String, default: "", trim: true },
+    description: { type: String, default: "", trim: true },
+
+    isVerified: { type: Boolean, default: false },
+    verified: { type: Boolean, default: false },
+    isPrivate: { type: Boolean, default: false },
+
+    searchType: { type: String, default: "standard", trim: true },
+
     status: {
       type: String,
       enum: ["saved", "good_fit", "bookmarked", "invited", "removed"],
       default: "saved",
     },
 
-    source: { type: SourceRefSchema, default: () => ({}) },
-    raw: { type: Schema.Types.Mixed, default: null },
+    source: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
+
+    audience: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    stats: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    contacts: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    profile: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    account: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    raw: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
 
     addedAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
-  { _id: true }
+  {
+    _id: true,
+    strict: false,
+  }
 );
 
 const BrandFolderSchema = new Schema(

@@ -29,6 +29,9 @@ const LEVEL_RANK = {
   edit: 2,
 };
 
+const MEMBER_ACTIVE_STATUSES = ["active", "invited"];
+const ALLOWED_ACCESS_TYPES = ["full", "limited", "custom"];
+
 function sendError(res, status, message) {
   return res.status(status).json({
     success: false,
@@ -42,6 +45,10 @@ function sameId(a, b) {
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
 }
 
 function getCurrentBrandId(req) {
@@ -73,18 +80,6 @@ async function getCurrentBrandFromReq(req) {
   );
 }
 
-function isGoogleBrandAccount(brand) {
-  const authProvider = String(brand?.authProvider || "").toLowerCase();
-  const provider = String(brand?.provider || "").toLowerCase();
-
-  return (
-    authProvider === "google" ||
-    provider === "google" ||
-    Boolean(brand?.googleId) ||
-    Boolean(brand?.googleSub)
-  );
-}
-
 function normalizeLevel(value) {
   const level = String(value || "").trim().toLowerCase();
 
@@ -104,8 +99,14 @@ function normalizeResourceKey(value) {
   return key;
 }
 
+function normalizeAccessType(value) {
+  const accessType = String(value || "limited").trim().toLowerCase();
+
+  return ALLOWED_ACCESS_TYPES.includes(accessType) ? accessType : "limited";
+}
+
 function buildPermissions(accessType = "limited", inputPermissions = []) {
-  const safeAccessType = String(accessType || "limited").toLowerCase();
+  const safeAccessType = normalizeAccessType(accessType);
 
   if (safeAccessType === "full") {
     return RESOURCES.map((key) => ({
@@ -146,24 +147,62 @@ function hasPermission(member, key, requiredLevel = "view") {
   return LEVEL_RANK[permission.level] >= LEVEL_RANK[requiredLevel];
 }
 
+function normalizeWorkspaceUsers(workspaceUsers = []) {
+  const map = new Map();
+
+  for (const item of workspaceUsers || []) {
+    const email = normalizeEmail(item?.email);
+
+    if (!email) continue;
+
+    map.set(email, {
+      email,
+      status: String(item?.status || "active").toLowerCase() === "inactive"
+        ? "inactive"
+        : "active",
+    });
+  }
+
+  return [...map.values()];
+}
+
+function upsertWorkspaceUser(ownerBrand, email, status = "active") {
+  const cleanEmail = normalizeEmail(email);
+  const nextStatus = status === "inactive" ? "inactive" : "active";
+  const workspaceUsers = normalizeWorkspaceUsers(ownerBrand.workspaceUsers);
+
+  const existing = workspaceUsers.find((item) => item.email === cleanEmail);
+
+  if (existing) {
+    existing.status = nextStatus;
+  } else if (cleanEmail) {
+    workspaceUsers.push({
+      email: cleanEmail,
+      status: nextStatus,
+    });
+  }
+
+  ownerBrand.workspaceUsers = workspaceUsers;
+}
+
 function isWorkspaceUserActive(ownerBrand, email) {
   const cleanEmail = normalizeEmail(email);
 
   return Array.isArray(ownerBrand?.workspaceUsers)
     ? ownerBrand.workspaceUsers.some((item) => {
-        return (
-          normalizeEmail(item?.email) === cleanEmail &&
-          String(item?.status || "").toLowerCase() === "active"
-        );
-      })
+      return (
+        normalizeEmail(item?.email) === cleanEmail &&
+        String(item?.status || "").toLowerCase() === "active"
+      );
+    })
     : false;
 }
 
 function formatMember(member, currentBrandId = null) {
   const populatedUser =
     member.memberBrandId &&
-    typeof member.memberBrandId === "object" &&
-    member.memberBrandId.email
+      typeof member.memberBrandId === "object" &&
+      member.memberBrandId.email
       ? member.memberBrandId
       : null;
 
@@ -183,10 +222,11 @@ function formatMember(member, currentBrandId = null) {
     accessType: member.accessType,
     permissions: member.permissions || [],
     status: member.status,
-    invitedAt: member.createdAt,
-    inviteSentAt: member.inviteSentAt,
+    invitedAt: member.invitedAt || member.createdAt,
+    inviteSentAt: member.inviteSentAt || member.invitedAt || member.createdAt,
     joinedAt: member.joinedAt,
     removedAt: member.removedAt,
+    ownershipTransferredAt: member.ownershipTransferredAt || null,
     isYou:
       currentBrandId && memberBrandId
         ? sameId(memberBrandId, currentBrandId)
@@ -306,23 +346,6 @@ async function canViewTeam(brandId, currentBrand) {
   };
 }
 
-async function canManageTeam(brandId, currentBrand) {
-  const access = await canViewWorkspace(brandId, currentBrand);
-
-  if (!access.allowed) return access;
-
-  if (access.isOwner) return access;
-
-  if (hasPermission(access.member, "team_invitations", "edit")) {
-    return access;
-  }
-
-  return {
-    allowed: false,
-    message: "You do not have permission to manage team members.",
-  };
-}
-
 async function sendInviteEmailSafe({ to, loginLink, ownerBrand }) {
   try {
     if (process.env.SEND_INVITE_EMAILS !== "true") {
@@ -373,6 +396,30 @@ async function sendInviteEmailSafe({ to, loginLink, ownerBrand }) {
     console.error("Invite email failed:", error.message);
     return false;
   }
+}
+
+async function getFormattedMembersForWorkspace(brandId, currentBrandId) {
+  const ownerBrand = await Brand.findById(brandId).select(
+    "email name brandName profilePic workspaceUsers createdAt"
+  );
+
+  if (!ownerBrand) return null;
+
+  const members = await BrandMember.find({
+    brandId,
+    status: { $in: MEMBER_ACTIVE_STATUSES },
+  })
+    .populate("memberBrandId", "email name brandName profilePic")
+    .sort({ createdAt: 1 });
+
+  return {
+    brandId: String(brandId),
+    owner: formatOwnerRow(ownerBrand, currentBrandId),
+    members: [
+      formatOwnerRow(ownerBrand, currentBrandId),
+      ...members.map((member) => formatMember(member, currentBrandId)),
+    ],
+  };
 }
 
 exports.getMyWorkspaces = async (req, res) => {
@@ -480,25 +527,19 @@ exports.listMembers = async (req, res) => {
       return sendError(res, 403, access.message);
     }
 
-    const ownerBrand = access.brand;
-    const currentBrandId = String(currentBrand._id);
-
-    const ownerRow = formatOwnerRow(ownerBrand, currentBrandId);
-
-    const members = await BrandMember.find({
+    const rows = await getFormattedMembersForWorkspace(
       brandId,
-      status: { $in: ["active", "invited"] },
-    })
-      .populate("memberBrandId", "email name brandName profilePic")
-      .sort({ createdAt: 1 });
+      String(currentBrand._id)
+    );
+
+    if (!rows) {
+      return sendError(res, 404, "Brand workspace not found.");
+    }
 
     return res.status(200).json({
       success: true,
-      brandId,
-      members: [
-        ownerRow,
-        ...members.map((member) => formatMember(member, currentBrandId)),
-      ],
+      brandId: rows.brandId,
+      members: rows.members,
     });
   } catch (error) {
     return sendError(res, 500, error.message);
@@ -532,7 +573,7 @@ exports.getMemberInfo = async (req, res) => {
     const member = await BrandMember.findOne({
       _id: memberId,
       brandId,
-      status: { $in: ["active", "invited"] },
+      status: { $in: MEMBER_ACTIVE_STATUSES },
     }).populate("memberBrandId", "email name brandName profilePic");
 
     if (!member) {
@@ -561,6 +602,22 @@ exports.inviteMember = async (req, res) => {
       return sendError(res, 400, "Email is required.");
     }
 
+    const cleanEmail = normalizeEmail(email);
+
+    if (!isValidEmail(cleanEmail)) {
+      return sendError(res, 400, "Invalid email.");
+    }
+
+    const requestedAccessType = String(accessType || "limited").toLowerCase();
+
+    if (requestedAccessType === "owner") {
+      return sendError(
+        res,
+        400,
+        "Owner access must be handled through transfer ownership."
+      );
+    }
+
     const currentBrand = await getCurrentBrandFromReq(req);
 
     if (!currentBrand) {
@@ -570,8 +627,6 @@ exports.inviteMember = async (req, res) => {
     if (!sameId(currentBrand._id, brandId)) {
       return sendError(res, 403, "Only brand owner can invite members.");
     }
-
-    const cleanEmail = normalizeEmail(email);
 
     const ownerBrand = await Brand.findById(brandId).select(
       "email name brandName profilePic workspaceUsers createdAt"
@@ -585,35 +640,16 @@ exports.inviteMember = async (req, res) => {
       return sendError(res, 400, "Owner is already part of this workspace.");
     }
 
-    const safeAccessType = ["full", "limited", "custom"].includes(
-      String(accessType || "").toLowerCase()
-    )
-      ? String(accessType).toLowerCase()
-      : "limited";
+    const safeAccessType = normalizeAccessType(requestedAccessType);
 
     const targetBrand = await Brand.findOne({ email: cleanEmail }).select(
       "email name brandName profilePic"
     );
 
-    const workspaceUsers = Array.isArray(ownerBrand.workspaceUsers)
-      ? ownerBrand.workspaceUsers
-      : [];
-
-    const existingWorkspaceUser = workspaceUsers.find((item) => {
-      return normalizeEmail(item?.email) === cleanEmail;
-    });
-
-    if (existingWorkspaceUser) {
-      existingWorkspaceUser.status = "active";
-    } else {
-      workspaceUsers.push({
-        email: cleanEmail,
-        status: "active",
-      });
-    }
-
-    ownerBrand.workspaceUsers = workspaceUsers;
+    upsertWorkspaceUser(ownerBrand, cleanEmail, "active");
     await ownerBrand.save();
+
+    const now = new Date();
 
     const member = await BrandMember.findOneAndUpdate(
       {
@@ -630,16 +666,18 @@ exports.inviteMember = async (req, res) => {
         permissions: buildPermissions(safeAccessType, permissions),
         status: "active",
         invitedBy: currentBrand._id,
-        inviteSentAt: new Date(),
-        joinedAt: targetBrand ? new Date() : null,
+        invitedAt: now,
+        inviteSentAt: now,
+        joinedAt: targetBrand ? now : null,
         removedAt: null,
+        removedBy: null,
       },
       {
         upsert: true,
         new: true,
         setDefaultsOnInsert: true,
       }
-    );
+    ).populate("memberBrandId", "email name brandName profilePic");
 
     const loginLink = `${FRONTEND_URL}/login?invited=1&brandId=${encodeURIComponent(
       String(brandId)
@@ -680,6 +718,16 @@ exports.updateMemberAccess = async (req, res) => {
       return sendError(res, 400, "Invalid memberId.");
     }
 
+    const requestedAccessType = String(accessType || "limited").toLowerCase();
+
+    if (requestedAccessType === "owner") {
+      return sendError(
+        res,
+        400,
+        "Owner access must be handled through transfer ownership."
+      );
+    }
+
     const currentBrand = await getCurrentBrandFromReq(req);
 
     if (!currentBrand) {
@@ -693,23 +741,20 @@ exports.updateMemberAccess = async (req, res) => {
     const member = await BrandMember.findOne({
       _id: memberId,
       brandId,
-      status: { $in: ["active", "invited"] },
+      status: { $in: MEMBER_ACTIVE_STATUSES },
     });
 
     if (!member) {
       return sendError(res, 404, "Member not found.");
     }
 
-    const safeAccessType = ["full", "limited", "custom"].includes(
-      String(accessType || "").toLowerCase()
-    )
-      ? String(accessType).toLowerCase()
-      : "limited";
+    const safeAccessType = normalizeAccessType(requestedAccessType);
 
     member.accessType = safeAccessType;
     member.permissions = buildPermissions(safeAccessType, permissions);
     member.status = "active";
     member.removedAt = null;
+    member.removedBy = null;
 
     await member.save();
 
@@ -724,6 +769,8 @@ exports.updateMemberAccess = async (req, res) => {
         },
       }
     );
+
+    await member.populate("memberBrandId", "email name brandName profilePic");
 
     return res.status(200).json({
       success: true,
@@ -760,7 +807,7 @@ exports.removeMemberAccess = async (req, res) => {
     const member = await BrandMember.findOne({
       _id: memberId,
       brandId,
-      status: { $in: ["active", "invited"] },
+      status: { $in: MEMBER_ACTIVE_STATUSES },
     });
 
     if (!member) {
@@ -769,6 +816,7 @@ exports.removeMemberAccess = async (req, res) => {
 
     member.status = "removed";
     member.removedAt = new Date();
+    member.removedBy = currentBrand._id;
 
     await member.save();
 
@@ -789,6 +837,168 @@ exports.removeMemberAccess = async (req, res) => {
       message: "Member access removed successfully.",
     });
   } catch (error) {
+    return sendError(res, 500, error.message);
+  }
+};
+
+exports.transferOwnership = async (req, res) => {
+  try {
+    const { brandId } = req.params;
+    const { email } = req.body || {};
+
+    if (!brandId || !mongoose.Types.ObjectId.isValid(String(brandId))) {
+      return sendError(res, 400, "Invalid brandId.");
+    }
+
+    if (!email) {
+      return sendError(res, 400, "New owner email is required.");
+    }
+
+    const cleanEmail = normalizeEmail(email);
+
+    if (!isValidEmail(cleanEmail)) {
+      return sendError(res, 400, "Invalid email.");
+    }
+
+    const currentBrand = await getCurrentBrandFromReq(req);
+
+    if (!currentBrand) {
+      return sendError(res, 401, "Unauthorized.");
+    }
+
+    if (!sameId(currentBrand._id, brandId)) {
+      return sendError(
+        res,
+        403,
+        "Only current brand owner can transfer ownership."
+      );
+    }
+
+    const ownerBrand = await Brand.findById(brandId).select(
+      "email name brandName profilePic workspaceUsers authProvider provider googleId googleSub createdAt"
+    );
+
+    if (!ownerBrand) {
+      return sendError(res, 404, "Brand workspace not found.");
+    }
+
+    const previousOwnerEmail = normalizeEmail(ownerBrand.email);
+
+    if (previousOwnerEmail === cleanEmail) {
+      return sendError(res, 400, "This email is already the owner email.");
+    }
+
+    const emailUsedByAnotherBrand = await Brand.findOne({
+      _id: { $ne: ownerBrand._id },
+      email: cleanEmail,
+    }).select("_id email brandName name");
+
+    if (emailUsedByAnotherBrand) {
+      return sendError(
+        res,
+        409,
+        "This email already belongs to another brand account. Use a different email or merge accounts first."
+      );
+    }
+
+    const now = new Date();
+
+    ownerBrand.email = cleanEmail;
+
+    const workspaceUsers = normalizeWorkspaceUsers(ownerBrand.workspaceUsers)
+      .filter((item) => item.email !== cleanEmail);
+
+    const previousOwnerInWorkspace = workspaceUsers.some(
+      (item) => item.email === previousOwnerEmail
+    );
+
+    if (previousOwnerEmail && !previousOwnerInWorkspace) {
+      workspaceUsers.push({
+        email: previousOwnerEmail,
+        status: "active",
+      });
+    }
+
+    ownerBrand.workspaceUsers = workspaceUsers;
+
+    await ownerBrand.save();
+
+    const previousOwnerMember = await BrandMember.findOneAndUpdate(
+      {
+        brandId,
+        email: previousOwnerEmail,
+      },
+      {
+        brandId,
+        memberBrandId: null,
+        email: previousOwnerEmail,
+        name: currentBrand.name || currentBrand.brandName || "",
+        profilePic: currentBrand.profilePic || "",
+        accessType: "full",
+        permissions: buildPermissions("full"),
+        status: "active",
+        invitedBy: currentBrand._id,
+        invitedAt: now,
+        inviteSentAt: now,
+        joinedAt: null,
+        removedAt: null,
+        removedBy: null,
+        ownershipTransferredAt: now,
+        ownershipTransferredBy: currentBrand._id,
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    await BrandMember.updateOne(
+      {
+        brandId,
+        email: cleanEmail,
+      },
+      {
+        $set: {
+          status: "removed",
+          removedAt: now,
+          removedBy: currentBrand._id,
+          ownershipTransferredAt: now,
+          ownershipTransferredBy: currentBrand._id,
+        },
+      }
+    );
+
+    await previousOwnerMember.populate(
+      "memberBrandId",
+      "email name brandName profilePic"
+    );
+
+    const rows = await getFormattedMembersForWorkspace(
+      brandId,
+      String(currentBrand._id)
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Ownership transferred successfully.",
+      requiresRelogin: true,
+      owner: rows?.owner || formatOwnerRow(ownerBrand, currentBrand._id),
+      previousOwnerMember: formatMember(previousOwnerMember, currentBrand._id),
+      members: rows?.members || [
+        formatOwnerRow(ownerBrand, currentBrand._id),
+        formatMember(previousOwnerMember, currentBrand._id),
+      ],
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return sendError(
+        res,
+        409,
+        "This email is already used by another account."
+      );
+    }
+
     return sendError(res, 500, error.message);
   }
 };
@@ -843,6 +1053,7 @@ exports.previewInvite = async (_req, res) => {
 exports.acceptInvite = async (_req, res) => {
   return res.status(410).json({
     success: false,
-    message: "Accept invite API is disabled. User access is activated from invite API and login.",
+    message:
+      "Accept invite API is disabled. User access is activated from invite API and login.",
   });
 };

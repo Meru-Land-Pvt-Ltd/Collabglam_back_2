@@ -19,6 +19,7 @@ const {
   acceptInvite,
   updateMemberAccess,
   removeMemberAccess,
+  transferOwnership,
   getMyAccess,
 } = brandMemberController;
 
@@ -34,6 +35,12 @@ if (typeof getMyWorkspaces !== "function") {
   );
 }
 
+if (typeof transferOwnership !== "function") {
+  throw new Error(
+    "transferOwnership controller is not a function. Check brandMemberController export."
+  );
+}
+
 router.get("/my-workspaces", protectBrand, getMyWorkspaces);
 
 router.get("/invite/:token", previewInvite);
@@ -46,10 +53,24 @@ router.get("/:brandId/members/my-access", protectBrand, getMyAccess);
 
 router.get("/:brandId/members/:memberId", protectBrand, getMemberInfo);
 
-router.post("/:brandId/members/invite", inviteMember);
+router.post("/:brandId/members/invite", protectBrand, inviteMember);
 
-router.patch("/:brandId/members/:memberId/access", protectBrand, updateMemberAccess);
+router.post(
+  "/:brandId/members/transfer-ownership",
+  protectBrand,
+  transferOwnership
+);
 
-router.delete("/:brandId/members/:memberId", protectBrand, removeMemberAccess);
+router.patch(
+  "/:brandId/members/:memberId/access",
+  protectBrand,
+  updateMemberAccess
+);
+
+router.delete(
+  "/:brandId/members/:memberId",
+  protectBrand,
+  removeMemberAccess
+);
 
 module.exports = router;
