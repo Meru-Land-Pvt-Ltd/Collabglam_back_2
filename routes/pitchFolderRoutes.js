@@ -9,6 +9,11 @@ const { adminAuth } = require("../middlewares/adminAuth");
 // public shared routes
 router.get("/shared/:token", controller.getSharedFolder);
 
+router.post(
+  "/shared/:token/good-fit/:itemId",
+  controller.updateSharedFolderGoodFit
+);
+
 // generic brand request route - shared media-kit only
 router.post(
   "/shared/:token/media-kit-request/:itemId",

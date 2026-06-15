@@ -5458,11 +5458,11 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
 
     const influencerLookup = mongoose.Types.ObjectId.isValid(String(influencerId))
       ? {
-        $or: [
-          { _id: influencerId },
-          { influencerId: String(influencerId) }
-        ]
-      }
+          $or: [
+            { _id: influencerId },
+            { influencerId: String(influencerId) }
+          ]
+        }
       : { influencerId: String(influencerId) };
 
     const influencer = await Influencer.findOne(
@@ -5477,7 +5477,7 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
     const internalInfluencerId = String(influencer._id);
     const publicInfluencerId = String(influencer.influencerId || influencer._id);
 
-    const appliedDocs = await ApplyCampaign.find(
+    const currentInfluencerAppliedDocs = await ApplyCampaign.find(
       {
         $or: [
           { "applicants.influencerId": internalInfluencerId },
@@ -5489,7 +5489,7 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
 
     const appliedCampaignIds = [
       ...new Set(
-        appliedDocs
+        currentInfluencerAppliedDocs
           .map((doc) => String(doc.campaignId || "").trim())
           .filter(Boolean)
       )
@@ -5547,11 +5547,222 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
         .lean()
     ]);
 
+    const brandObjectIds = [
+      ...new Set(
+        campaigns
+          .map((campaign) => String(campaign.brandId || "").trim())
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      )
+    ];
+
+    const campaignIdValues = [
+      ...new Set(
+        campaigns
+          .flatMap((campaign) => [
+            String(campaign._id || "").trim(),
+            String(campaign.campaignId || "").trim()
+          ])
+          .filter(Boolean)
+      )
+    ];
+
+    const campaignObjectIdValues = campaignIdValues
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const [brandDocs, applyDocsForCampaigns] = await Promise.all([
+      brandObjectIds.length
+        ? Brand.find(
+            { _id: { $in: brandObjectIds.map((id) => new mongoose.Types.ObjectId(id)) } },
+            "_id profilePic"
+          ).lean()
+        : Promise.resolve([]),
+
+      campaignIdValues.length
+        ? ApplyCampaign.find(
+            {
+              $or: [
+                { campaignId: { $in: campaignIdValues } },
+                ...(campaignObjectIdValues.length
+                  ? [{ campaignId: { $in: campaignObjectIdValues } }]
+                  : [])
+              ]
+            },
+            "campaignId applicants"
+          ).lean()
+        : Promise.resolve([])
+    ]);
+
+    const brandProfilePicMap = new Map(
+      brandDocs.map((brand) => [String(brand._id), brand.profilePic || ""])
+    );
+
+    const campaignKeyToObjectIdMap = new Map();
+
+    for (const campaign of campaigns) {
+      const campaignObjectId = String(campaign._id || "").trim();
+      const campaignLegacyId = String(campaign.campaignId || "").trim();
+
+      if (campaignObjectId) {
+        campaignKeyToObjectIdMap.set(campaignObjectId, campaignObjectId);
+      }
+
+      if (campaignLegacyId) {
+        campaignKeyToObjectIdMap.set(campaignLegacyId, campaignObjectId);
+      }
+    }
+
+    const applicantsByCampaignId = new Map();
+    const allApplicantIds = new Set();
+
+    for (const doc of applyDocsForCampaigns) {
+      const applyCampaignId = String(doc.campaignId || "").trim();
+      const campaignObjectId = campaignKeyToObjectIdMap.get(applyCampaignId);
+
+      if (!campaignObjectId) continue;
+
+      if (!applicantsByCampaignId.has(campaignObjectId)) {
+        applicantsByCampaignId.set(campaignObjectId, new Map());
+      }
+
+      const campaignApplicantsMap = applicantsByCampaignId.get(campaignObjectId);
+
+      for (const applicant of doc.applicants || []) {
+        const applicantId = String(
+          applicant.influencerId ||
+            applicant._id ||
+            applicant.id ||
+            applicant.email ||
+            ""
+        ).trim();
+
+        if (!applicantId) continue;
+
+        allApplicantIds.add(applicantId);
+
+        campaignApplicantsMap.set(applicantId, {
+          influencerId: applicantId,
+          name:
+            applicant.name ||
+            applicant.fullName ||
+            applicant.email ||
+            applicantId,
+          email: applicant.email || "",
+          handle: applicant.handle || null,
+          status: applicant.status || "",
+          appliedAt: applicant.appliedAt || applicant.createdAt || null,
+          profileimage:
+            applicant.profileimage ||
+            applicant.profileImage ||
+            applicant.profilePic ||
+            applicant.profilepic ||
+            applicant.profilePicture ||
+            applicant.avatar ||
+            applicant.avatarUrl ||
+            applicant.image ||
+            ""
+        });
+      }
+    }
+
+    const applicantIds = Array.from(allApplicantIds);
+
+    const applicantObjectIds = applicantIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    const influencerDocs = applicantIds.length
+      ? await Influencer.find(
+          {
+            $or: [
+              { influencerId: { $in: applicantIds } },
+              { email: { $in: applicantIds } },
+              ...(applicantObjectIds.length
+                ? [{ _id: { $in: applicantObjectIds } }]
+                : [])
+            ]
+          },
+          "_id influencerId name fullName email handle profileimage profileImage profilePic profilepic profilePicture avatar avatarUrl image"
+        ).lean()
+      : [];
+
+    const getProfileImage = (doc = {}) =>
+      doc.profileimage ||
+      doc.profileImage ||
+      doc.profilePic ||
+      doc.profilepic ||
+      doc.profilePicture ||
+      doc.avatar ||
+      doc.avatarUrl ||
+      doc.image ||
+      "";
+
+    const influencerMap = new Map();
+
+    for (const inf of influencerDocs) {
+      const hydratedInfluencer = {
+        _id: inf._id ? String(inf._id) : "",
+        influencerId: String(inf.influencerId || inf._id || ""),
+        name:
+          inf.name ||
+          inf.fullName ||
+          inf.email ||
+          inf.handle ||
+          String(inf.influencerId || inf._id || ""),
+        email: inf.email || "",
+        handle: inf.handle || null,
+        profileimage: getProfileImage(inf)
+      };
+
+      const keys = [
+        inf._id ? String(inf._id) : "",
+        inf.influencerId ? String(inf.influencerId) : "",
+        inf.email ? String(inf.email) : ""
+      ].filter(Boolean);
+
+      for (const key of keys) {
+        influencerMap.set(key, hydratedInfluencer);
+      }
+    }
+
+    const items = campaigns.map((campaign) => {
+      const campaignObjectId = String(campaign._id || "");
+      const brandId = String(campaign.brandId || "");
+      const campaignApplicantsMap =
+        applicantsByCampaignId.get(campaignObjectId) || new Map();
+
+      const appliedInfluencers = Array.from(campaignApplicantsMap.entries()).map(
+        ([applicantId, applicant]) => {
+          const hydrated = influencerMap.get(applicantId) || {};
+
+          return {
+            _id: hydrated._id || (mongoose.Types.ObjectId.isValid(applicantId) ? applicantId : ""),
+            influencerId: hydrated.influencerId || applicant.influencerId || applicantId,
+            name: hydrated.name || applicant.name || applicantId,
+            email: hydrated.email || applicant.email || "",
+            handle: hydrated.handle || applicant.handle || null,
+            profileimage: hydrated.profileimage || applicant.profileimage || "",
+            status: applicant.status || "",
+            appliedAt: applicant.appliedAt || null
+          };
+        }
+      );
+
+      return {
+        ...campaign,
+
+        brandprofilepic: brandProfilePicMap.get(brandId) || "",
+
+        appliedInfluencerCount: appliedInfluencers.length,
+        appliedInfluencers
+      };
+    });
+
     return ApiResponse.sendOk(
       res,
       200,
       {
-        items: campaigns,
+        items,
         pagination: {
           total,
           page: safePage,
@@ -5562,7 +5773,12 @@ exports.getAllActiveCampaignsForInfluencer = async (req, res) => {
       requestId
     );
   } catch (err) {
-    await saveErrorLog(req, err, err?.statusCode || err?.status || 500, "GET_ALL_ACTIVE_CAMPAIGNS_FOR_INFLUENCER_ERROR");
+    await saveErrorLog(
+      req,
+      err,
+      err?.statusCode || err?.status || 500,
+      "GET_ALL_ACTIVE_CAMPAIGNS_FOR_INFLUENCER_ERROR"
+    );
     return sendControllerError(res, requestId, err);
   }
 };

@@ -3,24 +3,12 @@ const router = express.Router();
 
 const {
   getAllErrorLogs,
-  getSingleErrorLog,
-  deleteErrorLog,
-  clearAllErrorLogs,
+  updateErrorLogResolved,
+  updateErrorLogPriority,
 } = require("../controllers/errorLogController");
 
-// Optional: add admin token middleware here
-// const { verifyAdminToken } = require("../controllers/adminController");
-
-// Get all error logs
 router.get("/", getAllErrorLogs);
-
-// Get single error log by MongoDB _id
-router.get("/:id", getSingleErrorLog);
-
-// Delete single error log
-router.delete("/:id", deleteErrorLog);
-
-// Clear all error logs
-router.delete("/", clearAllErrorLogs);
+router.patch("/:id/resolved", updateErrorLogResolved);
+router.patch("/:id/priority", updateErrorLogPriority);
 
 module.exports = router;

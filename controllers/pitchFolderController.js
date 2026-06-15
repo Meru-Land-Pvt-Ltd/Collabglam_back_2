@@ -53,14 +53,14 @@ function cleanStr(v) {
 function getAuthedBrandId(req = {}) {
   return cleanStr(
     req.brand?._id ||
-      req.brand?.id ||
-      req.brand?.brandId ||
-      req.brandId ||
-      req.user?.brandId ||
-      req.user?.brand?._id ||
-      req.user?.brand?.id ||
-      req.user?._id ||
-      req.user?.id
+    req.brand?.id ||
+    req.brand?.brandId ||
+    req.brandId ||
+    req.user?.brandId ||
+    req.user?.brand?._id ||
+    req.user?.brand?.id ||
+    req.user?._id ||
+    req.user?.id
   );
 }
 
@@ -2002,19 +2002,19 @@ function normalizeFolderKind(value = '') {
 function hasAssignedCampaignForFolderList(folder = {}) {
   return Boolean(
     folder?.assignedCampaign?.campaignId ||
-      folder?.assignedCampaign?.campaignsId ||
-      folder?.assignedCampaign?.campaignTitle ||
-      folder?.assignedCampaign?.productOrServiceName
+    folder?.assignedCampaign?.campaignsId ||
+    folder?.assignedCampaign?.campaignTitle ||
+    folder?.assignedCampaign?.productOrServiceName
   );
 }
 
 function getStoredFolderKind(folder = {}) {
   return cleanStr(
     folder.folderType ||
-      folder.type ||
-      folder.source ||
-      folder.folderKind ||
-      folder.category
+    folder.type ||
+    folder.source ||
+    folder.folderKind ||
+    folder.category
   )
     .toLowerCase()
     .replace(/\s+/g, '_')
@@ -2085,11 +2085,11 @@ function serializeFolderCardFromPitchFolder(folder = {}, overrideType = '') {
     assignedCampaign,
     share: folder.share
       ? {
-          token: folder.share.token || '',
-          url: folder.share.url || '',
-          generatedAt: folder.share.generatedAt || null,
-          sharedBy: serializeMiniAdmin(folder.share.sharedByAdminId),
-        }
+        token: folder.share.token || '',
+        url: folder.share.url || '',
+        generatedAt: folder.share.generatedAt || null,
+        sharedBy: serializeMiniAdmin(folder.share.sharedByAdminId),
+      }
       : {},
     createdAt: folder.createdAt || null,
     updatedAt: folder.updatedAt || null,
@@ -2234,11 +2234,11 @@ exports.getFolderList = async (req, res) => {
 
     const pitchDocs = includePitchSheets || includeFullyManaged || campaignId
       ? await PitchFolder.find(pitchQueryFilter)
-          .populate(buildCreatorPopulate())
-          .populate(buildUpdatedByPopulate())
-          .populate(buildSharedByPopulate())
-          .sort({ updatedAt: -1 })
-          .lean()
+        .populate(buildCreatorPopulate())
+        .populate(buildUpdatedByPopulate())
+        .populate(buildSharedByPopulate())
+        .sort({ updatedAt: -1 })
+        .lean()
       : [];
 
     const pitchCards = pitchDocs
@@ -2253,21 +2253,21 @@ exports.getFolderList = async (req, res) => {
 
     const pitchSheetFolders = includePitchSheets
       ? pitchCards
-          .filter((folder) => folder.type === 'pitch_sheet')
-          .filter((folder) => folderSearchMatches(folder, search))
+        .filter((folder) => folder.type === 'pitch_sheet')
+        .filter((folder) => folderSearchMatches(folder, search))
       : [];
 
     const fullyManagedFolders = includeFullyManaged
       ? pitchCards
-          .filter((folder) => folder.type === 'fully_managed' || folder.isCampaignSpecific)
-          .map((folder) => ({ ...folder, type: 'fully_managed', isFullyManaged: true }))
-          .filter((folder) => folderSearchMatches(folder, search))
+        .filter((folder) => folder.type === 'fully_managed' || folder.isCampaignSpecific)
+        .map((folder) => ({ ...folder, type: 'fully_managed', isFullyManaged: true }))
+        .filter((folder) => folderSearchMatches(folder, search))
       : [];
 
     const bookmarkPitchFolders = includeBookmarks
       ? pitchCards
-          .filter((folder) => folder.type === 'bookmark')
-          .filter((folder) => folderSearchMatches(folder, search))
+        .filter((folder) => folder.type === 'bookmark')
+        .filter((folder) => folderSearchMatches(folder, search))
       : [];
 
     const externalBookmarkFolders = includeBookmarks && !campaignId && !hasGoodFitOnly
@@ -2300,8 +2300,8 @@ exports.getFolderList = async (req, res) => {
     });
   } catch (err) {
     console.error('[getFolderList] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_LIST_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_LIST_ERROR'); return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
     });
@@ -2350,8 +2350,8 @@ exports.generateSelectionReason = async (req, res) => {
     });
   } catch (err) {
     console.error('[generateSelectionReason] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GENERATE_SELECTION_REASON_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GENERATE_SELECTION_REASON_ERROR'); return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
     });
@@ -2386,8 +2386,8 @@ exports.listFolders = async (req, res) => {
     });
   } catch (err) {
     console.error('[listFolders] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'LIST_FOLDERS_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'LIST_FOLDERS_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -2731,8 +2731,8 @@ exports.createFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[createFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'CREATE_FOLDER_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'CREATE_FOLDER_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -2784,8 +2784,8 @@ exports.getFolderByAssignedCampaign = async (req, res) => {
     });
   } catch (err) {
     console.error('[getFolderByAssignedCampaign] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_BY_ASSIGNED_CAMPAIGN_ERROR');return res.status(500).json({ success: false, error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_BY_ASSIGNED_CAMPAIGN_ERROR'); return res.status(500).json({ success: false, error: err?.message || 'Internal error' });
   }
 };
 
@@ -2813,8 +2813,8 @@ exports.getFolderById = async (req, res) => {
     });
   } catch (err) {
     console.error('[getFolderById] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_BY_ID_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_BY_ID_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -2901,8 +2901,8 @@ exports.updateFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -2971,8 +2971,8 @@ exports.duplicateFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[duplicateFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'DUPLICATE_FOLDER_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'DUPLICATE_FOLDER_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3004,8 +3004,8 @@ exports.archiveFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[archiveFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ARCHIVE_FOLDER_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ARCHIVE_FOLDER_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3067,8 +3067,8 @@ exports.addFolderItem = async (req, res) => {
     });
   } catch (err) {
     console.error('[addFolderItem] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ADD_FOLDER_ITEM_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ADD_FOLDER_ITEM_ERROR'); return res.status(500).json({
       error: err?.message || 'Internal error',
     });
   }
@@ -3161,8 +3161,8 @@ exports.updateFolderItem = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolderItem] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_ERROR'); return res.status(500).json({
       error: err?.message || 'Internal error',
     });
   }
@@ -3204,8 +3204,8 @@ exports.deleteFolderItem = async (req, res) => {
     });
   } catch (err) {
     console.error('[deleteFolderItem] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'DELETE_FOLDER_ITEM_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'DELETE_FOLDER_ITEM_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3256,8 +3256,8 @@ exports.getFolderItemMediaKitUploadUrl = async (req, res) => {
     });
   } catch (err) {
     console.error('[getFolderItemMediaKitUploadUrl] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_ITEM_MEDIA_KIT_UPLOAD_URL_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_ITEM_MEDIA_KIT_UPLOAD_URL_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3310,8 +3310,8 @@ exports.updateFolderItemMediaKitVisibility = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolderItemMediaKitVisibility] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_VISIBILITY_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_VISIBILITY_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3379,8 +3379,8 @@ exports.updateFolderItemMediaKitApproval = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolderItemMediaKitApproval] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_APPROVAL_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_APPROVAL_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3433,8 +3433,8 @@ exports.updateFolderItemMediaKitLinkVisibility = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolderItemMediaKitLinkVisibility] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_LINK_VISIBILITY_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_LINK_VISIBILITY_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3502,8 +3502,8 @@ exports.updateFolderItemMediaKitLinkApproval = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateFolderItemMediaKitLinkApproval] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_LINK_APPROVAL_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_FOLDER_ITEM_MEDIA_KIT_LINK_APPROVAL_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3545,8 +3545,8 @@ exports.generateShareLink = async (req, res) => {
     });
   } catch (err) {
     console.error('[generateShareLink] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GENERATE_SHARE_LINK_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GENERATE_SHARE_LINK_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3600,8 +3600,8 @@ exports.getSharedFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[getSharedFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_SHARED_FOLDER_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_SHARED_FOLDER_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3825,12 +3825,13 @@ exports.bulkImportYoutubeToFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[bulkImportYoutubeToFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'BULK_IMPORT_YOUTUBE_TO_FOLDER_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'BULK_IMPORT_YOUTUBE_TO_FOLDER_ERROR'); return res.status(500).json({
       error: err?.message || 'Internal error',
     });
   }
 };
+
 exports.updateSharedFolderGoodFit = async (req, res) => {
   try {
     const token = cleanStr(req.params.token);
@@ -3880,8 +3881,8 @@ exports.updateSharedFolderGoodFit = async (req, res) => {
     });
   } catch (err) {
     console.error('[updateSharedFolderGoodFit] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_SHARED_FOLDER_GOOD_FIT_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'UPDATE_SHARED_FOLDER_GOOD_FIT_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -3964,8 +3965,8 @@ exports.requestSharedFolderMediaKit = async (req, res) => {
     });
   } catch (err) {
     console.error('[requestSharedFolderMediaKit] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'REQUEST_SHARED_FOLDER_MEDIA_KIT_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'REQUEST_SHARED_FOLDER_MEDIA_KIT_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -4160,8 +4161,8 @@ exports.moveFolderItems = async (req, res) => {
     });
   } catch (err) {
     console.error('[moveFolderItems] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'MOVE_FOLDER_ITEMS_ERROR');return res.status(500).json({ error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'MOVE_FOLDER_ITEMS_ERROR'); return res.status(500).json({ error: err?.message || 'Internal error' });
   }
 };
 
@@ -4481,8 +4482,8 @@ exports.activateFolderItemOnAssignedCampaign = async (req, res) => {
     });
   } catch (err) {
     console.error('[activateFolderItemOnAssignedCampaign] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ACTIVATE_FOLDER_ITEM_ON_ASSIGNED_CAMPAIGN_ERROR');return res.status(500).json({ success: false, error: err?.message || 'Internal error' });
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ACTIVATE_FOLDER_ITEM_ON_ASSIGNED_CAMPAIGN_ERROR'); return res.status(500).json({ success: false, error: err?.message || 'Internal error' });
   }
 };
 
@@ -4592,8 +4593,8 @@ exports.assignCampaignToFolder = async (req, res) => {
     });
   } catch (err) {
     console.error('[assignCampaignToFolder] Error:', err);
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ASSIGN_CAMPAIGN_TO_FOLDER_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'ASSIGN_CAMPAIGN_TO_FOLDER_ERROR'); return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
     });
@@ -4805,8 +4806,8 @@ exports.getCampaignGoodFitList = async (req, res) => {
   } catch (err) {
     console.error('[getCampaignGoodFitList] Error:', err);
 
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_CAMPAIGN_GOOD_FIT_LIST_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_CAMPAIGN_GOOD_FIT_LIST_ERROR'); return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
     });
@@ -4882,31 +4883,31 @@ exports.getFolderGoodFitListAll = async (req, res) => {
 
       const campaignPayload = assignedCampaign
         ? {
-            campaignId: cleanStr(assignedCampaign.campaignId),
-            campaignsId: cleanStr(assignedCampaign.campaignsId),
-            campaignTitle: cleanStr(assignedCampaign.campaignTitle),
-            productOrServiceName: cleanStr(
-              assignedCampaign.productOrServiceName
-            ),
-            brandId: cleanStr(assignedCampaign.brandId || brandId),
-            brandName: cleanStr(assignedCampaign.brandName),
-            assignedAt: assignedCampaign.assignedAt || null,
-            folderId: String(doc._id),
-            folderTitle: doc.title || '',
-            folderSlug: doc.slug || '',
-          }
+          campaignId: cleanStr(assignedCampaign.campaignId),
+          campaignsId: cleanStr(assignedCampaign.campaignsId),
+          campaignTitle: cleanStr(assignedCampaign.campaignTitle),
+          productOrServiceName: cleanStr(
+            assignedCampaign.productOrServiceName
+          ),
+          brandId: cleanStr(assignedCampaign.brandId || brandId),
+          brandName: cleanStr(assignedCampaign.brandName),
+          assignedAt: assignedCampaign.assignedAt || null,
+          folderId: String(doc._id),
+          folderTitle: doc.title || '',
+          folderSlug: doc.slug || '',
+        }
         : {
-            campaignId: '',
-            campaignsId: '',
-            campaignTitle: '',
-            productOrServiceName: '',
-            brandId: cleanStr(doc.brandId || doc.brandRef || brandId),
-            brandName: '',
-            assignedAt: null,
-            folderId: String(doc._id),
-            folderTitle: doc.title || '',
-            folderSlug: doc.slug || '',
-          };
+          campaignId: '',
+          campaignsId: '',
+          campaignTitle: '',
+          productOrServiceName: '',
+          brandId: cleanStr(doc.brandId || doc.brandRef || brandId),
+          brandName: '',
+          assignedAt: null,
+          folderId: String(doc._id),
+          folderTitle: doc.title || '',
+          folderSlug: doc.slug || '',
+        };
 
       const campaignMapKey = campaignId || `folder:${String(doc._id)}`;
 
@@ -5005,8 +5006,8 @@ exports.getFolderGoodFitListAll = async (req, res) => {
   } catch (err) {
     console.error('[getFolderGoodFitListAll] Error:', err);
 
-    
-    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_GOOD_FIT_LIST_ALL_ERROR');return res.status(500).json({
+
+    await saveErrorLog(req, err, err?.response?.status || err?.statusCode || err?.status || 500, 'GET_FOLDER_GOOD_FIT_LIST_ALL_ERROR'); return res.status(500).json({
       success: false,
       error: err?.message || 'Internal error',
     });

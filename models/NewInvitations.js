@@ -1,6 +1,4 @@
 // models/NewInvitations.js
-"use strict";
-
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 
@@ -109,22 +107,109 @@ const InvitationSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    emailTo: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+    },
+
+    emailFrom: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+    },
+
+    emailSubject: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    emailTextBody: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    emailHtmlBody: {
+      type: String,
+      default: "",
+    },
+
+    emailAttachments: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    emailSendStatus: {
+      type: String,
+      enum: ["pending_email", "sent", "failed", "skipped"],
+      default: "pending_email",
+      index: true,
+    },
+
+    emailSkippedReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    emailMessageId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    emailSentAt: {
+      type: Date,
+      default: null,
+    },
+
+    followUpEmailTo: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+    },
+
+    followUpEmailFrom: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+    },
+
+    followUpSubject: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    followUpMessageId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    followUpSentAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    permanentCampaignLock: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-/**
- * Important:
- * Do NOT add unique index on:
- * - brandId + handle + platform
- * - brandId + campaignId + handle + platform
- *
- * This lets your controller decide:
- * - same campaign = exists
- * - different campaign = create new invitation
- */
 
 InvitationSchema.index({ brandId: 1, campaignId: 1 });
 InvitationSchema.index({ brandId: 1, handle: 1, platform: 1 });
@@ -133,6 +218,9 @@ InvitationSchema.index({ brandId: 1, userId: 1 });
 InvitationSchema.index({ brandId: 1, modashUserId: 1 });
 InvitationSchema.index({ brandId: 1, campaignId: 1, status: 1 });
 InvitationSchema.index({ createdAt: -1 });
+InvitationSchema.index({ brandId: 1, campaignId: 1, handle: 1, platform: 1, permanentCampaignLock: 1 });
+InvitationSchema.index({ followUpSentAt: -1 });
+InvitationSchema.index({ brandId: 1, emailSendStatus: 1 });
 
 module.exports =
   mongoose.models.Invitations ||
